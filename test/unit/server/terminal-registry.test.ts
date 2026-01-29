@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { isLinuxPath, getSystemShell, escapeCmdExe, buildSpawnSpec } from '../../../server/terminal-registry'
+import { isLinuxPath, getSystemShell, escapeCmdExe, buildSpawnSpec, TerminalRegistry } from '../../../server/terminal-registry'
 import * as fs from 'fs'
 
 // Mock fs.existsSync for shell existence checks
@@ -11,6 +11,32 @@ vi.mock('fs', () => {
     default: { existsSync },
   }
 })
+
+// Mock node-pty to avoid spawning real processes
+// The source uses `import * as pty from 'node-pty'` and calls `pty.spawn()`
+vi.mock('node-pty', async () => {
+  const createMockPty = () => ({
+    onData: vi.fn(),
+    onExit: vi.fn(),
+    write: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn(),
+    pid: 12345,
+  })
+  return {
+    spawn: vi.fn(createMockPty),
+  }
+})
+
+// Mock logger to avoid console output during tests
+vi.mock('../../../server/logger', () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn(),
+  },
+}))
 
 /**
  * Tests for getSystemShell - cross-platform shell resolution
@@ -404,6 +430,868 @@ describe('escapeCmdExe', () => {
  *
  * The buildSpawnSpec function generates { file, args, cwd, env } used to spawn terminals.
  */
+describe('buildSpawnSpec Unix paths', () => {
+  // Store original values to restore after tests
+  const originalPlatform = process.platform
+  const originalEnv = { ...process.env }
+
+  // Helper to mock platform
+  function mockPlatform(platform: string) {
+    Object.defineProperty(process, 'platform', {
+      value: platform,
+      writable: true,
+      configurable: true,
+    })
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    // Reset env to a clean state before each test
+    process.env = { ...originalEnv }
+    // Default: all shells exist (so getSystemShell() works as expected)
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    // Restore original platform and env after each test
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+      writable: true,
+      configurable: true,
+    })
+    process.env = originalEnv
+  })
+
+  describe('macOS shell mode', () => {
+    beforeEach(() => {
+      mockPlatform('darwin')
+    })
+
+    it('uses /bin/zsh as default shell on macOS when SHELL not set', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/Users/john/project', 'system')
+
+      expect(spec.file).toBe('/bin/zsh')
+      expect(spec.args).toContain('-l')
+      expect(spec.cwd).toBe('/Users/john/project')
+    })
+
+    it('uses $SHELL when set on macOS', () => {
+      process.env.SHELL = '/opt/homebrew/bin/fish'
+
+      const spec = buildSpawnSpec('shell', '/Users/john/project', 'system')
+
+      expect(spec.file).toBe('/opt/homebrew/bin/fish')
+      expect(spec.args).toContain('-l')
+    })
+
+    it('includes -l flag for login shell on macOS', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      expect(spec.args).toEqual(['-l'])
+    })
+
+    it('passes cwd correctly for macOS paths', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/Users/john/Documents/My Project', 'system')
+
+      expect(spec.cwd).toBe('/Users/john/Documents/My Project')
+    })
+  })
+
+  describe('Linux shell mode', () => {
+    beforeEach(() => {
+      mockPlatform('linux')
+    })
+
+    it('uses /bin/bash as default shell on Linux when SHELL not set', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'system')
+
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args).toContain('-l')
+      expect(spec.cwd).toBe('/home/user/project')
+    })
+
+    it('uses $SHELL when set on Linux', () => {
+      process.env.SHELL = '/bin/zsh'
+
+      const spec = buildSpawnSpec('shell', '/home/user', 'system')
+
+      expect(spec.file).toBe('/bin/zsh')
+    })
+
+    it('includes -l flag for login shell on Linux', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/home/user', 'system')
+
+      expect(spec.args).toEqual(['-l'])
+    })
+  })
+
+  describe('claude mode on Unix', () => {
+    beforeEach(() => {
+      mockPlatform('darwin')
+    })
+
+    it('spawns claude command directly without shell wrapper', () => {
+      delete process.env.CLAUDE_CMD
+
+      const spec = buildSpawnSpec('claude', '/Users/john/project', 'system')
+
+      expect(spec.file).toBe('claude')
+      expect(spec.cwd).toBe('/Users/john/project')
+    })
+
+    it('uses CLAUDE_CMD env var when set', () => {
+      process.env.CLAUDE_CMD = '/usr/local/bin/claude-dev'
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.file).toBe('/usr/local/bin/claude-dev')
+    })
+
+    it('passes --resume flag with session ID when resuming', () => {
+      delete process.env.CLAUDE_CMD
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system', 'session-abc123')
+
+      expect(spec.file).toBe('claude')
+      expect(spec.args).toContain('--resume')
+      expect(spec.args).toContain('session-abc123')
+    })
+
+    it('does not include --resume when no session ID provided', () => {
+      delete process.env.CLAUDE_CMD
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec.args).not.toContain('--resume')
+      expect(spec.args).toEqual([])
+    })
+  })
+
+  describe('codex mode on Unix', () => {
+    beforeEach(() => {
+      mockPlatform('linux')
+    })
+
+    it('spawns codex command directly', () => {
+      delete process.env.CODEX_CMD
+
+      const spec = buildSpawnSpec('codex', '/home/user/project', 'system')
+
+      expect(spec.file).toBe('codex')
+      expect(spec.args).toEqual([])
+      expect(spec.cwd).toBe('/home/user/project')
+    })
+
+    it('uses CODEX_CMD env var when set', () => {
+      process.env.CODEX_CMD = '/opt/codex/bin/codex'
+
+      const spec = buildSpawnSpec('codex', '/home/user', 'system')
+
+      expect(spec.file).toBe('/opt/codex/bin/codex')
+    })
+  })
+
+  describe('environment variables in spawn spec', () => {
+    beforeEach(() => {
+      mockPlatform('darwin')
+    })
+
+    it('includes TERM environment variable', () => {
+      delete process.env.TERM
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      expect(spec.env.TERM).toBe('xterm-256color')
+    })
+
+    it('preserves existing TERM if set', () => {
+      process.env.TERM = 'screen-256color'
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      expect(spec.env.TERM).toBe('screen-256color')
+    })
+
+    it('includes COLORTERM environment variable', () => {
+      delete process.env.COLORTERM
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      expect(spec.env.COLORTERM).toBe('truecolor')
+    })
+
+    it('preserves existing COLORTERM if set', () => {
+      process.env.COLORTERM = '24bit'
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      expect(spec.env.COLORTERM).toBe('24bit')
+    })
+
+    it('passes through other environment variables', () => {
+      process.env.MY_CUSTOM_VAR = 'test-value'
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      expect(spec.env.MY_CUSTOM_VAR).toBe('test-value')
+    })
+  })
+
+  describe('cwd handling on Unix', () => {
+    beforeEach(() => {
+      mockPlatform('darwin')
+    })
+
+    it('passes undefined cwd when not provided', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', undefined, 'system')
+
+      expect(spec.cwd).toBeUndefined()
+    })
+
+    it('handles paths with spaces', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/Users/john/My Documents/Project Name', 'system')
+
+      expect(spec.cwd).toBe('/Users/john/My Documents/Project Name')
+    })
+
+    it('handles deep nested paths', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/var/www/html/sites/mysite/public_html', 'system')
+
+      expect(spec.cwd).toBe('/var/www/html/sites/mysite/public_html')
+    })
+
+    it('handles root path', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/', 'system')
+
+      expect(spec.cwd).toBe('/')
+    })
+  })
+
+  describe('shell type normalization on Unix', () => {
+    beforeEach(() => {
+      mockPlatform('darwin')
+    })
+
+    it('normalizes cmd shell type to system on Unix', () => {
+      process.env.SHELL = '/bin/zsh'
+
+      // On Unix, 'cmd' should be normalized to 'system' shell
+      const spec = buildSpawnSpec('shell', '/Users/john', 'cmd')
+
+      // The shell should still use the system shell, not cmd.exe
+      expect(spec.file).toBe('/bin/zsh')
+    })
+
+    it('normalizes powershell shell type to system on Unix', () => {
+      process.env.SHELL = '/bin/bash'
+
+      // On Unix, 'powershell' should be normalized to 'system' shell
+      const spec = buildSpawnSpec('shell', '/Users/john', 'powershell')
+
+      expect(spec.file).toBe('/bin/bash')
+    })
+
+    it('normalizes wsl shell type to system on Unix', () => {
+      process.env.SHELL = '/bin/bash'
+
+      // On Unix, 'wsl' should be normalized to 'system' shell
+      const spec = buildSpawnSpec('shell', '/Users/john', 'wsl')
+
+      expect(spec.file).toBe('/bin/bash')
+    })
+  })
+
+  describe('spawn spec structure completeness', () => {
+    beforeEach(() => {
+      mockPlatform('darwin')
+    })
+
+    it('returns all required fields for shell mode', () => {
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      // Verify structure has all required fields
+      expect(spec).toHaveProperty('file')
+      expect(spec).toHaveProperty('args')
+      expect(spec).toHaveProperty('cwd')
+      expect(spec).toHaveProperty('env')
+      expect(typeof spec.file).toBe('string')
+      expect(Array.isArray(spec.args)).toBe(true)
+      expect(typeof spec.env).toBe('object')
+    })
+
+    it('returns all required fields for claude mode', () => {
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system')
+
+      expect(spec).toHaveProperty('file')
+      expect(spec).toHaveProperty('args')
+      expect(spec).toHaveProperty('cwd')
+      expect(spec).toHaveProperty('env')
+    })
+
+    it('returns all required fields for codex mode', () => {
+      const spec = buildSpawnSpec('codex', '/Users/john', 'system')
+
+      expect(spec).toHaveProperty('file')
+      expect(spec).toHaveProperty('args')
+      expect(spec).toHaveProperty('cwd')
+      expect(spec).toHaveProperty('env')
+    })
+  })
+
+  describe('claude mode on Linux', () => {
+    beforeEach(() => {
+      mockPlatform('linux')
+    })
+
+    it('spawns claude command directly on Linux', () => {
+      delete process.env.CLAUDE_CMD
+
+      const spec = buildSpawnSpec('claude', '/home/user/project', 'system')
+
+      expect(spec.file).toBe('claude')
+      expect(spec.cwd).toBe('/home/user/project')
+    })
+
+    it('uses CLAUDE_CMD env var on Linux when set', () => {
+      process.env.CLAUDE_CMD = '/usr/local/bin/my-claude'
+
+      const spec = buildSpawnSpec('claude', '/home/user', 'system')
+
+      expect(spec.file).toBe('/usr/local/bin/my-claude')
+    })
+
+    it('handles --resume flag correctly on Linux', () => {
+      delete process.env.CLAUDE_CMD
+
+      const spec = buildSpawnSpec('claude', '/home/user', 'system', 'linux-session-123')
+
+      expect(spec.args).toContain('--resume')
+      expect(spec.args).toContain('linux-session-123')
+      expect(spec.args).toEqual(['--resume', 'linux-session-123'])
+    })
+
+    it('includes proper env vars in claude mode on Linux', () => {
+      delete process.env.TERM
+      delete process.env.COLORTERM
+
+      const spec = buildSpawnSpec('claude', '/home/user', 'system')
+
+      expect(spec.env.TERM).toBe('xterm-256color')
+      expect(spec.env.COLORTERM).toBe('truecolor')
+    })
+  })
+
+  describe('codex mode on macOS', () => {
+    beforeEach(() => {
+      mockPlatform('darwin')
+    })
+
+    it('spawns codex command directly on macOS', () => {
+      delete process.env.CODEX_CMD
+
+      const spec = buildSpawnSpec('codex', '/Users/john/project', 'system')
+
+      expect(spec.file).toBe('codex')
+      expect(spec.args).toEqual([])
+      expect(spec.cwd).toBe('/Users/john/project')
+    })
+
+    it('uses CODEX_CMD env var on macOS when set', () => {
+      process.env.CODEX_CMD = '/Applications/Codex.app/Contents/MacOS/codex'
+
+      const spec = buildSpawnSpec('codex', '/Users/john', 'system')
+
+      expect(spec.file).toBe('/Applications/Codex.app/Contents/MacOS/codex')
+    })
+
+    it('includes proper env vars in codex mode on macOS', () => {
+      delete process.env.TERM
+      delete process.env.COLORTERM
+
+      const spec = buildSpawnSpec('codex', '/Users/john', 'system')
+
+      expect(spec.env.TERM).toBe('xterm-256color')
+      expect(spec.env.COLORTERM).toBe('truecolor')
+    })
+  })
+
+  describe('shell mode uses direct spawn (not shell wrapper)', () => {
+    it('spawns the shell directly on macOS (no wrapper)', () => {
+      mockPlatform('darwin')
+      process.env.SHELL = '/bin/zsh'
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      // Should spawn zsh directly, not through another shell
+      expect(spec.file).toBe('/bin/zsh')
+      // Args should be login shell flag only, not a command to execute
+      expect(spec.args).toEqual(['-l'])
+      // Should NOT have -c flag (which would indicate shell wrapper)
+      expect(spec.args).not.toContain('-c')
+    })
+
+    it('spawns the shell directly on Linux (no wrapper)', () => {
+      mockPlatform('linux')
+      process.env.SHELL = '/bin/bash'
+
+      const spec = buildSpawnSpec('shell', '/home/user', 'system')
+
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args).toEqual(['-l'])
+      expect(spec.args).not.toContain('-c')
+    })
+  })
+
+  describe('various shell fallback scenarios', () => {
+    it('falls back to /bin/zsh on macOS when SHELL is invalid', () => {
+      mockPlatform('darwin')
+      process.env.SHELL = '/nonexistent/shell'
+      vi.mocked(fs.existsSync).mockImplementation((path) => {
+        if (path === '/nonexistent/shell') return false
+        if (path === '/bin/zsh') return true
+        return false
+      })
+
+      const spec = buildSpawnSpec('shell', '/Users/john', 'system')
+
+      expect(spec.file).toBe('/bin/zsh')
+    })
+
+    it('falls back to /bin/bash on Linux when SHELL is invalid', () => {
+      mockPlatform('linux')
+      process.env.SHELL = '/nonexistent/shell'
+      vi.mocked(fs.existsSync).mockImplementation((path) => {
+        if (path === '/nonexistent/shell') return false
+        if (path === '/bin/bash') return true
+        return false
+      })
+
+      const spec = buildSpawnSpec('shell', '/home/user', 'system')
+
+      expect(spec.file).toBe('/bin/bash')
+    })
+
+    it('uses /bin/sh as last resort when other shells missing', () => {
+      mockPlatform('linux')
+      delete process.env.SHELL
+      vi.mocked(fs.existsSync).mockImplementation((path) => {
+        // No bash, only /bin/sh
+        if (path === '/bin/bash') return false
+        if (path === '/bin/sh') return true
+        return false
+      })
+
+      const spec = buildSpawnSpec('shell', '/home/user', 'system')
+
+      expect(spec.file).toBe('/bin/sh')
+    })
+  })
+
+  describe('home directory paths', () => {
+    it('handles typical home directory path on macOS', () => {
+      mockPlatform('darwin')
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/Users/johndoe', 'system')
+
+      expect(spec.cwd).toBe('/Users/johndoe')
+    })
+
+    it('handles typical home directory path on Linux', () => {
+      mockPlatform('linux')
+      delete process.env.SHELL
+
+      const spec = buildSpawnSpec('shell', '/home/johndoe', 'system')
+
+      expect(spec.cwd).toBe('/home/johndoe')
+    })
+
+    it('handles WSL-style home path on Linux', () => {
+      mockPlatform('linux')
+      delete process.env.SHELL
+
+      // WSL maps Windows drives under /mnt
+      const spec = buildSpawnSpec('shell', '/mnt/c/Users/john/project', 'system')
+
+      expect(spec.cwd).toBe('/mnt/c/Users/john/project')
+    })
+  })
+
+  describe('special paths', () => {
+    beforeEach(() => {
+      mockPlatform('linux')
+      delete process.env.SHELL
+    })
+
+    it('handles /tmp path', () => {
+      const spec = buildSpawnSpec('shell', '/tmp', 'system')
+      expect(spec.cwd).toBe('/tmp')
+    })
+
+    it('handles /var/log path', () => {
+      const spec = buildSpawnSpec('shell', '/var/log', 'system')
+      expect(spec.cwd).toBe('/var/log')
+    })
+
+    it('handles /opt path', () => {
+      const spec = buildSpawnSpec('shell', '/opt/myapp', 'system')
+      expect(spec.cwd).toBe('/opt/myapp')
+    })
+
+    it('handles paths with dots', () => {
+      const spec = buildSpawnSpec('shell', '/home/user/.config', 'system')
+      expect(spec.cwd).toBe('/home/user/.config')
+    })
+
+    it('handles paths with multiple consecutive dots in name', () => {
+      const spec = buildSpawnSpec('shell', '/home/user/project..old', 'system')
+      expect(spec.cwd).toBe('/home/user/project..old')
+    })
+  })
+})
+
+/**
+ * Tests for TerminalRegistry class - resumeSessionId functionality
+ *
+ * These tests verify the resumeSessionId storage and retrieval functionality
+ * added to support session-centric sidebar features.
+ */
+describe('TerminalRegistry', () => {
+  let registry: TerminalRegistry
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    // Create registry with a small maxTerminals limit for testing
+    registry = new TerminalRegistry(undefined, 10)
+  })
+
+  afterEach(() => {
+    // Clean up the registry (stops idle monitor)
+    registry.shutdown()
+  })
+
+  describe('create() with resumeSessionId', () => {
+    it('stores resumeSessionId on the terminal record when provided', () => {
+      const record = registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-abc123',
+      })
+
+      expect(record.resumeSessionId).toBe('session-abc123')
+      expect(record.mode).toBe('claude')
+    })
+
+    it('leaves resumeSessionId undefined when not provided', () => {
+      const record = registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+      })
+
+      expect(record.resumeSessionId).toBeUndefined()
+    })
+
+    it('stores resumeSessionId for shell mode terminals', () => {
+      const record = registry.create({
+        mode: 'shell',
+        cwd: '/home/user/project',
+        resumeSessionId: 'shell-session-123',
+      })
+
+      expect(record.resumeSessionId).toBe('shell-session-123')
+      expect(record.mode).toBe('shell')
+    })
+  })
+
+  describe('list() returns resumeSessionId', () => {
+    it('includes resumeSessionId in list output when set', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project1',
+        resumeSessionId: 'session-111',
+      })
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project2',
+        resumeSessionId: 'session-222',
+      })
+
+      const terminals = registry.list()
+
+      expect(terminals).toHaveLength(2)
+      const sessionIds = terminals.map(t => t.resumeSessionId).sort()
+      expect(sessionIds).toEqual(['session-111', 'session-222'])
+    })
+
+    it('includes undefined resumeSessionId in list output when not set', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+      })
+
+      const terminals = registry.list()
+
+      expect(terminals).toHaveLength(1)
+      expect(terminals[0].resumeSessionId).toBeUndefined()
+    })
+  })
+
+  describe('list() returns mode', () => {
+    it('includes mode in list output for shell terminals', () => {
+      registry.create({
+        mode: 'shell',
+        cwd: '/home/user/project',
+      })
+
+      const terminals = registry.list()
+
+      expect(terminals).toHaveLength(1)
+      expect(terminals[0].mode).toBe('shell')
+    })
+
+    it('includes mode in list output for claude terminals', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+      })
+
+      const terminals = registry.list()
+
+      expect(terminals).toHaveLength(1)
+      expect(terminals[0].mode).toBe('claude')
+    })
+
+    it('includes mode in list output for codex terminals', () => {
+      registry.create({
+        mode: 'codex',
+        cwd: '/home/user/project',
+      })
+
+      const terminals = registry.list()
+
+      expect(terminals).toHaveLength(1)
+      expect(terminals[0].mode).toBe('codex')
+    })
+
+    it('returns correct modes for mixed terminal types', () => {
+      registry.create({ mode: 'shell', cwd: '/home/user' })
+      registry.create({ mode: 'claude', cwd: '/home/user' })
+      registry.create({ mode: 'codex', cwd: '/home/user' })
+
+      const terminals = registry.list()
+      const modes = terminals.map(t => t.mode).sort()
+
+      expect(modes).toEqual(['claude', 'codex', 'shell'])
+    })
+  })
+
+  describe('findClaudeTerminalsBySession() exact match', () => {
+    it('finds terminal by exact resumeSessionId match', () => {
+      const record = registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-exact-match',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-exact-match')
+
+      expect(found).toHaveLength(1)
+      expect(found[0].terminalId).toBe(record.terminalId)
+      expect(found[0].resumeSessionId).toBe('session-exact-match')
+    })
+
+    it('returns empty array when no matching resumeSessionId', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-different',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-nonexistent')
+
+      expect(found).toHaveLength(0)
+    })
+
+    it('finds multiple terminals with same resumeSessionId', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project1',
+        resumeSessionId: 'session-shared',
+      })
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project2',
+        resumeSessionId: 'session-shared',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-shared')
+
+      expect(found).toHaveLength(2)
+      expect(found.every(t => t.resumeSessionId === 'session-shared')).toBe(true)
+    })
+  })
+
+  describe('findClaudeTerminalsBySession() cwd match', () => {
+    it('finds terminal by matching cwd when resumeSessionId does not match', () => {
+      const record = registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-different',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-nonexistent', '/home/user/project')
+
+      expect(found).toHaveLength(1)
+      expect(found[0].terminalId).toBe(record.terminalId)
+    })
+
+    it('matches cwd case-insensitively', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/Home/User/Project',
+        resumeSessionId: 'session-other',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-different', '/home/user/project')
+
+      expect(found).toHaveLength(1)
+    })
+
+    it('matches cwd with trailing slash differences', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project/',
+        resumeSessionId: 'session-other',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-different', '/home/user/project')
+
+      expect(found).toHaveLength(1)
+    })
+
+    it('normalizes backslashes for Windows path comparison', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: 'C:\\Users\\dan\\project',
+        resumeSessionId: 'session-other',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-different', 'C:/Users/dan/project')
+
+      expect(found).toHaveLength(1)
+    })
+
+    it('does not match when cwd is different', () => {
+      registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project-a',
+        resumeSessionId: 'session-other',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-different', '/home/user/project-b')
+
+      expect(found).toHaveLength(0)
+    })
+
+    it('finds terminal by exact resumeSessionId even when cwd differs', () => {
+      const record = registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project-a',
+        resumeSessionId: 'session-target',
+      })
+
+      // Searching with matching sessionId but different cwd
+      const found = registry.findClaudeTerminalsBySession('session-target', '/home/user/different')
+
+      expect(found).toHaveLength(1)
+      expect(found[0].terminalId).toBe(record.terminalId)
+    })
+  })
+
+  describe('findClaudeTerminalsBySession() ignores shell mode', () => {
+    it('does not return shell-mode terminals even with matching cwd', () => {
+      registry.create({
+        mode: 'shell',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-123',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-123', '/home/user/project')
+
+      expect(found).toHaveLength(0)
+    })
+
+    it('does not return shell-mode terminals with exact resumeSessionId match', () => {
+      registry.create({
+        mode: 'shell',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-exact',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-exact')
+
+      expect(found).toHaveLength(0)
+    })
+
+    it('does not return codex-mode terminals', () => {
+      registry.create({
+        mode: 'codex',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-123',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-123', '/home/user/project')
+
+      expect(found).toHaveLength(0)
+    })
+
+    it('returns only claude-mode terminals from mixed modes', () => {
+      registry.create({
+        mode: 'shell',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-shared',
+      })
+      const claudeRecord = registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-shared',
+      })
+      registry.create({
+        mode: 'codex',
+        cwd: '/home/user/project',
+        resumeSessionId: 'session-shared',
+      })
+
+      const found = registry.findClaudeTerminalsBySession('session-shared')
+
+      expect(found).toHaveLength(1)
+      expect(found[0].terminalId).toBe(claudeRecord.terminalId)
+      expect(found[0].mode).toBe('claude')
+    })
+  })
+})
+
 describe('buildSpawnSpec Unix paths', () => {
   // Store original values to restore after tests
   const originalPlatform = process.platform
