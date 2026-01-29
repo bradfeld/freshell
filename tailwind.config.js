@@ -25,8 +25,8 @@ export default {
       },
       borderRadius: {
         lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
+        md: 'calc(var(--radius) - 0.125rem)',
+        sm: 'calc(var(--radius) - 0.25rem)',
       },
       boxShadow: {
         'sm': 'var(--shadow-sm)',
@@ -34,12 +34,12 @@ export default {
         'lg': 'var(--shadow-lg)',
       },
       fontSize: {
-        '2xs': ['10px', '14px'],
-        'xs': ['11px', '16px'],
-        'sm': ['13px', '20px'],
-        'base': ['14px', '22px'],
-        'lg': ['16px', '24px'],
-        'xl': ['18px', '28px'],
+        '2xs': ['0.625rem', '0.875rem'],  // 10px/14px at 1rem=16px
+        'xs': ['0.6875rem', '1rem'],      // 11px/16px
+        'sm': ['0.8125rem', '1.25rem'],   // 13px/20px
+        'base': ['0.875rem', '1.375rem'], // 14px/22px
+        'lg': ['1rem', '1.5rem'],         // 16px/24px
+        'xl': ['1.125rem', '1.75rem'],    // 18px/28px
       },
       spacing: {
         '18': '4.5rem',

@@ -359,7 +359,7 @@ function Toggle({
       <div
         className={cn(
           'absolute top-0.5 h-4 w-4 rounded-full transition-all',
-          checked ? 'left-[18px] bg-background' : 'left-0.5 bg-muted-foreground'
+          checked ? 'left-[1.125rem] bg-background' : 'left-0.5 bg-muted-foreground'
         )}
       />
     </button>

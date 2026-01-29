@@ -359,7 +359,7 @@ function TerminalCard({
 
           <div className="mt-2 flex items-center gap-3 text-2xs text-muted-foreground">
             {terminal.cwd && (
-              <span className="truncate max-w-[200px]">{terminal.cwd}</span>
+              <span className="truncate max-w-[12.5rem]">{terminal.cwd}</span>
             )}
             <span>Created {formatTime(terminal.createdAt)}</span>
             <span>Idle {formatDuration(idleTime)}</span>

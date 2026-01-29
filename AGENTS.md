@@ -12,6 +12,7 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 
 ## Repo Rules
 - Always work in a worktree
+- When you are done, rebase onto local main, then merge to local main
 
 ## Commands
 
