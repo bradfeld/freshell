@@ -10,10 +10,43 @@ export interface TabsState {
 
 const DEFAULT_CWD = import.meta.env.VITE_DEFAULT_CWD || undefined
 
-const initialState: TabsState = {
-  tabs: [],
-  activeTabId: null,
+// Load persisted tabs state directly at module initialization time
+// This ensures the initial state includes persisted data BEFORE the store is created
+function loadInitialTabsState(): TabsState {
+  const defaultState: TabsState = {
+    tabs: [],
+    activeTabId: null,
+  }
+
+  try {
+    const raw = localStorage.getItem('freshell.tabs.v1')
+    if (!raw) return defaultState
+    const parsed = JSON.parse(raw)
+    // The persisted format is { tabs: TabsState }
+    const tabsState = parsed?.tabs as TabsState | undefined
+    if (!tabsState?.tabs) return defaultState
+
+    console.log('[TabsSlice] Loaded initial state from localStorage:', tabsState.tabs.map(t => t.id))
+
+    // Apply same transformations as hydrateTabs to ensure consistency
+    return {
+      tabs: tabsState.tabs.map((t: Tab) => ({
+        ...t,
+        createdAt: t.createdAt || Date.now(),
+        createRequestId: (t as any).createRequestId || t.id,
+        status: t.status || 'creating',
+        mode: t.mode || 'shell',
+        shell: t.shell || 'system',
+      })),
+      activeTabId: tabsState.activeTabId || (tabsState.tabs[0]?.id ?? null),
+    }
+  } catch (err) {
+    console.error('[TabsSlice] Failed to load from localStorage:', err)
+    return defaultState
+  }
 }
+
+const initialState: TabsState = loadInitialTabsState()
 
 type AddTabPayload = {
   title?: string
