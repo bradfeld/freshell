@@ -8,9 +8,10 @@ import FloatingActionButton from './FloatingActionButton'
 interface PaneLayoutProps {
   tabId: string
   defaultContent: PaneContentInput
+  hidden?: boolean
 }
 
-export default function PaneLayout({ tabId, defaultContent }: PaneLayoutProps) {
+export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayoutProps) {
   const dispatch = useAppDispatch()
   const layout = useAppSelector((s) => s.panes.layouts[tabId])
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
@@ -63,7 +64,7 @@ export default function PaneLayout({ tabId, defaultContent }: PaneLayoutProps) {
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
-      <PaneContainer tabId={tabId} node={layout} />
+      <PaneContainer tabId={tabId} node={layout} hidden={hidden} />
       <FloatingActionButton
         onAddTerminal={handleAddTerminal}
         onAddBrowser={handleAddBrowser}

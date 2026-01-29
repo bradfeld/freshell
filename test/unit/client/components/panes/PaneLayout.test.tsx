@@ -7,8 +7,15 @@ import panesReducer from '@/store/panesSlice'
 import type { PanesState } from '@/store/panesSlice'
 import type { PaneNode, PaneContent } from '@/store/paneTypes'
 
+// Hoist mock functions so vi.mock can reference them
+const { mockSend, mockTerminalView } = vi.hoisted(() => ({
+  mockSend: vi.fn(),
+  mockTerminalView: vi.fn(({ tabId, paneId, hidden }: { tabId: string; paneId: string; hidden?: boolean }) => (
+    <div data-testid={`terminal-${paneId}`} data-hidden={String(hidden)}>Terminal for {tabId}/{paneId}</div>
+  )),
+}))
+
 // Mock the ws-client module
-const mockSend = vi.fn()
 vi.mock('@/lib/ws-client', () => ({
   getWsClient: () => ({
     send: mockSend,
@@ -33,9 +40,7 @@ vi.mock('lucide-react', () => ({
 
 // Mock TerminalView component to avoid xterm.js dependencies
 vi.mock('@/components/TerminalView', () => ({
-  default: ({ tabId, paneId }: { tabId: string; paneId: string }) => (
-    <div data-testid={`terminal-${paneId}`}>Terminal for {tabId}/{paneId}</div>
-  ),
+  default: mockTerminalView,
 }))
 
 // Mock BrowserPane component
@@ -85,6 +90,7 @@ function renderWithStore(
 describe('PaneLayout', () => {
   beforeEach(() => {
     mockSend.mockClear()
+    mockTerminalView.mockClear()
     // Mock getBoundingClientRect for split direction calculation
     Element.prototype.getBoundingClientRect = vi.fn(() => ({
       width: 1000,
@@ -508,6 +514,58 @@ describe('PaneLayout', () => {
       state = store.getState().panes
       // Should have 3 panes now in a nested structure
       expect(state.activePane['tab-1']).not.toBe(firstNewPaneId)
+    })
+  })
+
+  describe('hidden prop propagation', () => {
+    it('passes hidden=true through to TerminalView', () => {
+      const paneId = 'pane-1'
+      const store = createStore({
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: paneId,
+            content: createTerminalContent(),
+          },
+        },
+        activePane: { 'tab-1': paneId },
+      })
+
+      renderWithStore(
+        <PaneLayout tabId="tab-1" defaultContent={createTerminalContent()} hidden={true} />,
+        store
+      )
+
+      // TerminalView should have received hidden=true
+      expect(mockTerminalView).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hidden: true }),
+        expect.anything()
+      )
+    })
+
+    it('passes hidden=false through to TerminalView', () => {
+      const paneId = 'pane-1'
+      const store = createStore({
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: paneId,
+            content: createTerminalContent(),
+          },
+        },
+        activePane: { 'tab-1': paneId },
+      })
+
+      renderWithStore(
+        <PaneLayout tabId="tab-1" defaultContent={createTerminalContent()} hidden={false} />,
+        store
+      )
+
+      // TerminalView should have received hidden=false
+      expect(mockTerminalView).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hidden: false }),
+        expect.anything()
+      )
     })
   })
 })
