@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'events'
 import { ClaudeSession, ClaudeSessionManager, SpawnFn } from '../../../server/claude-session'
+import * as claudeStreamTypes from '../../../server/claude-stream-types'
 
 // Mock logger to suppress output
 vi.mock('../../../server/logger', () => ({
@@ -134,6 +135,178 @@ describe('ClaudeSession', () => {
     expect(events).toHaveLength(2)
     expect(events[0].type).toBe('system')
     expect(events[1].type).toBe('assistant')
+  })
+
+  describe('line ending handling', () => {
+    it('handles Unix LF line endings correctly', async () => {
+      const session = createSession()
+      const events: any[] = []
+      session.on('event', (e) => events.push(e))
+
+      const line1 = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' })
+      const line2 = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [] }, session_id: 'abc', uuid: '1' })
+
+      // Unix-style LF line endings
+      mockProcess.stdout.emit('data', Buffer.from(line1 + '\n' + line2 + '\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+      expect(events).toHaveLength(2)
+      expect(events[0].type).toBe('system')
+      expect(events[1].type).toBe('assistant')
+    })
+
+    it('handles Windows CRLF line endings correctly', async () => {
+      const session = createSession()
+      const events: any[] = []
+      session.on('event', (e) => events.push(e))
+
+      const line1 = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' })
+      const line2 = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [] }, session_id: 'abc', uuid: '1' })
+
+      // Windows-style CRLF line endings
+      mockProcess.stdout.emit('data', Buffer.from(line1 + '\r\n' + line2 + '\r\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+      expect(events).toHaveLength(2)
+      expect(events[0].type).toBe('system')
+      expect(events[1].type).toBe('assistant')
+    })
+
+    it('handles mixed line endings correctly', async () => {
+      const session = createSession()
+      const events: any[] = []
+      session.on('event', (e) => events.push(e))
+
+      const line1 = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' })
+      const line2 = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [] }, session_id: 'abc', uuid: '1' })
+      const line3 = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, duration_ms: 100, num_turns: 1, session_id: 'abc', uuid: '2' })
+
+      // Mixed line endings: CRLF then LF
+      mockProcess.stdout.emit('data', Buffer.from(line1 + '\r\n' + line2 + '\n' + line3 + '\r\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+      expect(events).toHaveLength(3)
+      expect(events[0].type).toBe('system')
+      expect(events[1].type).toBe('assistant')
+      expect(events[2].type).toBe('result')
+    })
+
+    it('parses JSON correctly with CRLF in stream data', async () => {
+      const session = createSession()
+      const events: any[] = []
+
+      session.on('event', (e) => events.push(e))
+
+      // Create JSON with nested text that could be confused with line endings
+      const jsonData = {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Hello world' }]
+        },
+        session_id: 'abc',
+        uuid: '123'
+      }
+
+      // Send with CRLF line ending - JSON.parse should work without trailing \r
+      mockProcess.stdout.emit('data', Buffer.from(JSON.stringify(jsonData) + '\r\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      // Should parse successfully with no errors
+      expect(events).toHaveLength(1)
+      expect(events[0].type).toBe('assistant')
+      expect(events[0].message.content[0].text).toBe('Hello world')
+    })
+
+    it('handles CRLF split across multiple data chunks', async () => {
+      const session = createSession()
+      const events: any[] = []
+      session.on('event', (e) => events.push(e))
+
+      const line1 = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' })
+      const line2 = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [] }, session_id: 'abc', uuid: '1' })
+
+      // Split the CRLF across chunks: first chunk ends with \r, second starts with \n
+      mockProcess.stdout.emit('data', Buffer.from(line1 + '\r'))
+      mockProcess.stdout.emit('data', Buffer.from('\n' + line2 + '\r\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+      expect(events).toHaveLength(2)
+      expect(events[0].type).toBe('system')
+      expect(events[1].type).toBe('assistant')
+    })
+
+    it('does not leave carriage return in buffer when CRLF is split across chunks', async () => {
+      const session = createSession()
+      const events: any[] = []
+      session.on('event', (e) => events.push(e))
+
+      const line1 = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' })
+      const line2 = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [] }, session_id: 'abc', uuid: '1' })
+
+      // First chunk ends with just \r (no \n yet)
+      mockProcess.stdout.emit('data', Buffer.from(line1 + '\r'))
+
+      // At this point, line1 + '\r' should be in the buffer
+      // When we get \n, it should properly handle the \r\n sequence
+      mockProcess.stdout.emit('data', Buffer.from('\n' + line2 + '\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      // Both events should be parsed correctly
+      expect(events).toHaveLength(2)
+      expect(events[0].type).toBe('system')
+      // Verify the session_id doesn't have a trailing \r
+      expect(events[0].session_id).toBe('abc')
+      expect(events[0].session_id.endsWith('\r')).toBe(false)
+    })
+
+    it('strips carriage return from lines when using CRLF', async () => {
+      const session = createSession()
+      const events: any[] = []
+      session.on('event', (e) => events.push(e))
+
+      // JSON where trailing \r would cause parse failure if not handled
+      // Note: JSON.parse('{"a":"b"}\r') actually works due to whitespace tolerance
+      // But we want clean parsing without relying on that
+      const jsonData = { type: 'system', subtype: 'init', session_id: 'test-123' }
+
+      mockProcess.stdout.emit('data', Buffer.from(JSON.stringify(jsonData) + '\r\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      expect(events).toHaveLength(1)
+      // The session_id should not have any \r character
+      expect(events[0].session_id).toBe('test-123')
+      expect(events[0].session_id.includes('\r')).toBe(false)
+    })
+
+    it('does not pass lines with trailing carriage return to parseClaudeEvent', async () => {
+      // Spy on parseClaudeEvent to capture what lines are passed to it
+      const parseClaudeEventSpy = vi.spyOn(claudeStreamTypes, 'parseClaudeEvent')
+
+      const session = createSession()
+      const events: any[] = []
+      session.on('event', (e) => events.push(e))
+
+      const jsonData = { type: 'system', subtype: 'init', session_id: 'abc' }
+
+      // Send with CRLF line ending
+      mockProcess.stdout.emit('data', Buffer.from(JSON.stringify(jsonData) + '\r\n'))
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      expect(events).toHaveLength(1)
+
+      // The line passed to parseClaudeEvent should NOT have a trailing \r
+      expect(parseClaudeEventSpy).toHaveBeenCalled()
+      const passedLine = parseClaudeEventSpy.mock.calls[0][0]
+      expect(passedLine.endsWith('\r')).toBe(false)
+      expect(passedLine).toBe(JSON.stringify(jsonData))
+
+      parseClaudeEventSpy.mockRestore()
+    })
   })
 })
 
