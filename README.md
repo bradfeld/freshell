@@ -16,6 +16,8 @@
 
 ---
 
+![freshell screenshot](docs/freshell-screenshot.jpg)
+
 ## Features
 
 - **Multi-tab terminal sessions** — Run shell, Claude Code, and Codex in parallel tabs
