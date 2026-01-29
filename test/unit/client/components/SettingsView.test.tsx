@@ -103,7 +103,7 @@ describe('SettingsView Component', () => {
       // Appearance section
       expect(screen.getByText('Theme')).toBeInTheDocument()
       expect(screen.getByText('UI scale')).toBeInTheDocument()
-      expect(screen.getByText('Terminal theme')).toBeInTheDocument()
+      expect(screen.getByText('Color scheme')).toBeInTheDocument()
 
       // Sidebar section
       expect(screen.getByText('Sort mode')).toBeInTheDocument()
@@ -146,7 +146,7 @@ describe('SettingsView Component', () => {
       })
       renderWithStore(store)
 
-      expect(screen.getByText('16')).toBeInTheDocument()
+      expect(screen.getByText('16px (100%)')).toBeInTheDocument()
     })
 
     it('displays current UI scale value', () => {
@@ -299,15 +299,16 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      // Find the font size slider (first slider after "Font size" label)
+      // Find the font size slider (min=12, max=32)
       const sliders = screen.getAllByRole('slider')
       const fontSizeSlider = sliders.find((slider) => {
         const min = slider.getAttribute('min')
         const max = slider.getAttribute('max')
-        return min === '10' && max === '22'
+        return min === '12' && max === '32'
       })!
 
       fireEvent.change(fontSizeSlider, { target: { value: '18' } })
+      fireEvent.pointerUp(fontSizeSlider)
 
       expect(store.getState().settings.settings.terminal.fontSize).toBe(18)
     })
@@ -320,12 +321,13 @@ describe('SettingsView Component', () => {
       const fontSizeSlider = sliders.find((slider) => {
         const min = slider.getAttribute('min')
         const max = slider.getAttribute('max')
-        return min === '10' && max === '22'
+        return min === '12' && max === '32'
       })!
 
       fireEvent.change(fontSizeSlider, { target: { value: '20' } })
 
-      expect(screen.getByText('20')).toBeInTheDocument()
+      // Format is "20px (125%)"
+      expect(screen.getByText('20px (125%)')).toBeInTheDocument()
     })
 
     it('schedules API save after font size change', async () => {
@@ -336,17 +338,18 @@ describe('SettingsView Component', () => {
       const fontSizeSlider = sliders.find((slider) => {
         const min = slider.getAttribute('min')
         const max = slider.getAttribute('max')
-        return min === '10' && max === '22'
+        return min === '12' && max === '32'
       })!
 
-      fireEvent.change(fontSizeSlider, { target: { value: '16' } })
+      fireEvent.change(fontSizeSlider, { target: { value: '18' } })
+      fireEvent.pointerUp(fontSizeSlider)
 
       await act(async () => {
         vi.advanceTimersByTime(500)
       })
 
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-        terminal: { fontSize: 16 },
+        terminal: { fontSize: 18 },
       })
     })
   })
@@ -468,20 +471,23 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      // Get the "Terminal theme" section buttons - these are the second set of theme buttons
-      const lightButtons = screen.getAllByRole('button', { name: 'Light' })
-      // The second Light button is for terminal theme
-      const terminalLightButton = lightButtons[1]
-      fireEvent.click(terminalLightButton)
+      // Terminal theme is now a select dropdown (Color scheme)
+      const selects = screen.getAllByRole('combobox')
+      // First select is sidebar sort mode, second is terminal theme (Color scheme)
+      const terminalThemeSelect = selects.find((select) => {
+        // Check if it has the 'auto' option which is unique to terminal theme
+        return select.querySelector('option[value="auto"]') !== null
+      })!
+      fireEvent.change(terminalThemeSelect, { target: { value: 'one-dark' } })
 
-      expect(store.getState().settings.settings.terminal.theme).toBe('light')
+      expect(store.getState().settings.settings.terminal.theme).toBe('one-dark')
 
       await act(async () => {
         vi.advanceTimersByTime(500)
       })
 
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-        terminal: { theme: 'light' },
+        terminal: { theme: 'one-dark' },
       })
     })
 
@@ -493,10 +499,11 @@ describe('SettingsView Component', () => {
       const uiScaleSlider = sliders.find((slider) => {
         const min = slider.getAttribute('min')
         const step = slider.getAttribute('step')
-        return min === '0.75' && step === '0.125'
+        return min === '0.75' && step === '0.05'
       })!
 
       fireEvent.change(uiScaleSlider, { target: { value: '1.5' } })
+      fireEvent.pointerUp(uiScaleSlider)
 
       expect(store.getState().settings.settings.uiScale).toBe(1.5)
       expect(screen.getByText('150%')).toBeInTheDocument()
@@ -506,8 +513,12 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      const select = screen.getByRole('combobox')
-      fireEvent.change(select, { target: { value: 'activity' } })
+      // Find the sidebar sort mode select (has 'hybrid' option)
+      const selects = screen.getAllByRole('combobox')
+      const sortModeSelect = selects.find((select) => {
+        return select.querySelector('option[value="hybrid"]') !== null
+      })!
+      fireEvent.change(sortModeSelect, { target: { value: 'activity' } })
 
       expect(store.getState().settings.settings.sidebar.sortMode).toBe('activity')
 
@@ -588,6 +599,7 @@ describe('SettingsView Component', () => {
       })!
 
       fireEvent.change(lineHeightSlider, { target: { value: '1.5' } })
+      fireEvent.pointerUp(lineHeightSlider)
 
       expect(store.getState().settings.settings.terminal.lineHeight).toBe(1.5)
     })
@@ -604,6 +616,7 @@ describe('SettingsView Component', () => {
       })!
 
       fireEvent.change(scrollbackSlider, { target: { value: '15000' } })
+      fireEvent.pointerUp(scrollbackSlider)
 
       expect(store.getState().settings.settings.terminal.scrollback).toBe(15000)
     })
@@ -638,6 +651,7 @@ describe('SettingsView Component', () => {
       })!
 
       fireEvent.change(autoKillSlider, { target: { value: '300' } })
+      fireEvent.pointerUp(autoKillSlider)
 
       expect(store.getState().settings.settings.safety.autoKillIdleMinutes).toBe(300)
     })
@@ -654,6 +668,7 @@ describe('SettingsView Component', () => {
       })!
 
       fireEvent.change(warnSlider, { target: { value: '10' } })
+      fireEvent.pointerUp(warnSlider)
 
       expect(store.getState().settings.settings.safety.warnBeforeKillMinutes).toBe(10)
     })

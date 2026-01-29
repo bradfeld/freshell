@@ -22,14 +22,14 @@ describe('settingsSlice', () => {
       const state = settingsReducer(undefined, { type: 'unknown' })
 
       expect(state.settings.theme).toBe('system')
-      expect(state.settings.uiScale).toBe(1.25)
+      expect(state.settings.uiScale).toBe(1.0)
       expect(state.settings.terminal).toEqual({
-        fontSize: 12,
+        fontSize: 16,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
         lineHeight: 1,
         cursorBlink: true,
         scrollback: 5000,
-        theme: 'default',
+        theme: 'auto',
       })
       expect(state.settings.defaultCwd).toBeUndefined()
       expect(state.settings.safety).toEqual({
@@ -311,7 +311,7 @@ describe('settingsSlice', () => {
     it('exports defaultSettings constant', () => {
       expect(defaultSettings).toBeDefined()
       expect(defaultSettings.theme).toBe('system')
-      expect(defaultSettings.uiScale).toBe(1.25)
+      expect(defaultSettings.uiScale).toBe(1.0)
     })
 
     it('has all required properties', () => {

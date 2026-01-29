@@ -875,14 +875,14 @@ describe('Component Edge Cases', () => {
 
         const sliders = screen.getAllByRole('slider')
         const fontSizeSlider = sliders.find(
-          (s) => s.getAttribute('min') === '10' && s.getAttribute('max') === '22'
+          (s) => s.getAttribute('min') === '12' && s.getAttribute('max') === '32'
         )!
 
         // Rapidly move slider
-        for (let i = 10; i <= 22; i++) {
+        for (let i = 12; i <= 32; i++) {
           fireEvent.change(fontSizeSlider, { target: { value: String(i) } })
         }
-        for (let i = 22; i >= 10; i--) {
+        for (let i = 32; i >= 12; i--) {
           fireEvent.change(fontSizeSlider, { target: { value: String(i) } })
         }
 

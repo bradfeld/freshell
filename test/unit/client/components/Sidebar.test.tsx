@@ -244,7 +244,9 @@ describe('Sidebar Component - Session-Centric Display', () => {
       const store = createTestStore({ projects, sortMode: 'hybrid' })
       renderSidebar(store, terminals)
 
-      vi.advanceTimersByTime(100)
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
 
       // In hybrid mode, running sessions appear in "Running" section
       expect(screen.getByText('Running')).toBeInTheDocument()
@@ -373,7 +375,9 @@ describe('Sidebar Component - Session-Centric Display', () => {
       const store = createTestStore({ projects, sortMode: 'hybrid' })
       renderSidebar(store, terminals)
 
-      vi.advanceTimersByTime(100)
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
 
       // Both sections should appear
       expect(screen.getByText('Running')).toBeInTheDocument()

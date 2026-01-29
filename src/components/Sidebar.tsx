@@ -67,11 +67,10 @@ export default function Sidebar({
   }
 
   useEffect(() => {
-    let unsub = () => {}
     ws.connect().catch(() => {})
-    refresh()
 
-    unsub = ws.onMessage((msg) => {
+    // Register message handler BEFORE calling refresh to avoid race condition
+    const unsub = ws.onMessage((msg) => {
       if (msg.type === 'terminal.list.response' && msg.requestId === requestIdRef.current) {
         setTerminals(msg.terminals || [])
       }
@@ -80,6 +79,7 @@ export default function Sidebar({
       }
     })
 
+    refresh()
     const interval = window.setInterval(refresh, 10000)
     return () => {
       unsub()
