@@ -10,7 +10,7 @@ import panesReducer, {
   hydratePanes,
   PanesState,
 } from '../../../../src/store/panesSlice'
-import type { PaneNode, PaneContent } from '../../../../src/store/paneTypes'
+import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent } from '../../../../src/store/paneTypes'
 
 // Mock nanoid to return predictable IDs for testing
 let mockIdCounter = 0
@@ -881,6 +881,56 @@ describe('panesSlice', () => {
       expect(root.children[1].type).toBe('split')
       const nested = root.children[1] as Extract<PaneNode, { type: 'split' }>
       expect(nested.sizes).toEqual([30, 70])
+    })
+  })
+
+  describe('PaneContent types', () => {
+    it('TerminalPaneContent has required lifecycle fields', () => {
+      const content: TerminalPaneContent = {
+        kind: 'terminal',
+        createRequestId: 'req-123',
+        status: 'creating',
+        mode: 'shell',
+      }
+      expect(content.kind).toBe('terminal')
+      expect(content.createRequestId).toBe('req-123')
+      expect(content.status).toBe('creating')
+    })
+
+    it('TerminalPaneContent shell is optional with default behavior', () => {
+      const content: TerminalPaneContent = {
+        kind: 'terminal',
+        createRequestId: 'req-123',
+        status: 'creating',
+        mode: 'shell',
+        // shell is optional - defaults handled by reducer
+      }
+      expect(content.shell).toBeUndefined()
+    })
+
+    it('BrowserPaneContent unchanged', () => {
+      const content: BrowserPaneContent = {
+        kind: 'browser',
+        url: 'https://example.com',
+        devToolsOpen: false,
+      }
+      expect(content.kind).toBe('browser')
+    })
+
+    it('PaneContent is union of both types', () => {
+      const terminal: PaneContent = {
+        kind: 'terminal',
+        createRequestId: 'req-1',
+        status: 'running',
+        mode: 'shell',
+      }
+      const browser: PaneContent = {
+        kind: 'browser',
+        url: '',
+        devToolsOpen: false,
+      }
+      expect(terminal.kind).toBe('terminal')
+      expect(browser.kind).toBe('browser')
     })
   })
 })
