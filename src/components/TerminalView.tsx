@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateTab } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
+import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -256,6 +257,28 @@ export default function TerminalView({ tabId, hidden }: { tabId: string; hidden?
         if (msg.type === 'error' && msg.requestId && msg.requestId === requestIdRef.current) {
           dispatch(updateTab({ id: tab.id, updates: { status: 'error' } }))
           term.writeln(`\r\n[Error] ${msg.message || msg.code || 'Unknown error'}\r\n`)
+        }
+
+        // Handle INVALID_TERMINAL_ID errors (e.g., after server restart)
+        // These come without requestId when attach fails
+        if (msg.type === 'error' && msg.code === 'INVALID_TERMINAL_ID' && !msg.requestId) {
+          const terminalId = terminalIdRef.current
+          if (terminalId) {
+            // Terminal no longer exists on server - recreate it
+            term.writeln('\r\n[Reconnecting...]\r\n')
+            const newRequestId = nanoid()
+            requestIdRef.current = newRequestId
+            terminalIdRef.current = undefined
+            dispatch(updateTab({ id: tab.id, updates: { terminalId: undefined, createRequestId: newRequestId, status: 'creating' } }))
+            ws.send({
+              type: 'terminal.create',
+              requestId: newRequestId,
+              mode: tab.mode,
+              shell: tab.shell || 'system',
+              cwd: tab.initialCwd,
+              resumeSessionId: tab.resumeSessionId,
+            })
+          }
         }
       })
 
