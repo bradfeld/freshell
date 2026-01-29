@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { Loader2 } from 'lucide-react'
-import type { PaneNode, PaneContent } from '@/store/paneTypes'
+import type { PaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
 interface TerminalViewProps {
@@ -18,30 +18,10 @@ interface TerminalViewProps {
   hidden?: boolean
 }
 
-export default function TerminalView({ tabId, paneId, paneContent: paneContentProp, hidden }: TerminalViewProps) {
+export default function TerminalView({ tabId, paneId, paneContent, hidden }: TerminalViewProps) {
   const dispatch = useAppDispatch()
   const tab = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId))
   const settings = useAppSelector((s) => s.settings.settings)
-
-  // Get pane content when paneId is provided and paneContent prop is not passed
-  const paneContentFromStore = useAppSelector((s) => {
-    if (paneContentProp !== undefined) return null // Use prop instead
-    if (!paneId) return null
-    const layout = s.panes.layouts[tabId]
-    if (!layout) return null
-    // Helper to find pane in tree
-    function findPane(node: PaneNode): PaneContent | null {
-      if (node.type === 'leaf' && node.id === paneId) return node.content
-      if (node.type === 'split') {
-        return findPane(node.children[0]) || findPane(node.children[1])
-      }
-      return null
-    }
-    return findPane(layout)
-  })
-
-  // Use prop if provided, otherwise use store lookup
-  const paneContent = paneContentProp !== undefined ? paneContentProp : paneContentFromStore
 
   // Use pane content when available, otherwise fall back to tab properties
   const terminalMode = paneContent?.kind === 'terminal' ? paneContent.mode : tab?.mode

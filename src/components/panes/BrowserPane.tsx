@@ -11,11 +11,14 @@ interface BrowserPaneProps {
   devToolsOpen: boolean
 }
 
+const MAX_HISTORY_SIZE = 50
+
 export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: BrowserPaneProps) {
   const dispatch = useAppDispatch()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [inputUrl, setInputUrl] = useState(url)
   const [isLoading, setIsLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [history, setHistory] = useState<string[]>(url ? [url] : [])
   const [historyIndex, setHistoryIndex] = useState(url ? 0 : -1)
 
@@ -30,11 +33,21 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
 
     setInputUrl(fullUrl)
     setIsLoading(true)
+    setLoadError(null)
 
-    // Update history
-    const newHistory = [...history.slice(0, historyIndex + 1), fullUrl]
+    // Update history, limiting to MAX_HISTORY_SIZE entries
+    let newHistory = [...history.slice(0, historyIndex + 1), fullUrl]
+    let newIndex = newHistory.length - 1
+
+    // Truncate old entries if history exceeds max size
+    if (newHistory.length > MAX_HISTORY_SIZE) {
+      const excess = newHistory.length - MAX_HISTORY_SIZE
+      newHistory = newHistory.slice(excess)
+      newIndex = newIndex - excess
+    }
+
     setHistory(newHistory)
-    setHistoryIndex(newHistory.length - 1)
+    setHistoryIndex(newIndex)
 
     // Persist to Redux
     dispatch(updatePaneContent({
@@ -49,6 +62,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
       const newIndex = historyIndex - 1
       setHistoryIndex(newIndex)
       setInputUrl(history[newIndex])
+      setLoadError(null)
       dispatch(updatePaneContent({
         tabId,
         paneId,
@@ -62,6 +76,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
       const newIndex = historyIndex + 1
       setHistoryIndex(newIndex)
       setInputUrl(history[newIndex])
+      setLoadError(null)
       dispatch(updatePaneContent({
         tabId,
         paneId,
@@ -156,13 +171,31 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
       <div className="flex-1 flex min-h-0">
         {/* iframe */}
         <div className={cn('flex-1 min-w-0', devToolsOpen && 'border-r border-border')}>
-          {currentUrl ? (
+          {loadError ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 p-4">
+              <div className="text-destructive font-medium">Failed to load page</div>
+              <div className="text-sm text-center max-w-md">{loadError}</div>
+              <button
+                onClick={() => {
+                  setLoadError(null)
+                  refresh()
+                }}
+                className="mt-2 px-4 py-2 rounded bg-muted hover:bg-muted/80 text-sm"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : currentUrl ? (
             <iframe
               ref={iframeRef}
               src={currentUrl}
               className="w-full h-full border-0 bg-white"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
               onLoad={() => setIsLoading(false)}
+              onError={() => {
+                setIsLoading(false)
+                setLoadError(`Unable to load "${currentUrl}". The page may not exist, or the server may be blocking embedded access.`)
+              }}
               title="Browser content"
             />
           ) : (

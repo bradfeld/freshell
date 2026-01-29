@@ -56,7 +56,7 @@ export default function PaneLayout({ tabId, defaultContent }: PaneLayoutProps) {
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
-      <PaneContainer tabId={tabId} node={layout} isRoot />
+      <PaneContainer tabId={tabId} node={layout} />
       <FloatingActionButton
         onAddTerminal={handleAddTerminal}
         onAddBrowser={handleAddBrowser}

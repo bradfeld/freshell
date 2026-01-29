@@ -1,10 +1,7 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { PaneContent } from '@/store/paneTypes'
 
 interface PaneProps {
-  id: string
-  content: PaneContent
   isActive: boolean
   isOnlyPane: boolean
   onClose: () => void
@@ -13,8 +10,6 @@ interface PaneProps {
 }
 
 export default function Pane({
-  id,
-  content,
   isActive,
   isOnlyPane,
   onClose,
@@ -25,7 +20,7 @@ export default function Pane({
     <div
       className={cn(
         'relative h-full w-full overflow-hidden',
-        isActive && 'shadow-[0_0_0_2px_rgba(255,255,255,0.3),0_0_20px_rgba(255,255,255,0.1)]'
+        isActive && 'ring-2 ring-foreground/30 shadow-[0_0_20px_hsl(var(--foreground)/0.1)]'
       )}
       onClick={onFocus}
     >

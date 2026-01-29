@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useMemo } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { closePane, setActivePane, resizePanes } from '@/store/panesSlice'
 import type { PaneNode, PaneContent } from '@/store/paneTypes'
@@ -7,25 +7,33 @@ import PaneDivider from './PaneDivider'
 import TerminalView from '../TerminalView'
 import BrowserPane from './BrowserPane'
 import { cn } from '@/lib/utils'
+import { getWsClient } from '@/lib/ws-client'
 
 interface PaneContainerProps {
   tabId: string
   node: PaneNode
-  isRoot?: boolean
 }
 
-export default function PaneContainer({ tabId, node, isRoot = false }: PaneContainerProps) {
+export default function PaneContainer({ tabId, node }: PaneContainerProps) {
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
+  const ws = useMemo(() => getWsClient(), [])
 
   // Check if this is the only pane (root is a leaf)
   const rootNode = useAppSelector((s) => s.panes.layouts[tabId])
   const isOnlyPane = rootNode?.type === 'leaf'
 
-  const handleClose = useCallback((paneId: string) => {
+  const handleClose = useCallback((paneId: string, content: PaneContent) => {
+    // Clean up terminal process if this pane has one
+    if (content.kind === 'terminal' && content.terminalId) {
+      ws.send({
+        type: 'terminal.detach',
+        terminalId: content.terminalId,
+      })
+    }
     dispatch(closePane({ tabId, paneId }))
-  }, [dispatch, tabId])
+  }, [dispatch, tabId, ws])
 
   const handleFocus = useCallback((paneId: string) => {
     dispatch(setActivePane({ tabId, paneId }))
@@ -56,11 +64,9 @@ export default function PaneContainer({ tabId, node, isRoot = false }: PaneConta
   if (node.type === 'leaf') {
     return (
       <Pane
-        id={node.id}
-        content={node.content}
         isActive={activePane === node.id}
         isOnlyPane={isOnlyPane}
-        onClose={() => handleClose(node.id)}
+        onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
       >
         {renderContent(tabId, node.id, node.content)}
@@ -99,7 +105,8 @@ export default function PaneContainer({ tabId, node, isRoot = false }: PaneConta
 function renderContent(tabId: string, paneId: string, content: PaneContent) {
   if (content.kind === 'terminal') {
     // Terminal panes need a unique key based on paneId for proper lifecycle
-    return <TerminalView key={paneId} tabId={tabId} paneId={paneId} hidden={false} />
+    // Pass paneContent directly to avoid redundant tree traversal in TerminalView
+    return <TerminalView key={paneId} tabId={tabId} paneId={paneId} paneContent={content} hidden={false} />
   }
 
   if (content.kind === 'browser') {
