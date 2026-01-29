@@ -11,6 +11,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./test/setup/dom.ts'],
+    exclude: ['**/node_modules/**', '**/.worktrees/**'],
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@test': path.resolve(__dirname, './test'),
