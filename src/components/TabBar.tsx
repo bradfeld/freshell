@@ -1,26 +1,9 @@
-import { X, Plus, Circle } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Plus } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, closeTab, setActiveTab, updateTab } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { useMemo, useState } from 'react'
-
-function StatusIndicator({ status }: { status: string }) {
-  if (status === 'running') {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-success text-success" />
-      </div>
-    )
-  }
-  if (status === 'exited') {
-    return <Circle className="h-2 w-2 text-muted-foreground/40" />
-  }
-  if (status === 'error') {
-    return <Circle className="h-2 w-2 fill-destructive text-destructive" />
-  }
-  return <Circle className="h-2 w-2 text-muted-foreground/20 animate-pulse" />
-}
+import TabItem from './TabItem'
 
 export default function TabBar() {
   const dispatch = useAppDispatch()
@@ -36,73 +19,45 @@ export default function TabBar() {
   return (
     <div className="h-10 flex items-center gap-1 px-2 border-b border-border/30 bg-background">
       <div className="flex items-center gap-0.5 overflow-x-auto flex-1 py-1">
-        {tabs.map((tab) => {
-          const active = tab.id === activeTabId
-          return (
-            <div
-              key={tab.id}
-              className={cn(
-                'group flex items-center gap-2 h-7 px-3 rounded-md text-sm cursor-pointer transition-all',
-                active
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              )}
-              onClick={() => dispatch(setActiveTab(tab.id))}
-              onDoubleClick={() => {
-                setRenamingId(tab.id)
-                setRenameValue(tab.title)
-              }}
-            >
-              <StatusIndicator status={tab.status} />
-
-              {renamingId === tab.id ? (
-                <input
-                  className="bg-transparent outline-none w-32 text-sm"
-                  value={renameValue}
-                  autoFocus
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => {
-                    dispatch(updateTab({ id: tab.id, updates: { title: renameValue || tab.title, titleSetByUser: true } }))
-                    setRenamingId(null)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === 'Escape') {
-                      ;(e.target as HTMLInputElement).blur()
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span
-                  className={cn("whitespace-nowrap truncate text-sm", active ? "max-w-[10rem]" : "max-w-[5rem]")}
-                  title={tab.title}
-                >
-                  {tab.title}
-                </span>
-              )}
-
-              <button
-                className={cn(
-                  'ml-0.5 p-0.5 rounded transition-opacity',
-                  active ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-60 hover:!opacity-100'
-                )}
-                title="Close (Shift+Click to kill)"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (tab.terminalId) {
-                    ws.send({
-                      type: e.shiftKey ? 'terminal.kill' : 'terminal.detach',
-                      terminalId: tab.terminalId,
-                    })
-                  }
-                  dispatch(closeTab(tab.id))
-                }}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          )
-        })}
+        {tabs.map((tab) => (
+          <TabItem
+            key={tab.id}
+            tab={tab}
+            isActive={tab.id === activeTabId}
+            isDragging={false}
+            isRenaming={renamingId === tab.id}
+            renameValue={renameValue}
+            onRenameChange={setRenameValue}
+            onRenameBlur={() => {
+              dispatch(
+                updateTab({
+                  id: tab.id,
+                  updates: { title: renameValue || tab.title, titleSetByUser: true },
+                })
+              )
+              setRenamingId(null)
+            }}
+            onRenameKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') {
+                ;(e.target as HTMLInputElement).blur()
+              }
+            }}
+            onClose={(e) => {
+              if (tab.terminalId) {
+                ws.send({
+                  type: e.shiftKey ? 'terminal.kill' : 'terminal.detach',
+                  terminalId: tab.terminalId,
+                })
+              }
+              dispatch(closeTab(tab.id))
+            }}
+            onClick={() => dispatch(setActiveTab(tab.id))}
+            onDoubleClick={() => {
+              setRenamingId(tab.id)
+              setRenameValue(tab.title)
+            }}
+          />
+        ))}
       </div>
 
       <button
