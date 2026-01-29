@@ -1,4 +1,4 @@
-import './bootstrap' // Must be first - ensures .env exists before dotenv loads
+import { detectLanIps } from './bootstrap' // Must be first - ensures .env exists before dotenv loads
 import 'dotenv/config'
 import express from 'express'
 import fs from 'fs'
@@ -107,6 +107,10 @@ async function main() {
   app.get('/api/settings', async (_req, res) => {
     const s = await configStore.getSettings()
     res.json(s)
+  })
+
+  app.get('/api/lan-info', (_req, res) => {
+    res.json({ ips: detectLanIps() })
   })
 
   app.patch('/api/settings', async (req, res) => {

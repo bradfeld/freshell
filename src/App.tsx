@@ -13,7 +13,7 @@ import TabContent from '@/components/TabContent'
 import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
-import { Wifi, WifiOff, Moon, Sun, Share2 } from 'lucide-react'
+import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 
 export default function App() {
@@ -27,6 +27,8 @@ export default function App() {
   const settings = useAppSelector((s) => s.settings.settings)
 
   const [view, setView] = useState<AppView>('terminal')
+  const [shareModalUrl, setShareModalUrl] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const toggleTheme = async () => {
     const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
@@ -38,19 +40,43 @@ export default function App() {
   }
 
   const handleShare = async () => {
-    // Build shareable URL with token
+    // Build shareable URL with LAN IP and token
+    let lanIp: string | null = null
+    try {
+      const res = await api.get<{ ips: string[] }>('/api/lan-info')
+      if (res.ips.length > 0) {
+        lanIp = res.ips[0]
+      }
+    } catch {
+      // Fall back to current host if LAN info unavailable
+    }
+
     const url = new URL(window.location.href)
-    const token = sessionStorage.getItem('authToken')
+    if (lanIp) {
+      url.hostname = lanIp
+    }
+    const token = sessionStorage.getItem('auth-token')
     if (token) {
       url.searchParams.set('token', token)
     }
 
+    const shareUrl = url.toString()
+
+    // On Windows, show a modal instead of using system share
+    const isWindows = navigator.platform.includes('Win')
+    if (isWindows) {
+      setCopied(false)
+      setShareModalUrl(shareUrl)
+      return
+    }
+
+    const shareText = `You need to use this on your local network or with a VPN.\n${shareUrl}`
+
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Freshell Terminal',
-          text: 'Access my terminal session',
-          url: url.toString(),
+          title: 'Welcome to your freshell!',
+          text: shareText,
         })
       } catch (err) {
         // User cancelled or share failed - that's okay
@@ -59,11 +85,22 @@ export default function App() {
     } else {
       // Fallback: copy to clipboard
       try {
-        await navigator.clipboard.writeText(url.toString())
+        await navigator.clipboard.writeText(shareText)
         // TODO: Show toast notification
       } catch (err) {
         console.warn('Clipboard write failed:', err)
       }
+    }
+  }
+
+  const handleCopyShareLink = async () => {
+    if (!shareModalUrl) return
+    try {
+      await navigator.clipboard.writeText(shareModalUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.warn('Clipboard write failed:', err)
     }
   }
 
@@ -268,6 +305,51 @@ export default function App() {
           {content}
         </div>
       </div>
+
+      {/* Share modal for Windows */}
+      {shareModalUrl && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setShareModalUrl(null)}
+        >
+          <div
+            className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Welcome to your freshell!</h2>
+              <button
+                onClick={() => setShareModalUrl(null)}
+                className="p-1 rounded hover:bg-muted transition-colors"
+              >
+                <X className="h-4 w-4 text-muted-foreground" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              You need to use this on your local network or with a VPN.
+            </p>
+            <div className="bg-muted rounded-md p-3 mb-4">
+              <code className="text-sm break-all select-all">{shareModalUrl}</code>
+            </div>
+            <button
+              onClick={handleCopyShareLink}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  Copy link
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
