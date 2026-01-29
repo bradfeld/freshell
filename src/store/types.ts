@@ -26,6 +26,7 @@ export interface Tab {
   initialCwd?: string
   resumeSessionId?: string
   createdAt: number
+  titleSetByUser?: boolean     // If true, don't auto-update title
 }
 
 export interface BackgroundTerminal {
@@ -36,6 +37,8 @@ export interface BackgroundTerminal {
   cwd?: string
   status: 'running' | 'exited'
   hasClients: boolean
+  mode?: 'shell' | 'claude' | 'codex'
+  resumeSessionId?: string
 }
 
 export interface ClaudeSession {
