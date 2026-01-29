@@ -32,6 +32,16 @@ export const tabsSlice = createSlice({
   reducers: {
     addTab: (state, action: PayloadAction<AddTabPayload | undefined>) => {
       const payload = action.payload || {}
+
+      // Deduplicate: if resuming a session that already has a tab, switch to it instead
+      if (payload.resumeSessionId) {
+        const existingTab = state.tabs.find((t) => t.resumeSessionId === payload.resumeSessionId)
+        if (existingTab) {
+          state.activeTabId = existingTab.id
+          return
+        }
+      }
+
       const id = nanoid()
       const tab: Tab = {
         id,

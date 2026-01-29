@@ -25,7 +25,7 @@ function getProjectName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-export default function HistoryView() {
+export default function HistoryView({ onOpenSession }: { onOpenSession?: () => void }) {
   const dispatch = useAppDispatch()
   const { projects, expandedProjects } = useAppSelector((s) => s.sessions)
   const [filter, setFilter] = useState('')
@@ -72,8 +72,10 @@ export default function HistoryView() {
     await refresh()
   }
 
-  function openSession(projectPath: string, sessionId: string, title: string) {
-    dispatch(addTab({ title: title || 'Claude', mode: 'claude', initialCwd: projectPath, resumeSessionId: sessionId }))
+  function openSession(cwd: string | undefined, sessionId: string, title: string) {
+    // cwd might be undefined if session metadata didn't include it
+    dispatch(addTab({ title: title || 'Claude', mode: 'claude', initialCwd: cwd, resumeSessionId: sessionId }))
+    onOpenSession?.()
   }
 
   const totalSessions = (projects ?? []).reduce((acc, p) => acc + p.sessions.length, 0)
@@ -137,7 +139,7 @@ export default function HistoryView() {
                 expanded={expandedProjects.has(project.projectPath)}
                 onToggle={() => dispatch(toggleProjectExpanded(project.projectPath))}
                 onColorChange={(color) => setProjectColor(project.projectPath, color)}
-                onOpenSession={(sessionId, title) => openSession(project.projectPath, sessionId, title)}
+                onOpenSession={(sessionId, title, cwd) => openSession(cwd, sessionId, title)}
                 onRenameSession={renameSession}
                 onDeleteSession={deleteSession}
               />
@@ -162,7 +164,7 @@ function ProjectCard({
   expanded: boolean
   onToggle: () => void
   onColorChange: (color: string) => void
-  onOpenSession: (sessionId: string, title: string) => void
+  onOpenSession: (sessionId: string, title: string, cwd?: string) => void
   onRenameSession: (sessionId: string, title?: string, summary?: string) => void
   onDeleteSession: (sessionId: string) => void
 }) {
@@ -232,7 +234,7 @@ function ProjectCard({
                 <SessionRow
                   key={session.sessionId}
                   session={session}
-                  onOpen={() => onOpenSession(session.sessionId, session.title || session.sessionId.slice(0, 8))}
+                  onOpen={() => onOpenSession(session.sessionId, session.title || session.sessionId.slice(0, 8), session.cwd)}
                   onRename={(title, summary) => onRenameSession(session.sessionId, title, summary)}
                   onDelete={() => onDeleteSession(session.sessionId)}
                 />

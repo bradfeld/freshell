@@ -101,6 +101,11 @@ function getSystemShell(): string {
   return '/bin/bash'
 }
 
+function isLinuxPath(p: string | undefined): boolean {
+  // Detect Linux/WSL paths that won't work on native Windows
+  return typeof p === 'string' && p.startsWith('/') && !p.startsWith('//')
+}
+
 function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: ShellType, resumeSessionId?: string) {
   const env = {
     ...process.env,
@@ -112,10 +117,15 @@ function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: Shel
   const effectiveShell = resolveShell(shell)
 
   if (isWindows()) {
+    // If the cwd is a Linux path, force WSL mode since native Windows shells can't use it
+    const forceWsl = isLinuxPath(cwd)
+
     // Use protocol-specified shell, falling back to env var for backwards compatibility
-    const windowsMode = effectiveShell !== 'system'
-      ? effectiveShell
-      : (process.env.WINDOWS_SHELL || 'wsl').toLowerCase()
+    const windowsMode = forceWsl
+      ? 'wsl'
+      : effectiveShell !== 'system'
+        ? effectiveShell
+        : (process.env.WINDOWS_SHELL || 'wsl').toLowerCase()
 
     // Option A: WSL (default) — recommended for Claude/Codex on Windows.
     if (windowsMode === 'wsl') {
@@ -153,26 +163,30 @@ function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: Shel
 
     if (windowsMode === 'cmd') {
       const file = 'cmd.exe'
+      // Don't use Linux paths as cwd on native Windows
+      const winCwd = isLinuxPath(cwd) ? undefined : cwd
       if (mode === 'shell') {
-        return { file, args: ['/K'], cwd, env }
+        return { file, args: ['/K'], cwd: winCwd, env }
       }
       const cmd = mode === 'claude' ? (process.env.CLAUDE_CMD || 'claude') : (process.env.CODEX_CMD || 'codex')
       const resume = mode === 'claude' && resumeSessionId ? ` --resume ${resumeSessionId}` : ''
-      const cd = cwd ? `cd /d ${cwd} && ` : ''
-      return { file, args: ['/K', `${cd}${cmd}${resume}`], cwd, env }
+      const cd = winCwd ? `cd /d ${winCwd} && ` : ''
+      return { file, args: ['/K', `${cd}${cmd}${resume}`], cwd: winCwd, env }
     }
 
     // default to PowerShell
     const file = process.env.POWERSHELL_EXE || 'powershell.exe'
+    // Don't use Linux paths as cwd on native Windows
+    const winCwd = isLinuxPath(cwd) ? undefined : cwd
     if (mode === 'shell') {
-      return { file, args: ['-NoLogo'], cwd, env }
+      return { file, args: ['-NoLogo'], cwd: winCwd, env }
     }
 
     const cmd = mode === 'claude' ? (process.env.CLAUDE_CMD || 'claude') : (process.env.CODEX_CMD || 'codex')
     const resumeArgs = mode === 'claude' && resumeSessionId ? ` --resume ${resumeSessionId}` : ''
-    const cd = cwd ? `Set-Location -LiteralPath ${quote(cwd)}; ` : ''
+    const cd = winCwd ? `Set-Location -LiteralPath ${quote(winCwd)}; ` : ''
     const command = `${cd}${cmd}${resumeArgs}`
-    return { file, args: ['-NoLogo', '-NoExit', '-Command', command], cwd, env }
+    return { file, args: ['-NoLogo', '-NoExit', '-Command', command], cwd: winCwd, env }
   }
 // Non-Windows: native spawn using system shell
   const systemShell = getSystemShell()

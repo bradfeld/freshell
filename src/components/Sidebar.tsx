@@ -22,6 +22,7 @@ interface UnifiedItem {
   isActive?: boolean
   terminalId?: string
   sessionId?: string
+  cwd?: string
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -123,6 +124,7 @@ export default function Sidebar({
           projectColor: project.color,
           timestamp: session.updatedAt,
           sessionId: session.sessionId,
+          cwd: session.cwd,
         })
       })
     })
@@ -191,8 +193,8 @@ export default function Sidebar({
         dispatch(addTab({ title: item.title, terminalId: item.terminalId, status: item.isRunning ? 'running' : 'exited', mode: 'shell' }))
       }
       onNavigate('terminal')
-    } else if (item.type === 'session' && item.sessionId && item.projectPath) {
-      dispatch(addTab({ title: item.title, mode: 'claude', initialCwd: item.projectPath, resumeSessionId: item.sessionId }))
+    } else if (item.type === 'session' && item.sessionId) {
+      dispatch(addTab({ title: item.title, mode: 'claude', initialCwd: item.cwd, resumeSessionId: item.sessionId }))
       onNavigate('terminal')
     }
   }

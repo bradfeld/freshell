@@ -167,7 +167,7 @@ export default function App() {
   }, [tabs.length, dispatch])
 
   const content = (() => {
-    if (view === 'sessions') return <HistoryView />
+    if (view === 'sessions') return <HistoryView onOpenSession={() => setView('terminal')} />
     if (view === 'settings') return <SettingsView />
     if (view === 'overview') return <OverviewView onOpenTab={() => setView('terminal')} />
     return (
