@@ -183,25 +183,29 @@ export default function App() {
   })()
 
   return (
-    <div className="h-full flex bg-background text-foreground">
-      <Sidebar view={view} onNavigate={setView} />
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Minimal status bar */}
-        <div className="h-8 px-4 flex items-center justify-end border-b border-border/30 bg-background">
-          <div className="flex items-center gap-2">
-            {connection === 'ready' ? (
-              <Wifi className="h-3.5 w-3.5 text-success" />
-            ) : connection === 'connecting' ? (
-              <Wifi className="h-3.5 w-3.5 text-warning animate-pulse" />
-            ) : (
-              <WifiOff className="h-3.5 w-3.5 text-destructive" />
-            )}
-            {connectionError && (
-              <span className="text-2xs text-destructive">{connectionError}</span>
-            )}
-          </div>
+    <div className="h-full flex flex-col bg-background text-foreground">
+      {/* Top header bar spanning full width */}
+      <div className="h-8 px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
+        <span className="font-mono text-sm font-semibold tracking-tight">🐚freshell</span>
+        <div className="flex items-center gap-2">
+          {connection === 'ready' ? (
+            <Wifi className="h-3.5 w-3.5 text-success" />
+          ) : connection === 'connecting' ? (
+            <Wifi className="h-3.5 w-3.5 text-warning animate-pulse" />
+          ) : (
+            <WifiOff className="h-3.5 w-3.5 text-destructive" />
+          )}
+          {connectionError && (
+            <span className="text-2xs text-destructive">{connectionError}</span>
+          )}
         </div>
-        <div className="flex-1 min-h-0">{content}</div>
+      </div>
+      {/* Main content area with sidebar */}
+      <div className="flex-1 min-h-0 flex">
+        <Sidebar view={view} onNavigate={setView} />
+        <div className="flex-1 min-w-0 flex flex-col">
+          {content}
+        </div>
       </div>
     </div>
   )
