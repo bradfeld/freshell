@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => ({
     sourcemap: mode === 'development',
   },
   server: {
+    host: true,
     proxy: {
       '/api': 'http://localhost:3001',
       '/local-file': 'http://localhost:3001',
