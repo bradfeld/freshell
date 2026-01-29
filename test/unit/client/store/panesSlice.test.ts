@@ -77,7 +77,7 @@ describe('panesSlice', () => {
     })
 
     it('creates layouts for different tabs independently', () => {
-      const content1: PaneContent = { kind: 'terminal', mode: 'shell' }
+      const content1 = { kind: 'terminal' as const, mode: 'shell' as const }
       const content2: PaneContent = { kind: 'browser', url: 'https://example.com', devToolsOpen: false }
 
       let state = panesReducer(
@@ -93,8 +93,47 @@ describe('panesSlice', () => {
       expect(state.layouts['tab-2']).toBeDefined()
       const leaf1 = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
       const leaf2 = state.layouts['tab-2'] as Extract<PaneNode, { type: 'leaf' }>
-      expect(leaf1.content).toEqual(content1)
+      expect(leaf1.content.kind).toBe('terminal')
       expect(leaf2.content).toEqual(content2)
+    })
+
+    it('generates createRequestId and status for terminal content', () => {
+      // Initialize with minimal terminal input
+      const state = panesReducer(
+        initialState,
+        initLayout({
+          tabId: 'tab-1',
+          content: { kind: 'terminal', mode: 'shell' },
+        })
+      )
+
+      const layout = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
+
+      expect(layout.content.kind).toBe('terminal')
+      if (layout.content.kind === 'terminal') {
+        expect(layout.content.createRequestId).toBeDefined()
+        expect(layout.content.createRequestId.length).toBeGreaterThan(0)
+        expect(layout.content.status).toBe('creating')
+        expect(layout.content.shell).toBe('system')
+      }
+    })
+
+    it('preserves provided createRequestId and status', () => {
+      const state = panesReducer(
+        initialState,
+        initLayout({
+          tabId: 'tab-1',
+          content: { kind: 'terminal', createRequestId: 'custom-req', status: 'running', mode: 'claude' },
+        })
+      )
+
+      const layout = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
+
+      if (layout.content.kind === 'terminal') {
+        expect(layout.content.createRequestId).toBe('custom-req')
+        expect(layout.content.status).toBe('running')
+        expect(layout.content.mode).toBe('claude')
+      }
     })
   })
 
