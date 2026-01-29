@@ -12,7 +12,6 @@ export default function SettingsView() {
   const lastSavedAt = useAppSelector((s) => s.settings.lastSavedAt)
 
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [draggingScale, setDraggingScale] = useState<number | null>(null)
 
   const patch = useMemo(
     () => async (updates: any) => {
@@ -42,7 +41,7 @@ export default function SettingsView() {
       <div className="px-6 py-5 border-b border-border/30">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
             <p className="text-sm text-muted-foreground">
               {lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Configure your preferences'}
             </p>
@@ -72,25 +71,18 @@ export default function SettingsView() {
             </SettingsRow>
 
             <SettingsRow label="UI scale">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={0.75}
-                  max={2}
-                  step={0.125}
-                  value={draggingScale ?? settings.uiScale ?? 1.25}
-                  onChange={(e) => setDraggingScale(Number(e.target.value))}
-                  onPointerUp={() => {
-                    if (draggingScale !== null) {
-                      dispatch(updateSettingsLocal({ uiScale: draggingScale }))
-                      scheduleSave({ uiScale: draggingScale })
-                      setDraggingScale(null)
-                    }
-                  }}
-                  className="w-32 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground"
-                />
-                <span className="text-sm tabular-nums w-12">{Math.round((draggingScale ?? settings.uiScale ?? 1.25) * 100)}%</span>
-              </div>
+              <RangeSlider
+                value={settings.uiScale ?? 1.0}
+                min={0.75}
+                max={1.5}
+                step={0.05}
+                labelWidth="w-12"
+                format={(v) => `${Math.round(v * 100)}%`}
+                onChange={(v) => {
+                  dispatch(updateSettingsLocal({ uiScale: v }))
+                  scheduleSave({ uiScale: v })
+                }}
+              />
             </SettingsRow>
 
           </SettingsSection>
@@ -152,60 +144,47 @@ export default function SettingsView() {
             </SettingsRow>
 
             <SettingsRow label="Font size">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={10}
-                  max={22}
-                  step={1}
-                  value={settings.terminal.fontSize}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    dispatch(updateSettingsLocal({ terminal: { fontSize: v } } as any))
-                    scheduleSave({ terminal: { fontSize: v } })
-                  }}
-                  className="w-32 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground"
-                />
-                <span className="text-sm tabular-nums w-8">{settings.terminal.fontSize}</span>
-              </div>
+              <RangeSlider
+                value={settings.terminal.fontSize}
+                min={12}
+                max={32}
+                step={1}
+                labelWidth="w-20"
+                format={(v) => `${v}px (${Math.round(v / 16 * 100)}%)`}
+                onChange={(v) => {
+                  dispatch(updateSettingsLocal({ terminal: { fontSize: v } } as any))
+                  scheduleSave({ terminal: { fontSize: v } })
+                }}
+              />
             </SettingsRow>
 
             <SettingsRow label="Line height">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={1}
-                  max={1.8}
-                  step={0.05}
-                  value={settings.terminal.lineHeight}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    dispatch(updateSettingsLocal({ terminal: { lineHeight: v } } as any))
-                    scheduleSave({ terminal: { lineHeight: v } })
-                  }}
-                  className="w-32 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground"
-                />
-                <span className="text-sm tabular-nums w-10">{settings.terminal.lineHeight.toFixed(2)}</span>
-              </div>
+              <RangeSlider
+                value={settings.terminal.lineHeight}
+                min={1}
+                max={1.8}
+                step={0.05}
+                labelWidth="w-10"
+                format={(v) => v.toFixed(2)}
+                onChange={(v) => {
+                  dispatch(updateSettingsLocal({ terminal: { lineHeight: v } } as any))
+                  scheduleSave({ terminal: { lineHeight: v } })
+                }}
+              />
             </SettingsRow>
 
             <SettingsRow label="Scrollback lines">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={1000}
-                  max={20000}
-                  step={500}
-                  value={settings.terminal.scrollback}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    dispatch(updateSettingsLocal({ terminal: { scrollback: v } } as any))
-                    scheduleSave({ terminal: { scrollback: v } })
-                  }}
-                  className="w-32 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground"
-                />
-                <span className="text-sm tabular-nums w-14">{settings.terminal.scrollback.toLocaleString()}</span>
-              </div>
+              <RangeSlider
+                value={settings.terminal.scrollback}
+                min={1000}
+                max={20000}
+                step={500}
+                format={(v) => v.toLocaleString()}
+                onChange={(v) => {
+                  dispatch(updateSettingsLocal({ terminal: { scrollback: v } } as any))
+                  scheduleSave({ terminal: { scrollback: v } })
+                }}
+              />
             </SettingsRow>
 
             <SettingsRow label="Cursor blink">
@@ -234,41 +213,31 @@ export default function SettingsView() {
           {/* Safety */}
           <SettingsSection title="Safety" description="Auto-kill and idle terminal management">
             <SettingsRow label="Auto-kill idle (minutes)">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={10}
-                  max={720}
-                  step={10}
-                  value={settings.safety.autoKillIdleMinutes}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    dispatch(updateSettingsLocal({ safety: { autoKillIdleMinutes: v } } as any))
-                    scheduleSave({ safety: { autoKillIdleMinutes: v } })
-                  }}
-                  className="w-32 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground"
-                />
-                <span className="text-sm tabular-nums w-14">{settings.safety.autoKillIdleMinutes}</span>
-              </div>
+              <RangeSlider
+                value={settings.safety.autoKillIdleMinutes}
+                min={10}
+                max={720}
+                step={10}
+                format={(v) => String(v)}
+                onChange={(v) => {
+                  dispatch(updateSettingsLocal({ safety: { autoKillIdleMinutes: v } } as any))
+                  scheduleSave({ safety: { autoKillIdleMinutes: v } })
+                }}
+              />
             </SettingsRow>
 
             <SettingsRow label="Warn before kill (minutes)">
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={1}
-                  max={60}
-                  step={1}
-                  value={settings.safety.warnBeforeKillMinutes}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    dispatch(updateSettingsLocal({ safety: { warnBeforeKillMinutes: v } } as any))
-                    scheduleSave({ safety: { warnBeforeKillMinutes: v } })
-                  }}
-                  className="w-32 h-1.5 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground"
-                />
-                <span className="text-sm tabular-nums w-14">{settings.safety.warnBeforeKillMinutes}</span>
-              </div>
+              <RangeSlider
+                value={settings.safety.warnBeforeKillMinutes}
+                min={1}
+                max={60}
+                step={1}
+                format={(v) => String(v)}
+                onChange={(v) => {
+                  dispatch(updateSettingsLocal({ safety: { warnBeforeKillMinutes: v } } as any))
+                  scheduleSave({ safety: { warnBeforeKillMinutes: v } })
+                }}
+              />
             </SettingsRow>
 
             <SettingsRow label="Default working directory">
@@ -415,6 +384,61 @@ function ShortcutRow({
           </span>
         ))}
       </div>
+    </div>
+  )
+}
+
+function RangeSlider({
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  format,
+  width = 'w-32',
+  labelWidth = 'w-14',
+}: {
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (value: number) => void
+  format: (value: number) => string
+  width?: string
+  labelWidth?: string
+}) {
+  const [dragging, setDragging] = useState<number | null>(null)
+  const displayValue = dragging ?? value
+
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={displayValue}
+        onChange={(e) => setDragging(Number(e.target.value))}
+        onPointerUp={() => {
+          if (dragging !== null) {
+            onChange(dragging)
+            setDragging(null)
+          }
+        }}
+        onPointerLeave={() => {
+          // Also commit if pointer leaves while dragging (edge case)
+          if (dragging !== null) {
+            onChange(dragging)
+            setDragging(null)
+          }
+        }}
+        className={cn(
+          width,
+          'h-1.5 bg-muted rounded-full appearance-none cursor-pointer',
+          '[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground'
+        )}
+      />
+      <span className={cn('text-sm tabular-nums', labelWidth)}>{format(displayValue)}</span>
     </div>
   )
 }

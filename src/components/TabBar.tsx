@@ -74,7 +74,7 @@ export default function TabBar() {
                 />
               ) : (
                 <span
-                  className={cn("whitespace-nowrap truncate text-xs", active ? "max-w-[10rem]" : "max-w-[5rem]")}
+                  className={cn("whitespace-nowrap truncate text-sm", active ? "max-w-[10rem]" : "max-w-[5rem]")}
                   title={tab.title}
                 >
                   {tab.title}

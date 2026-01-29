@@ -3,7 +3,7 @@ import type { AppSettings } from './types'
 
 export const defaultSettings: AppSettings = {
   theme: 'system',
-  uiScale: 1.25, // 125% default for comfortable desktop viewing
+  uiScale: 1.0, // 100% = UI text matches terminal font size
   terminal: {
     fontSize: 16,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
