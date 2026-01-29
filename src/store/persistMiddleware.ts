@@ -1,7 +1,7 @@
 import type { Middleware } from '@reduxjs/toolkit'
 import type { RootState } from './store'
 
-const STORAGE_KEY = 'ccso.tabs.v1'
+const STORAGE_KEY = 'freshell.tabs.v1'
 
 export function loadPersistedTabs(): any | null {
   try {

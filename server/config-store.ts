@@ -69,7 +69,7 @@ export const defaultSettings: AppSettings = {
     lineHeight: 1,
     cursorBlink: true,
     scrollback: 5000,
-    theme: 'dark',
+    theme: 'default',
   },
   defaultCwd: undefined,
   safety: {
@@ -79,7 +79,7 @@ export const defaultSettings: AppSettings = {
 }
 
 function configDir(): string {
-  return path.join(os.homedir(), '.ccso')
+  return path.join(os.homedir(), '.freshell')
 }
 
 function configPath(): string {

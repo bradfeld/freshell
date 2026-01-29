@@ -1099,7 +1099,7 @@ describe('API Edge Cases - Security Testing', () => {
   describe('Config File Edge Cases', () => {
     it('recovers from corrupted config file', async () => {
       // Write corrupted config
-      const ccsoDir = path.join(tempDir, '.ccso')
+      const ccsoDir = path.join(tempDir, '.freshell')
       await fsp.mkdir(ccsoDir, { recursive: true })
       await fsp.writeFile(path.join(ccsoDir, 'config.json'), 'not valid json {{{')
 
@@ -1112,7 +1112,7 @@ describe('API Edge Cases - Security Testing', () => {
     })
 
     it('recovers from config with wrong version', async () => {
-      const ccsoDir = path.join(tempDir, '.ccso')
+      const ccsoDir = path.join(tempDir, '.freshell')
       await fsp.mkdir(ccsoDir, { recursive: true })
       await fsp.writeFile(
         path.join(ccsoDir, 'config.json'),
@@ -1125,10 +1125,10 @@ describe('API Edge Cases - Security Testing', () => {
       expect(settings).toEqual(defaultSettings)
     })
 
-    it('handles missing .ccso directory', async () => {
+    it('handles missing .freshell directory', async () => {
       // Ensure directory does not exist
       try {
-        await fsp.rm(path.join(tempDir, '.ccso'), { recursive: true })
+        await fsp.rm(path.join(tempDir, '.freshell'), { recursive: true })
       } catch {
         // OK if already doesn't exist
       }
@@ -1143,7 +1143,7 @@ describe('API Edge Cases - Security Testing', () => {
       // Skip on Windows as chmod doesn't work the same way
       if (process.platform === 'win32') {
         // On Windows, test that we can at least read after writing
-        const ccsoDir = path.join(tempDir, '.ccso')
+        const ccsoDir = path.join(tempDir, '.freshell')
         await fsp.mkdir(ccsoDir, { recursive: true })
         const configFilePath = path.join(ccsoDir, 'config.json')
         await fsp.writeFile(configFilePath, JSON.stringify({
@@ -1161,7 +1161,7 @@ describe('API Edge Cases - Security Testing', () => {
       }
 
       // Unix-like systems: test with chmod
-      const ccsoDir = path.join(tempDir, '.ccso')
+      const ccsoDir = path.join(tempDir, '.freshell')
       await fsp.mkdir(ccsoDir, { recursive: true })
       const configFilePath = path.join(ccsoDir, 'config.json')
       await fsp.writeFile(configFilePath, JSON.stringify({

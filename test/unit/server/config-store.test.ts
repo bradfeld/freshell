@@ -37,7 +37,7 @@ describe('ConfigStore', () => {
     // Create a unique temp directory for each test
     tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'config-store-test-'))
     mockState.homeDir = tempDir
-    configDir = path.join(tempDir, '.ccso')
+    configDir = path.join(tempDir, '.freshell')
     configPath = path.join(configDir, 'config.json')
   })
 
@@ -73,7 +73,7 @@ describe('ConfigStore', () => {
       expect(exists).toBe(true)
     })
 
-    it('creates .ccso directory if needed', async () => {
+    it('creates .freshell directory if needed', async () => {
       const store = new ConfigStore()
       await store.load()
 
