@@ -51,9 +51,11 @@ Open http://localhost:5173/?token=YOUR_AUTH_TOKEN
 | Platform | Requirements |
 |----------|-------------|
 | **All** | Node.js 18+ (20+ recommended), npm |
-| **Windows** | WSL with a Linux distribution (Ubuntu recommended) |
+| **Windows** | Build tools for native modules (see below) |
 | **macOS** | Xcode Command Line Tools |
 | **Linux** | build-essential, python3 |
+
+> **Note:** WSL is optional on Windows. The app defaults to `cmd.exe` for terminals. Set `WINDOWS_SHELL=wsl` or `WINDOWS_SHELL=powershell` to change. WSL is only needed if your Claude sessions live inside the Linux filesystem.
 
 ### Platform-Specific Setup
 
@@ -61,14 +63,15 @@ Open http://localhost:5173/?token=YOUR_AUTH_TOKEN
 <summary><strong>Windows</strong></summary>
 
 1. Install [Node.js](https://nodejs.org/) (LTS version)
-2. Install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) with Ubuntu:
-   ```powershell
-   wsl --install -d Ubuntu
-   ```
-3. Install build tools for native modules:
+2. Install build tools for native modules:
    ```powershell
    npm install -g windows-build-tools
    ```
+3. **(Optional)** Install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) if you want Linux terminals or need to access Claude sessions stored in WSL:
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+   Then set `WINDOWS_SHELL=wsl` in your `.env` file.
 
 </details>
 
@@ -124,7 +127,10 @@ AUTH_TOKEN=your-secure-random-token-here
 # Optional: server port (default 3001)
 PORT=3001
 
-# Windows/WSL only: path to Claude home in WSL
+# Windows only: shell type (cmd, powershell, or wsl). Default: cmd
+# WINDOWS_SHELL=cmd
+
+# Windows/WSL: path to Claude home (use WSL path if using WSL)
 CLAUDE_HOME=\\wsl$\Ubuntu\home\your-user\.claude
 WSL_DISTRO=Ubuntu
 
@@ -186,16 +192,18 @@ freshell uses a tmux-style prefix system. Press `Ctrl+B` followed by a command k
 | `PORT` | No | Server port (default: 3001) |
 | `ALLOWED_ORIGINS` | No | Comma-separated allowed CORS origins |
 | `CLAUDE_HOME` | No | Path to Claude config directory |
+| `WINDOWS_SHELL` | No | Windows shell: `cmd` (default), `powershell`, or `wsl` |
 | `WSL_DISTRO` | No | WSL distribution name (Windows only) |
 | `CLAUDE_CMD` | No | Claude CLI command override |
 | `CODEX_CMD` | No | Codex CLI command override |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | No | Gemini API key for AI summaries |
 
-### Windows + WSL
+### Windows + WSL (Optional)
 
-Claude Code sessions typically live inside WSL at `~/.claude`. To access them from Windows:
+If your Claude Code sessions live inside WSL at `~/.claude`, configure access from Windows:
 
 ```bash
+WINDOWS_SHELL=wsl
 CLAUDE_HOME=\\wsl$\Ubuntu\home\your-username\.claude
 WSL_DISTRO=Ubuntu
 ```
