@@ -100,8 +100,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     // Handle copy/paste keyboard shortcuts
     term.attachCustomKeyEventHandler((event) => {
-      // Ctrl+Shift+C to copy
-      if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown') {
+      // Ctrl+Shift+C to copy (ignore key repeat)
+      if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown' && !event.repeat) {
         const selection = term.getSelection()
         if (selection) {
           void navigator.clipboard.writeText(selection).catch(() => {
@@ -110,8 +110,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
         return false // Prevent default
       }
-      // Ctrl+Shift+V to paste
-      if (event.ctrlKey && event.shiftKey && event.key === 'V' && event.type === 'keydown') {
+      // Ctrl+Shift+V to paste (ignore key repeat)
+      if (event.ctrlKey && event.shiftKey && event.key === 'V' && event.type === 'keydown' && !event.repeat) {
         void navigator.clipboard.readText().then((text) => {
           const terminalId = terminalIdRef.current
           if (terminalId && text) {
