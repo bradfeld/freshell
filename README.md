@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
-<h1 align="center">freshell</h1>
+<h1 align="center">🐚freshell</h1>
 
 <p align="center">
   A local web-based terminal manager with Claude Code session indexing
