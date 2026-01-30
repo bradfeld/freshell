@@ -34,6 +34,8 @@ const initialState: SessionActivityState = {
   sessions: loadFromStorage(),
 }
 
+const EMPTY_ACTIVITY: Record<string, number> = {}
+
 export const sessionActivitySlice = createSlice({
   name: 'sessionActivity',
   initialState,
@@ -56,12 +58,12 @@ export const sessionActivitySlice = createSlice({
 export const { updateSessionActivity } = sessionActivitySlice.actions
 
 export const selectSessionActivity = (
-  state: { sessionActivity: SessionActivityState },
+  state: { sessionActivity?: SessionActivityState },
   sessionId: string
-): number | undefined => state.sessionActivity.sessions[sessionId]
+): number | undefined => state.sessionActivity?.sessions?.[sessionId]
 
 export const selectAllSessionActivity = (
-  state: { sessionActivity: SessionActivityState }
-): Record<string, number> => state.sessionActivity.sessions
+  state: { sessionActivity?: SessionActivityState }
+): Record<string, number> => state.sessionActivity?.sessions ?? EMPTY_ACTIVITY
 
 export default sessionActivitySlice.reducer
