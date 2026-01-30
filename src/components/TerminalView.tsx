@@ -157,6 +157,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
   // Track last title we set to avoid churn from spinner animations
   const lastTitleRef = useRef<string | null>(null)
+  const lastTitleUpdateRef = useRef<number>(0)
+  const TITLE_UPDATE_THROTTLE_MS = 2000
 
   // Handle xterm title changes (from terminal escape sequences)
   useEffect(() => {
@@ -176,7 +178,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
       // Only update if the cleaned title actually changed
       if (cleanTitle === lastTitleRef.current) return
+
+      // Throttle updates to avoid churn from rapid title changes (e.g., spinner animations)
+      const now = Date.now()
+      if (now - lastTitleUpdateRef.current < TITLE_UPDATE_THROTTLE_MS) return
+
       lastTitleRef.current = cleanTitle
+      lastTitleUpdateRef.current = now
 
       dispatch(updateTab({ id: currentTab.id, updates: { title: cleanTitle } }))
     })
@@ -258,8 +266,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           terminalIdRef.current = newId
           updateContent({ terminalId: newId, status: 'running' })
           // Also update tab for title purposes
-          if (tab) {
-            dispatch(updateTab({ id: tab.id, updates: { terminalId: newId, status: 'running' } }))
+          const currentTab = tabRef.current
+          if (currentTab) {
+            dispatch(updateTab({ id: currentTab.id, updates: { terminalId: newId, status: 'running' } }))
           }
           if (msg.snapshot) {
             try { term.clear(); term.write(msg.snapshot) } catch {}
@@ -277,21 +286,23 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
           updateContent({ status: 'exited' })
-          if (tab) {
+          const exitTab = tabRef.current
+          if (exitTab) {
             const code = typeof msg.exitCode === 'number' ? msg.exitCode : undefined
             // Only modify title if user hasn't manually set it
             const updates: { status: 'exited'; title?: string } = { status: 'exited' }
-            if (!tab.titleSetByUser) {
-              updates.title = tab.title + (code !== undefined ? ` (exit ${code})` : '')
+            if (!exitTab.titleSetByUser) {
+              updates.title = exitTab.title + (code !== undefined ? ` (exit ${code})` : '')
             }
-            dispatch(updateTab({ id: tab.id, updates }))
+            dispatch(updateTab({ id: exitTab.id, updates }))
           }
         }
 
         // Auto-update title from Claude session (only if user hasn't manually set it)
         if (msg.type === 'terminal.title.updated' && msg.terminalId === tid) {
-          if (tab && !tab.titleSetByUser && msg.title) {
-            dispatch(updateTab({ id: tab.id, updates: { title: msg.title } }))
+          const titleTab = tabRef.current
+          if (titleTab && !titleTab.titleSetByUser && msg.title) {
+            dispatch(updateTab({ id: titleTab.id, updates: { title: msg.title } }))
           }
         }
 
@@ -364,7 +375,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // - On hydration: terminalId from storage, we attach once
   // - On reconnect: createRequestId changes, effect re-runs, terminalId is undefined, we create
   // We read terminalId from terminalIdRef.current to get the current value without triggering re-runs
-  }, [isTerminal, paneId, terminalContent?.createRequestId, updateContent, ws, tab, dispatch])
+  //
+  // NOTE: tab is intentionally NOT in dependencies - we use tabRef to avoid re-attaching
+  // when tab properties (like title) change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTerminal, paneId, terminalContent?.createRequestId, updateContent, ws, dispatch])
 
   // NOW we can do the conditional return - after all hooks
   if (!isTerminal || !terminalContent) {
