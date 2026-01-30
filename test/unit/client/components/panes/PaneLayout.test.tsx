@@ -317,8 +317,8 @@ describe('PaneLayout', () => {
       expect(splitNode.direction).toBe('horizontal')
     })
 
-    it('uses vertical split when container is taller than wide', async () => {
-      // Container is 600x1000 (taller)
+    it('uses horizontal split for 2 panes regardless of container dimensions', async () => {
+      // Container is 600x1000 (taller) - with grid layout, 2 panes are always side by side
       Element.prototype.getBoundingClientRect = vi.fn(() => ({
         width: 600,
         height: 1000,
@@ -352,9 +352,10 @@ describe('PaneLayout', () => {
       fireEvent.click(screen.getByTitle('Add pane'))
       fireEvent.click(screen.getByText('Terminal'))
 
+      // With grid layout, 2 panes are always horizontal (side by side)
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
-      expect(splitNode.direction).toBe('vertical')
+      expect(splitNode.direction).toBe('horizontal')
     })
 
     it('sets new pane as active after adding', async () => {
@@ -454,7 +455,7 @@ describe('PaneLayout', () => {
   })
 
   describe('edge cases', () => {
-    it('does not add pane when no active pane is set', async () => {
+    it('adds pane even when no active pane is set (grid layout does not require active pane)', async () => {
       const paneId = 'pane-1'
       const store = createStore({
         layouts: {
@@ -472,13 +473,13 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB and try to add terminal
+      // Click FAB and add terminal - with grid layout, this works without active pane
       fireEvent.click(screen.getByTitle('Add pane'))
       fireEvent.click(screen.getByText('Terminal'))
 
-      // Layout should remain unchanged (still a leaf)
+      // Layout should now be a split with 2 panes
       const state = store.getState().panes
-      expect(state.layouts['tab-1'].type).toBe('leaf')
+      expect(state.layouts['tab-1'].type).toBe('split')
     })
 
     it('handles rapid add operations', async () => {

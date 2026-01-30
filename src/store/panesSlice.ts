@@ -79,6 +79,82 @@ function findAndReplace(
   return null
 }
 
+// Helper to collect all leaf nodes in order (left-to-right, top-to-bottom)
+function collectLeaves(node: PaneNode): Extract<PaneNode, { type: 'leaf' }>[] {
+  if (node.type === 'leaf') return [node]
+  return [...collectLeaves(node.children[0]), ...collectLeaves(node.children[1])]
+}
+
+// Helper to create a horizontal split from an array of leaves
+function buildHorizontalRow(leaves: Extract<PaneNode, { type: 'leaf' }>[]): PaneNode {
+  if (leaves.length === 1) return leaves[0]
+  if (leaves.length === 2) {
+    return {
+      type: 'split',
+      id: nanoid(),
+      direction: 'horizontal',
+      sizes: [50, 50],
+      children: [leaves[0], leaves[1]],
+    }
+  }
+  // For 3+ panes in a row, nest horizontally: [a, [b, c]] -> [a, [b, [c, d]]] etc.
+  // Or use a more balanced approach: split in half
+  const mid = Math.ceil(leaves.length / 2)
+  const left = leaves.slice(0, mid)
+  const right = leaves.slice(mid)
+  return {
+    type: 'split',
+    id: nanoid(),
+    direction: 'horizontal',
+    sizes: [50, 50],
+    children: [buildHorizontalRow(left), buildHorizontalRow(right)],
+  }
+}
+
+/**
+ * Build a grid layout from leaves.
+ * Pattern:
+ * - 1 pane: single leaf
+ * - 2 panes: [1][2] horizontal
+ * - 3 panes: [1][2] top, [3] bottom (full width)
+ * - 4 panes: [1][2] top, [3][4] bottom
+ * - 5 panes: [1][2][3] top, [4][5] bottom
+ * - 6 panes: [1][2][3] top, [4][5][6] bottom
+ * - etc.
+ */
+function buildGridLayout(leaves: Extract<PaneNode, { type: 'leaf' }>[]): PaneNode {
+  if (leaves.length === 1) return leaves[0]
+  if (leaves.length === 2) {
+    return {
+      type: 'split',
+      id: nanoid(),
+      direction: 'horizontal',
+      sizes: [50, 50],
+      children: [leaves[0], leaves[1]],
+    }
+  }
+
+  // For 3+ panes, use 2 rows with ceiling division for top row
+  // 3 panes: 2 top, 1 bottom
+  // 4 panes: 2 top, 2 bottom
+  // 5 panes: 3 top, 2 bottom
+  // 6 panes: 3 top, 3 bottom
+  const topCount = Math.ceil(leaves.length / 2)
+  const topLeaves = leaves.slice(0, topCount)
+  const bottomLeaves = leaves.slice(topCount)
+
+  const topRow = buildHorizontalRow(topLeaves)
+  const bottomRow = buildHorizontalRow(bottomLeaves)
+
+  return {
+    type: 'split',
+    id: nanoid(),
+    direction: 'vertical',
+    sizes: [50, 50],
+    children: [topRow, bottomRow],
+  }
+}
+
 export const panesSlice = createSlice({
   name: 'panes',
   initialState,
@@ -144,6 +220,43 @@ export const panesSlice = createSlice({
       }
     },
 
+    /**
+     * Add a pane using grid layout pattern.
+     * Restructures the entire layout to maintain the grid:
+     * - 2 panes: [1][2] side by side
+     * - 3 panes: [1][2] top, [3] bottom (full width)
+     * - 4 panes: [1][2] / [3][4] (2x2 grid)
+     * - 5 panes: [1][2][3] top, [4][5] bottom
+     * - etc.
+     */
+    addPane: (
+      state,
+      action: PayloadAction<{
+        tabId: string
+        newContent: PaneContentInput
+      }>
+    ) => {
+      const { tabId, newContent } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      // Collect existing leaves
+      const existingLeaves = collectLeaves(root)
+
+      // Create new leaf
+      const newPaneId = nanoid()
+      const newLeaf: Extract<PaneNode, { type: 'leaf' }> = {
+        type: 'leaf',
+        id: newPaneId,
+        content: normalizeContent(newContent),
+      }
+
+      // Build new grid layout with all leaves
+      const allLeaves = [...existingLeaves, newLeaf]
+      state.layouts[tabId] = buildGridLayout(allLeaves)
+      state.activePane[tabId] = newPaneId
+    },
+
     closePane: (
       state,
       action: PayloadAction<{ tabId: string; paneId: string }>
@@ -155,53 +268,20 @@ export const panesSlice = createSlice({
       // Can't close the only pane
       if (root.type === 'leaf') return
 
-      // Find the parent split containing this pane and its sibling
-      function findParentAndSibling(
-        node: PaneNode,
-        targetId: string
-      ): { parent: PaneNode; sibling: PaneNode; siblingIndex: 0 | 1 } | null {
-        if (node.type === 'leaf') return null
+      // Collect all leaves except the one being closed
+      const allLeaves = collectLeaves(root)
+      const remainingLeaves = allLeaves.filter(leaf => leaf.id !== paneId)
 
-        // Check if either child is the target
-        if (node.children[0].type === 'leaf' && node.children[0].id === targetId) {
-          return { parent: node, sibling: node.children[1], siblingIndex: 1 }
-        }
-        if (node.children[1].type === 'leaf' && node.children[1].id === targetId) {
-          return { parent: node, sibling: node.children[0], siblingIndex: 0 }
-        }
+      // If no leaves remain (shouldn't happen), bail out
+      if (remainingLeaves.length === 0) return
 
-        // Recurse into children
-        return (
-          findParentAndSibling(node.children[0], targetId) ||
-          findParentAndSibling(node.children[1], targetId)
-        )
-      }
-
-      const result = findParentAndSibling(root, paneId)
-      if (!result) return
-
-      const { parent, sibling } = result
-
-      // Replace the parent split with the sibling
-      if (parent === root) {
-        // Parent is root - sibling becomes new root
-        state.layouts[tabId] = sibling
-      } else {
-        // Replace parent with sibling in the tree
-        const newRoot = findAndReplace(root, parent.id, sibling)
-        if (newRoot) {
-          state.layouts[tabId] = newRoot
-        }
-      }
+      // Rebuild layout with remaining leaves using grid pattern
+      state.layouts[tabId] = buildGridLayout(remainingLeaves)
 
       // Update active pane if needed
       if (state.activePane[tabId] === paneId) {
-        // Find first leaf in sibling
-        function findFirstLeaf(node: PaneNode): string {
-          if (node.type === 'leaf') return node.id
-          return findFirstLeaf(node.children[0])
-        }
-        state.activePane[tabId] = findFirstLeaf(sibling)
+        // Set active to the last remaining leaf (similar to where the new pane would be)
+        state.activePane[tabId] = remainingLeaves[remainingLeaves.length - 1].id
       }
     },
 
@@ -278,6 +358,7 @@ export const panesSlice = createSlice({
 export const {
   initLayout,
   splitPane,
+  addPane,
   closePane,
   setActivePane,
   resizePanes,

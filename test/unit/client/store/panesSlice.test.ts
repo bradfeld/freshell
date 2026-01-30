@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import panesReducer, {
   initLayout,
   splitPane,
+  addPane,
   closePane,
   setActivePane,
   resizePanes,
@@ -1052,6 +1053,276 @@ describe('panesSlice', () => {
       }
       expect(terminal.kind).toBe('terminal')
       expect(browser.kind).toBe('browser')
+    })
+  })
+
+  describe('addPane (grid layout)', () => {
+    // Helper to count leaves in a pane tree
+    function countLeaves(node: PaneNode): number {
+      if (node.type === 'leaf') return 1
+      return countLeaves(node.children[0]) + countLeaves(node.children[1])
+    }
+
+    // Helper to collect all leaf contents in order (left-to-right, top-to-bottom)
+    function collectLeaves(node: PaneNode): PaneContent[] {
+      if (node.type === 'leaf') return [node.content]
+      return [...collectLeaves(node.children[0]), ...collectLeaves(node.children[1])]
+    }
+
+    it('does nothing if layout does not exist', () => {
+      const state = panesReducer(
+        initialState,
+        addPane({ tabId: 'non-existent', newContent: { kind: 'terminal', mode: 'shell' } })
+      )
+      expect(state.layouts['non-existent']).toBeUndefined()
+    })
+
+    it('adds 2nd pane: creates horizontal split [1][2]', () => {
+      // Start with 1 pane
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      // Add 2nd pane
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'claude' } })
+      )
+
+      const root = state.layouts['tab-1']
+      expect(root.type).toBe('split')
+      expect(countLeaves(root)).toBe(2)
+
+      const split = root as Extract<PaneNode, { type: 'split' }>
+      expect(split.direction).toBe('horizontal')
+      expect(split.children[0].type).toBe('leaf')
+      expect(split.children[1].type).toBe('leaf')
+
+      const leaves = collectLeaves(root)
+      expect(leaves[0].kind).toBe('terminal')
+      expect((leaves[0] as any).mode).toBe('shell')
+      expect(leaves[1].kind).toBe('terminal')
+      expect((leaves[1] as any).mode).toBe('claude')
+    })
+
+    it('adds 3rd pane: [1][2] on top, [3] full width bottom', () => {
+      // Start with 1 pane
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      // Add 2nd pane
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'claude' } })
+      )
+
+      // Add 3rd pane
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'codex' } })
+      )
+
+      const root = state.layouts['tab-1']
+      expect(countLeaves(root)).toBe(3)
+
+      // Structure: vertical split with top row (horizontal split) and bottom (single pane)
+      expect(root.type).toBe('split')
+      const outerSplit = root as Extract<PaneNode, { type: 'split' }>
+      expect(outerSplit.direction).toBe('vertical')
+
+      // Top row: horizontal split of [1][2]
+      expect(outerSplit.children[0].type).toBe('split')
+      const topRow = outerSplit.children[0] as Extract<PaneNode, { type: 'split' }>
+      expect(topRow.direction).toBe('horizontal')
+      expect(topRow.children[0].type).toBe('leaf')
+      expect(topRow.children[1].type).toBe('leaf')
+
+      // Bottom row: single pane [3]
+      expect(outerSplit.children[1].type).toBe('leaf')
+
+      const leaves = collectLeaves(root)
+      expect((leaves[0] as any).mode).toBe('shell')
+      expect((leaves[1] as any).mode).toBe('claude')
+      expect((leaves[2] as any).mode).toBe('codex')
+    })
+
+    it('adds 4th pane: 2x2 grid [1][2] / [3][4]', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      // Add panes 2, 3, 4
+      state = panesReducer(state, addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'claude' } }))
+      state = panesReducer(state, addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'codex' } }))
+      state = panesReducer(state, addPane({ tabId: 'tab-1', newContent: { kind: 'browser', url: 'https://example.com', devToolsOpen: false } }))
+
+      const root = state.layouts['tab-1']
+      expect(countLeaves(root)).toBe(4)
+
+      // Structure: vertical split with two horizontal splits
+      expect(root.type).toBe('split')
+      const outerSplit = root as Extract<PaneNode, { type: 'split' }>
+      expect(outerSplit.direction).toBe('vertical')
+
+      // Top row: [1][2]
+      expect(outerSplit.children[0].type).toBe('split')
+      const topRow = outerSplit.children[0] as Extract<PaneNode, { type: 'split' }>
+      expect(topRow.direction).toBe('horizontal')
+
+      // Bottom row: [3][4]
+      expect(outerSplit.children[1].type).toBe('split')
+      const bottomRow = outerSplit.children[1] as Extract<PaneNode, { type: 'split' }>
+      expect(bottomRow.direction).toBe('horizontal')
+
+      const leaves = collectLeaves(root)
+      expect((leaves[0] as any).mode).toBe('shell')
+      expect((leaves[1] as any).mode).toBe('claude')
+      expect((leaves[2] as any).mode).toBe('codex')
+      expect(leaves[3].kind).toBe('browser')
+    })
+
+    it('adds 5th pane: [1][2][3] on top, [4][5] on bottom', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      // Add panes 2-5
+      for (let i = 2; i <= 5; i++) {
+        state = panesReducer(state, addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'shell' } }))
+      }
+
+      const root = state.layouts['tab-1']
+      expect(countLeaves(root)).toBe(5)
+
+      // Top row should have 3 panes, bottom row should have 2
+      const outerSplit = root as Extract<PaneNode, { type: 'split' }>
+      expect(outerSplit.direction).toBe('vertical')
+
+      // Top row: 3 panes
+      expect(countLeaves(outerSplit.children[0])).toBe(3)
+      // Bottom row: 2 panes
+      expect(countLeaves(outerSplit.children[1])).toBe(2)
+    })
+
+    it('adds 6th pane: 3x2 grid [1][2][3] / [4][5][6]', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      // Add panes 2-6
+      for (let i = 2; i <= 6; i++) {
+        state = panesReducer(state, addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'shell' } }))
+      }
+
+      const root = state.layouts['tab-1']
+      expect(countLeaves(root)).toBe(6)
+
+      const outerSplit = root as Extract<PaneNode, { type: 'split' }>
+      expect(outerSplit.direction).toBe('vertical')
+
+      // Both rows should have 3 panes
+      expect(countLeaves(outerSplit.children[0])).toBe(3)
+      expect(countLeaves(outerSplit.children[1])).toBe(3)
+    })
+
+    it('sets the new pane as active', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'claude' } })
+      )
+
+      // Find the new pane (should be the second leaf)
+      const root = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const newPane = root.children[1] as Extract<PaneNode, { type: 'leaf' }>
+      expect(state.activePane['tab-1']).toBe(newPane.id)
+    })
+
+    it('preserves existing pane IDs when restructuring', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+      const pane1Id = (state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).id
+
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'claude' } })
+      )
+
+      // First pane should keep its ID
+      const root = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const firstPane = root.children[0] as Extract<PaneNode, { type: 'leaf' }>
+      expect(firstPane.id).toBe(pane1Id)
+    })
+
+    it('preserves pane contents when restructuring for 3rd pane', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell', createRequestId: 'req-1', status: 'running' } })
+      )
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'claude', createRequestId: 'req-2', status: 'running' } })
+      )
+
+      // Capture pane IDs
+      const split2 = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const pane1Id = (split2.children[0] as Extract<PaneNode, { type: 'leaf' }>).id
+      const pane2Id = (split2.children[1] as Extract<PaneNode, { type: 'leaf' }>).id
+
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'codex', createRequestId: 'req-3', status: 'running' } })
+      )
+
+      // After restructure, original panes should have same IDs and content
+      const leaves = collectLeaves(state.layouts['tab-1'])
+      expect(leaves[0].kind).toBe('terminal')
+      expect((leaves[0] as any).createRequestId).toBe('req-1')
+      expect(leaves[1].kind).toBe('terminal')
+      expect((leaves[1] as any).createRequestId).toBe('req-2')
+      expect(leaves[2].kind).toBe('terminal')
+      expect((leaves[2] as any).createRequestId).toBe('req-3')
+
+      // Check IDs are preserved
+      function findLeafById(node: PaneNode, id: string): PaneNode | null {
+        if (node.type === 'leaf') return node.id === id ? node : null
+        return findLeafById(node.children[0], id) || findLeafById(node.children[1], id)
+      }
+
+      expect(findLeafById(state.layouts['tab-1'], pane1Id)).not.toBeNull()
+      expect(findLeafById(state.layouts['tab-1'], pane2Id)).not.toBeNull()
+    })
+
+    it('generates createRequestId for new terminal panes', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      state = panesReducer(
+        state,
+        addPane({ tabId: 'tab-1', newContent: { kind: 'terminal', mode: 'claude' } })
+      )
+
+      const root = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const newPane = root.children[1] as Extract<PaneNode, { type: 'leaf' }>
+      expect(newPane.content.kind).toBe('terminal')
+      if (newPane.content.kind === 'terminal') {
+        expect(newPane.content.createRequestId).toBeDefined()
+        expect(newPane.content.status).toBe('creating')
+      }
     })
   })
 })

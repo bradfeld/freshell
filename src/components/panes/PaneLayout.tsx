@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { initLayout, splitPane } from '@/store/panesSlice'
+import { initLayout, addPane } from '@/store/panesSlice'
 import type { PaneContentInput } from '@/store/paneTypes'
 import PaneContainer from './PaneContainer'
 import FloatingActionButton from './FloatingActionButton'
@@ -14,7 +14,6 @@ interface PaneLayoutProps {
 export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayoutProps) {
   const dispatch = useAppDispatch()
   const layout = useAppSelector((s) => s.panes.layouts[tabId])
-  const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Debug: check what's in the store
@@ -31,32 +30,19 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, tabId, layout])
 
-  // Determine split direction based on container dimensions
-  const getSplitDirection = useCallback((): 'horizontal' | 'vertical' => {
-    if (!containerRef.current) return 'horizontal'
-    const { width, height } = containerRef.current.getBoundingClientRect()
-    return width >= height ? 'horizontal' : 'vertical'
-  }, [])
-
   const handleAddTerminal = useCallback(() => {
-    if (!activePane) return
-    dispatch(splitPane({
+    dispatch(addPane({
       tabId,
-      paneId: activePane,
-      direction: getSplitDirection(),
       newContent: { kind: 'terminal', mode: 'shell' },
     }))
-  }, [dispatch, tabId, activePane, getSplitDirection])
+  }, [dispatch, tabId])
 
   const handleAddBrowser = useCallback(() => {
-    if (!activePane) return
-    dispatch(splitPane({
+    dispatch(addPane({
       tabId,
-      paneId: activePane,
-      direction: getSplitDirection(),
       newContent: { kind: 'browser', url: '', devToolsOpen: false },
     }))
-  }, [dispatch, tabId, activePane, getSplitDirection])
+  }, [dispatch, tabId])
 
   if (!layout) {
     return <div className="h-full w-full" /> // Loading state
