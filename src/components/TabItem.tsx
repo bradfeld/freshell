@@ -1,5 +1,6 @@
 import { X, Circle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Tab } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
 
@@ -72,15 +73,21 @@ export default function TabItem({
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        <span
-          className={cn(
-            'whitespace-nowrap truncate text-sm',
-            isActive ? 'max-w-[10rem]' : 'max-w-[5rem]'
-          )}
-          title={tab.title}
-        >
-          {tab.title}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className={cn(
+                'relative whitespace-nowrap truncate text-sm',
+                isActive ? 'max-w-[10rem]' : 'max-w-[5rem]'
+              )}
+            >
+              {tab.title}
+              <TooltipContent className="whitespace-nowrap">
+                {tab.title}
+              </TooltipContent>
+            </span>
+          </TooltipTrigger>
+        </Tooltip>
       )}
 
       <button

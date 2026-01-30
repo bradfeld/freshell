@@ -626,8 +626,8 @@ describe('TabBar', () => {
       renderWithStore(<TabBar />, store)
 
       // Both tabs should be rendered (sortable context doesn't change this)
-      expect(screen.getByTitle('Tab 1')).toBeInTheDocument()
-      expect(screen.getByTitle('Tab 2')).toBeInTheDocument()
+      expect(screen.getByText('Tab 1')).toBeInTheDocument()
+      expect(screen.getByText('Tab 2')).toBeInTheDocument()
     })
 
     it('Ctrl+Shift+ArrowRight moves active tab right', () => {
