@@ -11,7 +11,7 @@ import panesReducer, {
   hydratePanes,
   PanesState,
 } from '../../../../src/store/panesSlice'
-import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent } from '../../../../src/store/paneTypes'
+import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent, EditorPaneContent } from '../../../../src/store/paneTypes'
 
 // Mock nanoid to return predictable IDs for testing
 let mockIdCounter = 0
@@ -1053,6 +1053,45 @@ describe('panesSlice', () => {
       }
       expect(terminal.kind).toBe('terminal')
       expect(browser.kind).toBe('browser')
+    })
+  })
+
+  describe('EditorPaneContent type', () => {
+    it('can be created with required fields', () => {
+      const content: EditorPaneContent = {
+        kind: 'editor',
+        filePath: '/path/to/file.ts',
+        language: 'typescript',
+        readOnly: false,
+        content: 'const x = 1',
+        viewMode: 'source',
+      }
+      expect(content.kind).toBe('editor')
+      expect(content.filePath).toBe('/path/to/file.ts')
+    })
+
+    it('supports scratch pad mode with null filePath', () => {
+      const content: EditorPaneContent = {
+        kind: 'editor',
+        filePath: null,
+        language: null,
+        readOnly: false,
+        content: '',
+        viewMode: 'source',
+      }
+      expect(content.filePath).toBeNull()
+    })
+
+    it('is part of PaneContent union', () => {
+      const editor: PaneContent = {
+        kind: 'editor',
+        filePath: '/test.md',
+        language: 'markdown',
+        readOnly: false,
+        content: '# Hello',
+        viewMode: 'preview',
+      }
+      expect(editor.kind).toBe('editor')
     })
   })
 
