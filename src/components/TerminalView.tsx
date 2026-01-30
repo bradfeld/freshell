@@ -155,17 +155,30 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     tabRef.current = tab
   }, [tab])
 
+  // Track last title we set to avoid churn from spinner animations
+  const lastTitleRef = useRef<string | null>(null)
+
   // Handle xterm title changes (from terminal escape sequences)
   useEffect(() => {
     if (!isTerminal) return
     const term = termRef.current
     if (!term) return
 
-    const disposable = term.onTitleChange((newTitle: string) => {
+    const disposable = term.onTitleChange((rawTitle: string) => {
       const currentTab = tabRef.current
-      if (currentTab && !currentTab.titleSetByUser && newTitle) {
-        dispatch(updateTab({ id: currentTab.id, updates: { title: newTitle } }))
-      }
+      if (!currentTab || currentTab.titleSetByUser) return
+
+      // Strip prefix noise (spinners, status chars) - everything before first letter
+      const match = rawTitle.match(/[a-zA-Z]/)
+      if (!match) return // No letters = all noise, ignore
+      const cleanTitle = rawTitle.slice(match.index)
+      if (!cleanTitle) return
+
+      // Only update if the cleaned title actually changed
+      if (cleanTitle === lastTitleRef.current) return
+      lastTitleRef.current = cleanTitle
+
+      dispatch(updateTab({ id: currentTab.id, updates: { title: cleanTitle } }))
     })
 
     return () => disposable.dispose()
