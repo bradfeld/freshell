@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Plus, Terminal, Globe, FileText } from 'lucide-react'
+import { Plus, Terminal, Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface FloatingActionButtonProps {
   onAddTerminal: () => void
   onAddBrowser: () => void
-  onAddEditor: () => void
 }
 
 interface MenuItem {
@@ -17,7 +16,7 @@ interface MenuItem {
 
 const MENU_ID = 'fab-menu'
 
-export default function FloatingActionButton({ onAddTerminal, onAddBrowser, onAddEditor }: FloatingActionButtonProps) {
+export default function FloatingActionButton({ onAddTerminal, onAddBrowser }: FloatingActionButtonProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [focusedIndex, setFocusedIndex] = useState(0)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -27,8 +26,7 @@ export default function FloatingActionButton({ onAddTerminal, onAddBrowser, onAd
   const menuItems: MenuItem[] = useMemo(() => [
     { id: 'terminal', label: 'Terminal', icon: Terminal, action: onAddTerminal },
     { id: 'browser', label: 'Browser', icon: Globe, action: onAddBrowser },
-    { id: 'editor', label: 'Editor', icon: FileText, action: onAddEditor },
-  ], [onAddTerminal, onAddBrowser, onAddEditor])
+  ], [onAddTerminal, onAddBrowser])
 
   // Close menu on outside click
   useEffect(() => {

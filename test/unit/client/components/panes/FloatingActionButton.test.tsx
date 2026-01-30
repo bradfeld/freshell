@@ -13,20 +13,15 @@ vi.mock('lucide-react', () => ({
   Globe: ({ className }: { className?: string }) => (
     <svg data-testid="globe-icon" className={className} />
   ),
-  FileText: ({ className }: { className?: string }) => (
-    <svg data-testid="file-text-icon" className={className} />
-  ),
 }))
 
 describe('FloatingActionButton', () => {
   let onAddTerminal: ReturnType<typeof vi.fn>
   let onAddBrowser: ReturnType<typeof vi.fn>
-  let onAddEditor: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     onAddTerminal = vi.fn()
     onAddBrowser = vi.fn()
-    onAddEditor = vi.fn()
   })
 
   afterEach(() => {
@@ -39,7 +34,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -52,7 +46,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -67,7 +60,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -83,7 +75,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -103,7 +94,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -126,7 +116,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -147,7 +136,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -162,43 +150,6 @@ describe('FloatingActionButton', () => {
       expect(onAddBrowser).toHaveBeenCalledTimes(1)
       expect(screen.queryByText('Browser')).not.toBeInTheDocument()
     })
-
-    it('shows Editor menu item', () => {
-      render(
-        <FloatingActionButton
-          onAddTerminal={onAddTerminal}
-          onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
-        />
-      )
-
-      // Open menu
-      const fabButton = screen.getByTitle('Add pane')
-      fireEvent.click(fabButton)
-
-      expect(screen.getByRole('menuitem', { name: /editor/i })).toBeInTheDocument()
-    })
-
-    it('calls onAddEditor when Editor is clicked', () => {
-      render(
-        <FloatingActionButton
-          onAddTerminal={onAddTerminal}
-          onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
-        />
-      )
-
-      // Open menu
-      const fabButton = screen.getByTitle('Add pane')
-      fireEvent.click(fabButton)
-
-      // Click Editor option
-      const editorOption = screen.getByRole('menuitem', { name: /editor/i })
-      fireEvent.click(editorOption)
-
-      expect(onAddEditor).toHaveBeenCalledTimes(1)
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
-    })
   })
 
   describe('click outside behavior', () => {
@@ -209,7 +160,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         </div>
       )
@@ -232,7 +182,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -256,7 +205,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -280,7 +228,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -302,7 +249,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -325,7 +271,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -346,7 +291,6 @@ describe('FloatingActionButton', () => {
         <FloatingActionButton
           onAddTerminal={onAddTerminal}
           onAddBrowser={onAddBrowser}
-          onAddEditor={onAddEditor}
         />
       )
 
@@ -370,7 +314,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -383,7 +326,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -396,7 +338,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -410,7 +351,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -426,7 +366,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -434,7 +373,7 @@ describe('FloatingActionButton', () => {
         fireEvent.click(button)
 
         const menuItems = screen.getAllByRole('menuitem')
-        expect(menuItems).toHaveLength(3)
+        expect(menuItems).toHaveLength(2)
       })
 
       it('links FAB button to menu via aria-controls', () => {
@@ -442,7 +381,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -458,7 +396,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -473,7 +410,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -489,7 +425,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -505,7 +440,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -524,7 +458,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -540,7 +473,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -558,7 +490,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -579,7 +510,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -602,7 +532,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -626,7 +555,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -638,14 +566,10 @@ describe('FloatingActionButton', () => {
         })
 
         const menuItems = screen.getAllByRole('menuitem')
-        const lastIndex = menuItems.length - 1
-        // Move to last item
-        for (let i = 0; i < lastIndex; i++) {
-          fireEvent.keyDown(menuItems[i], { key: 'ArrowDown' })
-        }
-        expect(menuItems[lastIndex]).toHaveFocus()
+        fireEvent.keyDown(menuItems[0], { key: 'ArrowDown' }) // Move to second (last) item
+        expect(menuItems[1]).toHaveFocus()
 
-        fireEvent.keyDown(menuItems[lastIndex], { key: 'ArrowDown' }) // Should wrap to first
+        fireEvent.keyDown(menuItems[1], { key: 'ArrowDown' }) // Should wrap to first
         expect(menuItems[0]).toHaveFocus()
       })
 
@@ -654,7 +578,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -669,7 +592,7 @@ describe('FloatingActionButton', () => {
         expect(menuItems[0]).toHaveFocus()
 
         fireEvent.keyDown(menuItems[0], { key: 'ArrowUp' }) // Should wrap to last
-        expect(menuItems[menuItems.length - 1]).toHaveFocus()
+        expect(menuItems[1]).toHaveFocus()
       })
 
       it('selects menu item on Enter key', async () => {
@@ -677,7 +600,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -700,7 +622,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -724,7 +645,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -747,7 +667,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -769,7 +688,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -791,7 +709,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -814,7 +731,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -838,7 +754,6 @@ describe('FloatingActionButton', () => {
           <FloatingActionButton
             onAddTerminal={onAddTerminal}
             onAddBrowser={onAddBrowser}
-            onAddEditor={onAddEditor}
           />
         )
 
@@ -853,7 +768,7 @@ describe('FloatingActionButton', () => {
         expect(menuItems[0]).toHaveFocus()
 
         fireEvent.keyDown(menuItems[0], { key: 'End' })
-        expect(menuItems[menuItems.length - 1]).toHaveFocus()
+        expect(menuItems[1]).toHaveFocus()
       })
     })
   })

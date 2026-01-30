@@ -11,7 +11,7 @@ import panesReducer, {
   hydratePanes,
   PanesState,
 } from '../../../../src/store/panesSlice'
-import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent, EditorPaneContent } from '../../../../src/store/paneTypes'
+import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent } from '../../../../src/store/paneTypes'
 
 // Mock nanoid to return predictable IDs for testing
 let mockIdCounter = 0
@@ -1056,45 +1056,6 @@ describe('panesSlice', () => {
     })
   })
 
-  describe('EditorPaneContent type', () => {
-    it('can be created with required fields', () => {
-      const content: EditorPaneContent = {
-        kind: 'editor',
-        filePath: '/path/to/file.ts',
-        language: 'typescript',
-        readOnly: false,
-        content: 'const x = 1',
-        viewMode: 'source',
-      }
-      expect(content.kind).toBe('editor')
-      expect(content.filePath).toBe('/path/to/file.ts')
-    })
-
-    it('supports scratch pad mode with null filePath', () => {
-      const content: EditorPaneContent = {
-        kind: 'editor',
-        filePath: null,
-        language: null,
-        readOnly: false,
-        content: '',
-        viewMode: 'source',
-      }
-      expect(content.filePath).toBeNull()
-    })
-
-    it('is part of PaneContent union', () => {
-      const editor: PaneContent = {
-        kind: 'editor',
-        filePath: '/test.md',
-        language: 'markdown',
-        readOnly: false,
-        content: '# Hello',
-        viewMode: 'preview',
-      }
-      expect(editor.kind).toBe('editor')
-    })
-  })
-
   describe('addPane (grid layout)', () => {
     // Helper to count leaves in a pane tree
     function countLeaves(node: PaneNode): number {
@@ -1362,53 +1323,6 @@ describe('panesSlice', () => {
         expect(newPane.content.createRequestId).toBeDefined()
         expect(newPane.content.status).toBe('creating')
       }
-    })
-  })
-
-  describe('editor content normalization', () => {
-    it('passes editor content through unchanged', () => {
-      const editorContent: EditorPaneContent = {
-        kind: 'editor',
-        filePath: '/test.ts',
-        language: 'typescript',
-        readOnly: false,
-        content: 'code',
-        viewMode: 'source',
-      }
-
-      const state = panesReducer(
-        initialState,
-        initLayout({ tabId: 'tab-1', content: editorContent })
-      )
-
-      const leaf = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
-      expect(leaf.content).toEqual(editorContent)
-    })
-
-    it('creates editor pane via addPane', () => {
-      let state = panesReducer(
-        initialState,
-        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
-      )
-
-      state = panesReducer(
-        state,
-        addPane({
-          tabId: 'tab-1',
-          newContent: {
-            kind: 'editor',
-            filePath: null,
-            language: null,
-            readOnly: false,
-            content: '',
-            viewMode: 'source',
-          },
-        })
-      )
-
-      const root = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
-      const editorPane = root.children[1] as Extract<PaneNode, { type: 'leaf' }>
-      expect(editorPane.content.kind).toBe('editor')
     })
   })
 })

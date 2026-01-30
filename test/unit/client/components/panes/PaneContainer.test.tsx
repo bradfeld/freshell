@@ -5,7 +5,7 @@ import { Provider } from 'react-redux'
 import PaneContainer from '@/components/panes/PaneContainer'
 import panesReducer from '@/store/panesSlice'
 import type { PanesState } from '@/store/panesSlice'
-import type { PaneNode, PaneContent, EditorPaneContent } from '@/store/paneTypes'
+import type { PaneNode, PaneContent } from '@/store/paneTypes'
 
 // Hoist mock functions so vi.mock can reference them
 const { mockSend, mockTerminalView } = vi.hoisted(() => ({
@@ -42,18 +42,6 @@ vi.mock('lucide-react', () => ({
   PanelLeftOpen: ({ className }: { className?: string }) => (
     <svg data-testid="panel-left-open-icon" className={className} />
   ),
-  FolderOpen: ({ className }: { className?: string }) => (
-    <svg data-testid="folder-open-icon" className={className} />
-  ),
-  Eye: ({ className }: { className?: string }) => (
-    <svg data-testid="eye-icon" className={className} />
-  ),
-  Code: ({ className }: { className?: string }) => (
-    <svg data-testid="code-icon" className={className} />
-  ),
-  FileText: ({ className }: { className?: string }) => (
-    <svg data-testid="file-text-icon" className={className} />
-  ),
 }))
 
 // Mock TerminalView component to avoid xterm.js dependencies
@@ -65,17 +53,6 @@ vi.mock('@/components/TerminalView', () => ({
 vi.mock('@/components/panes/BrowserPane', () => ({
   default: ({ paneId, url }: { paneId: string; url: string }) => (
     <div data-testid={`browser-${paneId}`}>Browser: {url}</div>
-  ),
-}))
-
-// Mock Monaco editor
-vi.mock('@monaco-editor/react', () => ({
-  default: ({ value, onChange }: any) => (
-    <textarea
-      data-testid="monaco-mock"
-      value={value}
-      onChange={(e) => onChange?.(e.target.value)}
-    />
   ),
 }))
 
@@ -662,45 +639,6 @@ describe('PaneContainer', () => {
       expect(calls.length).toBe(2)
       expect(calls[0][0]).toMatchObject({ hidden: true })
       expect(calls[1][0]).toMatchObject({ hidden: true })
-    })
-  })
-
-  describe('rendering editor pane', () => {
-    it('renders EditorPane for editor content', () => {
-      const editorContent: EditorPaneContent = {
-        kind: 'editor',
-        filePath: '/test.ts',
-        language: 'typescript',
-        readOnly: false,
-        content: 'code',
-        viewMode: 'source',
-      }
-
-      const node: PaneNode = {
-        type: 'leaf',
-        id: 'pane-1',
-        content: editorContent,
-      }
-
-      const state: PanesState = {
-        layouts: { 'tab-1': node },
-        activePane: { 'tab-1': 'pane-1' },
-      }
-
-      const store = configureStore({
-        reducer: {
-          panes: () => state,
-        },
-      })
-
-      render(
-        <Provider store={store}>
-          <PaneContainer tabId="tab-1" node={node} />
-        </Provider>
-      )
-
-      // Should render the mocked Monaco editor
-      expect(screen.getByTestId('monaco-mock')).toBeInTheDocument()
     })
   })
 })
