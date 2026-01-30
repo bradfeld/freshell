@@ -73,6 +73,7 @@ function createStore(initialPanesState: Partial<PanesState> = {}) {
       panes: {
         layouts: {},
         activePane: {},
+        paneTitles: {},
         ...initialPanesState,
       },
     },
