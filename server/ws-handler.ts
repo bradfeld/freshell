@@ -187,8 +187,18 @@ export class WsHandler {
     const origin = req.headers.origin as string | undefined
     const remoteAddr = (req.socket.remoteAddress as string | undefined) || undefined
 
-    // In dev/prod, browsers will set Origin. If missing, only allow loopback clients.
-    if (origin) {
+    // Trust loopback connections (e.g., Vite dev proxy) regardless of Origin header.
+    // In dev mode, Vite proxies WebSocket requests from remote clients but the connection
+    // arrives from localhost. The original client's Origin header is preserved but may not
+    // match the Host header due to changeOrigin, so we skip origin validation for loopback.
+    const isLoopback = isLoopbackAddress(remoteAddr)
+
+    if (!isLoopback) {
+      // Remote connections must have a valid Origin
+      if (!origin) {
+        ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Origin required')
+        return
+      }
       const host = req.headers.host as string | undefined
       const hostOrigins = host ? [`http://${host}`, `https://${host}`] : []
       const allowed = isOriginAllowed(origin) || hostOrigins.includes(origin)
@@ -196,9 +206,6 @@ export class WsHandler {
         ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Origin not allowed')
         return
       }
-    } else if (!isLoopbackAddress(remoteAddr)) {
-      ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Origin required')
-      return
     }
 
     const state: ClientState = {

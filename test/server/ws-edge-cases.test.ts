@@ -1130,6 +1130,54 @@ describe('WebSocket edge cases', () => {
     })
   })
 
+  describe('Origin validation for loopback connections', () => {
+    it('allows loopback connections regardless of Origin header', async () => {
+      // This test verifies the fix for remote LAN access via Vite dev proxy.
+      // When Vite proxies WebSocket connections, the connection arrives from localhost (127.0.0.1)
+      // but may have a mismatched Origin header (e.g., "http://192.168.x.x:5173").
+      // Loopback connections should be trusted regardless of Origin.
+
+      // Our test infrastructure connects from 127.0.0.1, so any connection we make
+      // tests the loopback bypass. The key is that it succeeds despite not being
+      // in ALLOWED_ORIGINS (which only has localhost:5173 and localhost:3001 by default).
+      const { ws, close } = await createAuthenticatedConnection()
+
+      // If we got here, the loopback connection was accepted
+      expect(ws.readyState).toBe(WebSocket.OPEN)
+
+      // Verify we can actually use it
+      const terminalId = await createTerminal(ws, 'loopback-test')
+      expect(terminalId).toMatch(/^term_/)
+
+      close()
+    })
+
+    it('allows connections without Origin header from loopback', async () => {
+      // Loopback connections without Origin should also be accepted.
+      // This can happen with some WebSocket client libraries.
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Connection timeout')), 5000)
+        ws.on('open', () => {
+          clearTimeout(timeout)
+          resolve()
+        })
+        ws.on('error', (err) => {
+          clearTimeout(timeout)
+          reject(err)
+        })
+      })
+
+      // Should be able to authenticate
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+
+      const ready = await waitForMessage(ws, (m) => m.type === 'ready')
+      expect(ready.type).toBe('ready')
+
+      ws.close()
+    })
+  })
+
   describe('Error recovery', () => {
     it('recovers from invalid messages without disconnecting', async () => {
       const { ws, close } = await createAuthenticatedConnection()
