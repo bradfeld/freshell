@@ -155,4 +155,98 @@ describe('Files API Integration', () => {
       expect(res.status).toBe(400)
     })
   })
+
+  describe('GET /api/files/complete', () => {
+    beforeEach(async () => {
+      // Create test file structure
+      await fsp.mkdir(path.join(tempDir, 'src'), { recursive: true })
+      await fsp.mkdir(path.join(tempDir, 'docs'), { recursive: true })
+      await fsp.writeFile(path.join(tempDir, 'src', 'index.ts'), '')
+      await fsp.writeFile(path.join(tempDir, 'src', 'utils.ts'), '')
+      await fsp.writeFile(path.join(tempDir, 'docs', 'README.md'), '')
+      await fsp.writeFile(path.join(tempDir, 'package.json'), '')
+    })
+
+    it('returns suggestions for prefix', async () => {
+      const res = await request(app)
+        .get('/api/files/complete')
+        .query({ prefix: path.join(tempDir, 'src', '') })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(200)
+      expect(res.body.suggestions).toBeInstanceOf(Array)
+      expect(res.body.suggestions.length).toBeGreaterThan(0)
+
+      const paths = res.body.suggestions.map((s: any) => s.path)
+      expect(paths).toContain(path.join(tempDir, 'src', 'index.ts'))
+      expect(paths).toContain(path.join(tempDir, 'src', 'utils.ts'))
+    })
+
+    it('includes isDirectory flag', async () => {
+      const res = await request(app)
+        .get('/api/files/complete')
+        .query({ prefix: path.join(tempDir, '') })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(200)
+
+      const srcDir = res.body.suggestions.find((s: any) => s.path.endsWith('src'))
+      expect(srcDir).toBeDefined()
+      expect(srcDir.isDirectory).toBe(true)
+
+      const pkgJson = res.body.suggestions.find((s: any) => s.path.endsWith('package.json'))
+      expect(pkgJson).toBeDefined()
+      expect(pkgJson.isDirectory).toBe(false)
+    })
+
+    it('returns directories first', async () => {
+      const res = await request(app)
+        .get('/api/files/complete')
+        .query({ prefix: path.join(tempDir, '') })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(200)
+
+      const suggestions = res.body.suggestions
+      const firstFile = suggestions.findIndex((s: any) => !s.isDirectory)
+      const lastDir = suggestions.findLastIndex((s: any) => s.isDirectory)
+
+      if (firstFile !== -1 && lastDir !== -1) {
+        expect(lastDir).toBeLessThan(firstFile)
+      }
+    })
+
+    it('limits to 20 results', async () => {
+      // Create 25 files
+      for (let i = 0; i < 25; i++) {
+        await fsp.writeFile(path.join(tempDir, `file${i}.txt`), '')
+      }
+
+      const res = await request(app)
+        .get('/api/files/complete')
+        .query({ prefix: path.join(tempDir, 'file') })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(200)
+      expect(res.body.suggestions.length).toBeLessThanOrEqual(20)
+    })
+
+    it('returns 400 if prefix is missing', async () => {
+      const res = await request(app)
+        .get('/api/files/complete')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(400)
+    })
+
+    it('returns empty array for non-matching prefix', async () => {
+      const res = await request(app)
+        .get('/api/files/complete')
+        .query({ prefix: path.join(tempDir, 'nonexistent') })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(200)
+      expect(res.body.suggestions).toEqual([])
+    })
+  })
 })

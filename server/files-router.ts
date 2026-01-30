@@ -59,3 +59,57 @@ filesRouter.post('/write', async (req, res) => {
     return res.status(500).json({ error: err.message })
   }
 })
+
+filesRouter.get('/complete', async (req, res) => {
+  const prefix = req.query.prefix as string
+  if (!prefix) {
+    return res.status(400).json({ error: 'prefix query parameter required' })
+  }
+
+  const resolved = path.resolve(prefix)
+
+  try {
+    // Check if prefix is a directory - if so, list all files in it
+    let dir: string
+    let basename: string
+
+    try {
+      const stat = await fsp.stat(resolved)
+      if (stat.isDirectory()) {
+        dir = resolved
+        basename = ''
+      } else {
+        dir = path.dirname(resolved)
+        basename = path.basename(resolved)
+      }
+    } catch {
+      // Path doesn't exist, treat as partial path
+      dir = path.dirname(resolved)
+      basename = path.basename(resolved)
+    }
+
+    const entries = await fsp.readdir(dir, { withFileTypes: true })
+
+    const matches = entries
+      .filter((entry) => entry.name.startsWith(basename))
+      .map((entry) => ({
+        path: path.join(dir, entry.name),
+        isDirectory: entry.isDirectory(),
+      }))
+      // Sort: directories first, then alphabetically
+      .sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) {
+          return a.isDirectory ? -1 : 1
+        }
+        return a.path.localeCompare(b.path)
+      })
+      .slice(0, 20)
+
+    res.json({ suggestions: matches })
+  } catch (err: any) {
+    if (err.code === 'ENOENT') {
+      return res.json({ suggestions: [] })
+    }
+    return res.status(500).json({ error: err.message })
+  }
+})
