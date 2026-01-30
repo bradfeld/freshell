@@ -353,11 +353,13 @@ export const panesSlice = createSlice({
       const { tabId } = action.payload
       delete state.layouts[tabId]
       delete state.activePane[tabId]
+      delete state.paneTitles[tabId]
     },
 
     hydratePanes: (state, action: PayloadAction<PanesState>) => {
       state.layouts = action.payload.layouts || {}
       state.activePane = action.payload.activePane || {}
+      state.paneTitles = action.payload.paneTitles || {}
     },
 
     updatePaneTitle: (

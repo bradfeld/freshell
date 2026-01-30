@@ -945,6 +945,36 @@ describe('panesSlice', () => {
       expect(state.layouts).toEqual(originalState.layouts)
       expect(state.activePane).toEqual(originalState.activePane)
     })
+
+    it('removes paneTitles for the tab', () => {
+      const state: PanesState = {
+        layouts: {
+          'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+        },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: { 'tab-1': { 'pane-1': 'My Title' } },
+      }
+
+      const result = panesReducer(state, removeLayout({ tabId: 'tab-1' }))
+
+      expect(result.paneTitles['tab-1']).toBeUndefined()
+    })
+
+    it('preserves paneTitles for other tabs when removing one', () => {
+      const state: PanesState = {
+        layouts: {
+          'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+          'tab-2': { type: 'leaf', id: 'pane-2', content: { kind: 'terminal', createRequestId: 'req-2', status: 'running', mode: 'shell' } },
+        },
+        activePane: { 'tab-1': 'pane-1', 'tab-2': 'pane-2' },
+        paneTitles: { 'tab-1': { 'pane-1': 'Title 1' }, 'tab-2': { 'pane-2': 'Title 2' } },
+      }
+
+      const result = panesReducer(state, removeLayout({ tabId: 'tab-1' }))
+
+      expect(result.paneTitles['tab-1']).toBeUndefined()
+      expect(result.paneTitles['tab-2']).toEqual({ 'pane-2': 'Title 2' })
+    })
   })
 
   describe('hydratePanes', () => {
@@ -1032,6 +1062,32 @@ describe('panesSlice', () => {
       expect(root.children[1].type).toBe('split')
       const nested = root.children[1] as Extract<PaneNode, { type: 'split' }>
       expect(nested.sizes).toEqual([30, 70])
+    })
+
+    it('restores paneTitles from persisted state', () => {
+      const savedState: PanesState = {
+        layouts: {
+          'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+        },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: { 'tab-1': { 'pane-1': 'My Shell' } },
+      }
+
+      const state = panesReducer(initialState, hydratePanes(savedState))
+
+      expect(state.paneTitles).toEqual({ 'tab-1': { 'pane-1': 'My Shell' } })
+    })
+
+    it('handles missing paneTitles in persisted state', () => {
+      const savedStateWithoutTitles = {
+        layouts: {},
+        activePane: {},
+        // paneTitles is missing
+      } as PanesState
+
+      const state = panesReducer(initialState, hydratePanes(savedStateWithoutTitles))
+
+      expect(state.paneTitles).toEqual({})
     })
   })
 
