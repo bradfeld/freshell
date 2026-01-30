@@ -212,7 +212,7 @@ describe('PaneContent migration', () => {
     expect(layout.content.createRequestId).toBeDefined()
     expect(layout.content.status).toBe('creating')
     expect(layout.content.shell).toBe('system')
-    expect(loaded.version).toBe(2) // Migrated version
+    expect(loaded.version).toBe(3) // Migrated version
   })
 
   it('migrates nested split panes recursively', () => {
@@ -285,5 +285,40 @@ describe('PaneContent migration', () => {
     expect(layout.content.kind).toBe('browser')
     expect(layout.content.url).toBe('https://example.com')
     expect(layout.content.devToolsOpen).toBe(true)
+  })
+})
+
+describe('version 3 migration', () => {
+  beforeEach(() => {
+    localStorageMock.clear()
+  })
+
+  it('adds empty paneTitles when migrating from version 2', () => {
+    const v2State = {
+      version: 2,
+      layouts: { 'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } } },
+      activePane: { 'tab-1': 'pane-1' },
+      // No paneTitles field
+    }
+    localStorage.setItem('freshell.panes.v1', JSON.stringify(v2State))
+
+    const result = loadPersistedPanes()
+
+    expect(result.version).toBe(3)
+    expect(result.paneTitles).toEqual({})
+  })
+
+  it('preserves existing paneTitles when loading version 3', () => {
+    const v3State = {
+      version: 3,
+      layouts: {},
+      activePane: {},
+      paneTitles: { 'tab-1': { 'pane-1': 'My Title' } },
+    }
+    localStorage.setItem('freshell.panes.v1', JSON.stringify(v3State))
+
+    const result = loadPersistedPanes()
+
+    expect(result.paneTitles).toEqual({ 'tab-1': { 'pane-1': 'My Title' } })
   })
 })

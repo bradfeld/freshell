@@ -6,7 +6,7 @@ const STORAGE_KEY = 'freshell.tabs.v1'
 const PANES_STORAGE_KEY = 'freshell.panes.v1'
 
 // Current panes schema version
-const PANES_SCHEMA_VERSION = 2
+const PANES_SCHEMA_VERSION = 3
 
 export function loadPersistedTabs(): any | null {
   try {
@@ -77,19 +77,33 @@ export function loadPersistedPanes(): any | null {
     // Check if migration needed
     const currentVersion = parsed.version || 1
     if (currentVersion >= PANES_SCHEMA_VERSION) {
-      // Already up to date
-      return parsed
+      // Already up to date, but ensure paneTitles exists
+      return {
+        ...parsed,
+        paneTitles: parsed.paneTitles || {},
+      }
     }
 
     // Run migrations
-    const migratedLayouts: Record<string, any> = {}
-    for (const [tabId, node] of Object.entries(parsed.layouts || {})) {
-      migratedLayouts[tabId] = migrateNode(node)
+    let layouts = parsed.layouts || {}
+    let paneTitles = parsed.paneTitles || {}
+
+    // Version 1 -> 2: migrate pane content to include lifecycle fields
+    if (currentVersion < 2) {
+      const migratedLayouts: Record<string, any> = {}
+      for (const [tabId, node] of Object.entries(layouts)) {
+        migratedLayouts[tabId] = migrateNode(node)
+      }
+      layouts = migratedLayouts
     }
 
+    // Version 2 -> 3: add paneTitles (already defaulted to {} above)
+    // No additional migration needed, just ensure the field exists
+
     return {
-      ...parsed,
-      layouts: migratedLayouts,
+      layouts,
+      activePane: parsed.activePane || {},
+      paneTitles,
       version: PANES_SCHEMA_VERSION,
     }
   } catch {
