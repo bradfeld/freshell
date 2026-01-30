@@ -262,7 +262,7 @@ export default function App() {
     <div className="h-full flex flex-col bg-background text-foreground">
       {/* Top header bar spanning full width */}
       <div className="h-8 px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
-        <span className="font-mono text-base font-semibold tracking-tight">🐚freshell</span>
+        <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
         <div className="flex items-center gap-1">
           <button
             onClick={toggleTheme}
