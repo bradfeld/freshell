@@ -42,6 +42,9 @@ vi.mock('lucide-react', () => ({
   PanelLeftOpen: ({ className }: { className?: string }) => (
     <svg data-testid="panel-left-open-icon" className={className} />
   ),
+  Circle: ({ className }: { className?: string }) => (
+    <svg data-testid="circle-icon" className={className} />
+  ),
 }))
 
 // Mock TerminalView component to avoid xterm.js dependencies
@@ -640,6 +643,62 @@ describe('PaneContainer', () => {
       expect(calls.length).toBe(2)
       expect(calls[0][0]).toMatchObject({ hidden: true })
       expect(calls[1][0]).toMatchObject({ hidden: true })
+    })
+  })
+
+  describe('pane title rendering', () => {
+    it('passes explicit pane title to Pane component', () => {
+      const layout: PaneNode = {
+        type: 'split',
+        id: 'split-1',
+        direction: 'horizontal',
+        sizes: [50, 50],
+        children: [
+          { type: 'leaf', id: 'pane-1', content: createTerminalContent({ mode: 'shell' }) },
+          { type: 'leaf', id: 'pane-2', content: createTerminalContent({ mode: 'shell' }) },
+        ],
+      }
+
+      const store = createStore({
+        layouts: { 'tab-1': layout },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: { 'tab-1': { 'pane-1': 'First Terminal', 'pane-2': 'Second Terminal' } },
+      })
+
+      renderWithStore(
+        <PaneContainer tabId="tab-1" node={layout} />,
+        store
+      )
+
+      expect(screen.getByText('First Terminal')).toBeInTheDocument()
+      expect(screen.getByText('Second Terminal')).toBeInTheDocument()
+    })
+
+    it('shows derived title when no explicit title is set', () => {
+      const layout: PaneNode = {
+        type: 'split',
+        id: 'split-1',
+        direction: 'horizontal',
+        sizes: [50, 50],
+        children: [
+          { type: 'leaf', id: 'pane-1', content: createTerminalContent({ mode: 'claude' }) },
+          { type: 'leaf', id: 'pane-2', content: createTerminalContent({ mode: 'shell' }) },
+        ],
+      }
+
+      const store = createStore({
+        layouts: { 'tab-1': layout },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {}, // No explicit titles
+      })
+
+      renderWithStore(
+        <PaneContainer tabId="tab-1" node={layout} />,
+        store
+      )
+
+      expect(screen.getByText('Claude')).toBeInTheDocument()
+      expect(screen.getByText('Shell')).toBeInTheDocument()
     })
   })
 })

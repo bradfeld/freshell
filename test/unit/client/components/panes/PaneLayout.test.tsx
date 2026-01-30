@@ -36,6 +36,9 @@ vi.mock('lucide-react', () => ({
   Terminal: ({ className }: { className?: string }) => (
     <svg data-testid="terminal-icon" className={className} />
   ),
+  Circle: ({ className }: { className?: string }) => (
+    <svg data-testid="circle-icon" className={className} />
+  ),
 }))
 
 // Mock TerminalView component to avoid xterm.js dependencies
@@ -74,6 +77,7 @@ function createStore(initialPanesState: Partial<PanesState> = {}) {
       panes: {
         layouts: {},
         activePane: {},
+        paneTitles: {},
         ...initialPanesState,
       },
     },

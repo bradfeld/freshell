@@ -8,6 +8,7 @@ import TerminalView from '../TerminalView'
 import BrowserPane from './BrowserPane'
 import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
+import { derivePaneTitle } from '@/lib/derivePaneTitle'
 
 interface PaneContainerProps {
   tabId: string
@@ -18,6 +19,7 @@ interface PaneContainerProps {
 export default function PaneContainer({ tabId, node, hidden }: PaneContainerProps) {
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
+  const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] || {})
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
 
@@ -63,10 +65,16 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
 
   // Render a leaf pane
   if (node.type === 'leaf') {
+    const explicitTitle = paneTitles[node.id]
+    const paneTitle = explicitTitle ?? derivePaneTitle(node.content)
+    const paneStatus = node.content.kind === 'terminal' ? node.content.status : 'running'
+
     return (
       <Pane
         isActive={activePane === node.id}
         isOnlyPane={isOnlyPane}
+        title={paneTitle}
+        status={paneStatus}
         onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
       >
