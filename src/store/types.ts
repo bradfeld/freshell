@@ -100,5 +100,7 @@ export interface AppSettings {
   sidebar: {
     sortMode: SidebarSortMode
     showProjectBadges: boolean
+    width: number // pixels, default 288 (equivalent to w-72)
+    collapsed: boolean // for mobile/responsive use
   }
 }

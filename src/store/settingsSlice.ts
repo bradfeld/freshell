@@ -20,6 +20,8 @@ export const defaultSettings: AppSettings = {
   sidebar: {
     sortMode: 'hybrid',
     showProjectBadges: true,
+    width: 288,
+    collapsed: false,
   },
 }
 

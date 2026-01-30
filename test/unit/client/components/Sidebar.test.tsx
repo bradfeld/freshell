@@ -733,4 +733,48 @@ describe('Sidebar Component - Session-Centric Display', () => {
       expect(screen.queryByText('my-awesome-project')).not.toBeInTheDocument()
     })
   })
+
+  describe('dynamic width', () => {
+    it('applies width from prop', async () => {
+      const store = createTestStore({ projects: [] })
+      const { container } = render(
+        <Provider store={store}>
+          <Sidebar view="terminal" onNavigate={vi.fn()} width={350} />
+        </Provider>
+      )
+
+      vi.advanceTimersByTime(100)
+
+      const sidebar = container.firstChild as HTMLElement
+      expect(sidebar.style.width).toBe('350px')
+    })
+
+    it('uses default width of 288px when no width prop provided', async () => {
+      const store = createTestStore({ projects: [] })
+      const { container } = render(
+        <Provider store={store}>
+          <Sidebar view="terminal" onNavigate={vi.fn()} />
+        </Provider>
+      )
+
+      vi.advanceTimersByTime(100)
+
+      const sidebar = container.firstChild as HTMLElement
+      expect(sidebar.style.width).toBe('288px')
+    })
+
+    it('has transition class for smooth width changes', async () => {
+      const store = createTestStore({ projects: [] })
+      const { container } = render(
+        <Provider store={store}>
+          <Sidebar view="terminal" onNavigate={vi.fn()} width={300} />
+        </Provider>
+      )
+
+      vi.advanceTimersByTime(100)
+
+      const sidebar = container.firstChild as HTMLElement
+      expect(sidebar.className).toContain('transition-')
+    })
+  })
 })

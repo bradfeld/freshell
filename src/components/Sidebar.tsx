@@ -44,9 +44,11 @@ function getProjectName(path: string): string {
 export default function Sidebar({
   view,
   onNavigate,
+  width = 288,
 }: {
   view: AppView
   onNavigate: (v: AppView) => void
+  width?: number
 }) {
   const dispatch = useAppDispatch()
   const settings = useAppSelector((s) => s.settings.settings)
@@ -216,7 +218,10 @@ export default function Sidebar({
   ]
 
   return (
-    <div className="w-72 h-full flex flex-col bg-card border-r border-border/50">
+    <div
+      className="h-full flex flex-col bg-card flex-shrink-0 transition-[width] duration-150"
+      style={{ width: `${width}px` }}
+    >
       {/* Header */}
       <div className="px-4 py-4">
         <span className="text-sm font-medium tracking-tight">Coding Agents</span>

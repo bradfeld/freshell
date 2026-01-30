@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
@@ -14,8 +14,13 @@ import TabContent from '@/components/TabContent'
 import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
-import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check } from 'lucide-react'
+import PaneDivider from '@/components/panes/PaneDivider'
+import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
+
+const SIDEBAR_MIN_WIDTH = 200
+const SIDEBAR_MAX_WIDTH = 500
+const MOBILE_BREAKPOINT = 768
 
 export default function App() {
   useThemeEffect()
@@ -30,6 +35,50 @@ export default function App() {
   const [view, setView] = useState<AppView>('terminal')
   const [shareModalUrl, setShareModalUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const mainContentRef = useRef<HTMLDivElement>(null)
+
+  // Sidebar width from settings (or local state during drag)
+  const sidebarWidth = settings.sidebar?.width ?? 288
+  const sidebarCollapsed = settings.sidebar?.collapsed ?? false
+
+  // Check for mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // Auto-collapse sidebar on mobile
+  useEffect(() => {
+    if (isMobile && !sidebarCollapsed) {
+      dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: true } }))
+    }
+  }, [isMobile])
+
+  const handleSidebarResize = useCallback((delta: number) => {
+    const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth + delta))
+    dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, width: newWidth } }))
+  }, [sidebarWidth, settings.sidebar, dispatch])
+
+  const handleSidebarResizeEnd = useCallback(async () => {
+    try {
+      await api.patch('/api/settings', { sidebar: settings.sidebar })
+      dispatch(markSaved())
+    } catch {}
+  }, [settings.sidebar, dispatch])
+
+  const toggleSidebarCollapse = useCallback(async () => {
+    const newCollapsed = !sidebarCollapsed
+    dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: newCollapsed } }))
+    try {
+      await api.patch('/api/settings', { sidebar: { ...settings.sidebar, collapsed: newCollapsed } })
+      dispatch(markSaved())
+    } catch {}
+  }, [sidebarCollapsed, settings.sidebar, dispatch])
 
   const toggleTheme = async () => {
     const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
@@ -225,6 +274,9 @@ export default function App() {
       } else if (key === ',') {
         e.preventDefault()
         setView('settings')
+      } else if (key === 'b') {
+        e.preventDefault()
+        toggleSidebarCollapse()
       }
     }
 
@@ -262,7 +314,20 @@ export default function App() {
     <div className="h-full flex flex-col bg-background text-foreground">
       {/* Top header bar spanning full width */}
       <div className="h-8 px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
-        <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleSidebarCollapse}
+            className="p-1.5 rounded-md hover:bg-muted transition-colors"
+            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeft className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <PanelLeftClose className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </button>
+          <span className="font-mono text-base font-semibold tracking-tight">🐚🔥freshell</span>
+        </div>
         <div className="flex items-center gap-1">
           <button
             onClick={toggleTheme}
@@ -297,8 +362,31 @@ export default function App() {
         </div>
       </div>
       {/* Main content area with sidebar */}
-      <div className="flex-1 min-h-0 flex">
-        <Sidebar view={view} onNavigate={setView} />
+      <div className="flex-1 min-h-0 flex relative" ref={mainContentRef}>
+        {/* Mobile overlay when sidebar is open */}
+        {isMobile && !sidebarCollapsed && (
+          <div
+            className="absolute inset-0 bg-black/50 z-10"
+            onClick={toggleSidebarCollapse}
+          />
+        )}
+        {/* Sidebar - on mobile it overlays, on desktop it's inline */}
+        {!sidebarCollapsed && (
+          <div className={isMobile ? 'absolute left-0 top-0 bottom-0 z-20' : 'contents'}>
+            <Sidebar view={view} onNavigate={(v) => {
+              setView(v)
+              // On mobile, collapse sidebar after navigation
+              if (isMobile) toggleSidebarCollapse()
+            }} width={sidebarWidth} />
+            {!isMobile && (
+              <PaneDivider
+                direction="horizontal"
+                onResize={handleSidebarResize}
+                onResizeEnd={handleSidebarResizeEnd}
+              />
+            )}
+          </div>
+        )}
         <div className="flex-1 min-w-0 flex flex-col">
           {content}
         </div>
