@@ -1,0 +1,92 @@
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import express, { type Express } from 'express'
+import request from 'supertest'
+import fsp from 'fs/promises'
+import path from 'path'
+import os from 'os'
+
+const TEST_AUTH_TOKEN = 'test-auth-token-12345678'
+
+describe('Files API Integration', () => {
+  let app: Express
+  let tempDir: string
+
+  beforeAll(() => {
+    process.env.AUTH_TOKEN = TEST_AUTH_TOKEN
+  })
+
+  beforeEach(async () => {
+    tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'files-api-test-'))
+
+    app = express()
+    app.use(express.json({ limit: '1mb' }))
+
+    // Auth middleware
+    app.use('/api', (req, res, next) => {
+      const token = process.env.AUTH_TOKEN
+      if (!token) return res.status(500).json({ error: 'Server misconfigured' })
+      const provided = req.headers['x-auth-token'] as string | undefined
+      if (!provided || provided !== token) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+      next()
+    })
+
+    // Import and mount files routes
+    const { filesRouter } = await import('../../../server/files-router')
+    app.use('/api/files', filesRouter)
+  })
+
+  afterEach(async () => {
+    await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  afterAll(() => {
+    delete process.env.AUTH_TOKEN
+  })
+
+  describe('GET /api/files/read', () => {
+    it('returns file content and metadata', async () => {
+      const filePath = path.join(tempDir, 'test.txt')
+      await fsp.writeFile(filePath, 'Hello, world!')
+
+      const res = await request(app)
+        .get('/api/files/read')
+        .query({ path: filePath })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(200)
+      expect(res.body.content).toBe('Hello, world!')
+      expect(res.body.size).toBe(13)
+      expect(res.body.modifiedAt).toBeDefined()
+    })
+
+    it('returns 400 if path is missing', async () => {
+      const res = await request(app)
+        .get('/api/files/read')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(400)
+      expect(res.body.error).toContain('path')
+    })
+
+    it('returns 404 if file does not exist', async () => {
+      const res = await request(app)
+        .get('/api/files/read')
+        .query({ path: path.join(tempDir, 'nonexistent.txt') })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(404)
+    })
+
+    it('returns 400 for directories', async () => {
+      const res = await request(app)
+        .get('/api/files/read')
+        .query({ path: tempDir })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(400)
+      expect(res.body.error).toContain('directory')
+    })
+  })
+})
