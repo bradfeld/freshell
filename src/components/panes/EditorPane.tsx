@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useRef, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
 import { FileText } from 'lucide-react'
 import { useAppDispatch } from '@/store/hooks'
@@ -23,6 +23,8 @@ function isHtml(filePath: string | null): boolean {
   return lower.endsWith('.htm') || lower.endsWith('.html')
 }
 
+const AUTO_SAVE_DELAY = 5000
+
 interface EditorPaneProps {
   paneId: string
   tabId: string
@@ -44,6 +46,47 @@ export default function EditorPane({
 }: EditorPaneProps) {
   const dispatch = useAppDispatch()
   const showViewToggle = useMemo(() => isPreviewable(filePath), [filePath])
+
+  // Auto-save refs
+  const autoSaveTimer = useRef<NodeJS.Timeout | null>(null)
+  const pendingContent = useRef<string>(content)
+
+  // Cleanup auto-save timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current)
+      }
+    }
+  }, [])
+
+  const scheduleAutoSave = useCallback(() => {
+    // Don't auto-save scratch pads (no filePath) or read-only files
+    if (!filePath || readOnly) return
+
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current)
+    }
+
+    autoSaveTimer.current = setTimeout(async () => {
+      try {
+        const token = localStorage.getItem('authToken') || ''
+        await fetch('/api/files/write', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-auth-token': token,
+          },
+          body: JSON.stringify({
+            path: filePath,
+            content: pendingContent.current,
+          }),
+        })
+      } catch (err) {
+        console.error('Auto-save failed:', err)
+      }
+    }, AUTO_SAVE_DELAY)
+  }, [filePath, readOnly])
 
   const updateContent = useCallback(
     (updates: Partial<{
@@ -73,9 +116,11 @@ export default function EditorPane({
   const handleContentChange = useCallback(
     (value: string | undefined) => {
       if (value === undefined) return
+      pendingContent.current = value
       updateContent({ content: value })
+      scheduleAutoSave()
     },
-    [updateContent]
+    [updateContent, scheduleAutoSave]
   )
 
   const handlePathChange = useCallback(
