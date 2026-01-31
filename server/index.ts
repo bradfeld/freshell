@@ -1,6 +1,5 @@
 import { detectLanIps } from './bootstrap.js' // Must be first - ensures .env exists before dotenv loads
 import 'dotenv/config'
-import { createRequire } from 'module'
 import express from 'express'
 import fs from 'fs'
 import http from 'http'
@@ -20,15 +19,27 @@ import { filesRouter } from './files-router.js'
 import { getSessionRepairService } from './session-scanner/service.js'
 import { runUpdateCheck } from './updater/index.js'
 
-const require = createRequire(import.meta.url)
-const packageJson = require('../package.json')
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// Find package.json by walking up from current directory
+function findPackageJson(): string {
+  let dir = __dirname
+  while (dir !== path.dirname(dir)) {
+    const candidate = path.join(dir, 'package.json')
+    if (fs.existsSync(candidate)) {
+      return candidate
+    }
+    dir = path.dirname(dir)
+  }
+  throw new Error('Could not find package.json')
+}
+
+const packageJson = JSON.parse(fs.readFileSync(findPackageJson(), 'utf-8'))
 const APP_VERSION: string = packageJson.version
 
 const SKIP_UPDATE_CHECK = process.argv.includes('--skip-update-check') ||
                           process.env.SKIP_UPDATE_CHECK === 'true'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
 
 async function main() {
   validateStartupSecurity()
