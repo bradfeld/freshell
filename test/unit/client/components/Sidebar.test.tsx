@@ -23,6 +23,17 @@ vi.mock('@/lib/ws-client', () => ({
   }),
 }))
 
+// Mock the searchSessions API
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual('@/lib/api')
+  return {
+    ...actual,
+    searchSessions: vi.fn(),
+  }
+})
+
+import { searchSessions as mockSearchSessions } from '@/lib/api'
+
 function createTestStore(options?: {
   projects?: ProjectGroup[]
   terminals?: BackgroundTerminal[]
@@ -1264,6 +1275,87 @@ describe('Sidebar Component - Session-Centric Display', () => {
 
       const select = getByRole('combobox', { name: /search tier/i })
       expect(select).toHaveValue('title')
+    })
+  })
+
+  describe('Backend search integration', () => {
+    beforeEach(() => {
+      vi.mocked(mockSearchSessions).mockReset()
+    })
+
+    it('calls searchSessions API when tier is not title and query exists', async () => {
+      vi.mocked(mockSearchSessions).mockResolvedValue({
+        results: [
+          { sessionId: 'result-1', projectPath: '/proj', matchedIn: 'userMessage', updatedAt: 1000, snippet: 'Found it' },
+        ],
+        tier: 'userMessages',
+        query: 'test',
+        totalScanned: 5,
+      })
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // Enter search query
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+
+      // Change tier to userMessages
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // Wait for debounce
+      await act(() => vi.advanceTimersByTime(500))
+
+      expect(mockSearchSessions).toHaveBeenCalledWith({
+        query: 'test',
+        tier: 'userMessages',
+      })
+    })
+
+    it('displays search results from API', async () => {
+      vi.mocked(mockSearchSessions).mockResolvedValue({
+        results: [
+          { sessionId: 'result-1', projectPath: '/proj', matchedIn: 'userMessage', updatedAt: 1000, title: 'Found Session', snippet: 'test found here' },
+        ],
+        tier: 'userMessages',
+        query: 'test',
+        totalScanned: 5,
+      })
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole, getByText } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // Advance past debounce and flush promises
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+      })
+
+      expect(getByText('Found Session')).toBeInTheDocument()
+    })
+
+    it('does not call API for title tier (uses local filter)', async () => {
+      const store = createTestStore({
+        projects: [
+          {
+            projectPath: '/proj',
+            sessions: [{ sessionId: 's1', projectPath: '/proj', updatedAt: 1000, title: 'Test session', cwd: '/proj' }],
+          },
+        ],
+      })
+      const { getByPlaceholderText } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+
+      // Keep default title tier
+      await act(() => vi.advanceTimersByTime(500))
+
+      expect(mockSearchSessions).not.toHaveBeenCalled()
     })
   })
 })

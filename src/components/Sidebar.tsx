@@ -6,6 +6,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, setActiveTab } from '@/store/tabsSlice'
 import { selectAllSessionActivity } from '@/store/sessionActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
+import { searchSessions, type SearchResult } from '@/lib/api'
 import type { BackgroundTerminal, ClaudeSession, ProjectGroup } from '@/store/types'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
@@ -66,6 +67,8 @@ export default function Sidebar({
   const [terminals, setTerminals] = useState<BackgroundTerminal[]>([])
   const [filter, setFilter] = useState('')
   const [searchTier, setSearchTier] = useState<'title' | 'userMessages' | 'fullText'>('title')
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null)
+  const [isSearching, setIsSearching] = useState(false)
   const requestIdRef = useRef<string | null>(null)
 
   // Fetch background terminals
@@ -95,6 +98,42 @@ export default function Sidebar({
       window.clearInterval(interval)
     }
   }, [ws])
+
+  // Backend search for non-title tiers
+  useEffect(() => {
+    if (!filter.trim() || searchTier === 'title') {
+      setSearchResults(null)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const response = await searchSessions({
+          query: filter.trim(),
+          tier: searchTier,
+        })
+        if (!controller.signal.aborted) {
+          setSearchResults(response.results)
+        }
+      } catch (err) {
+        console.error('Search failed:', err)
+        if (!controller.signal.aborted) {
+          setSearchResults([])
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearching(false)
+        }
+      }
+    }, 300) // Debounce 300ms
+
+    return () => {
+      controller.abort()
+      clearTimeout(timeoutId)
+    }
+  }, [filter, searchTier])
 
   // Build session list with running state from terminals
   const sessionItems = useMemo(() => {
@@ -155,6 +194,22 @@ export default function Sidebar({
 
   // Filter items
   const filteredItems = useMemo(() => {
+    // If we have backend search results, convert them to SessionItems
+    if (searchResults !== null) {
+      return searchResults.map((result): SessionItem => ({
+        id: `search-${result.sessionId}`,
+        sessionId: result.sessionId,
+        title: result.title || result.sessionId.slice(0, 8),
+        subtitle: getProjectName(result.projectPath),
+        projectPath: result.projectPath,
+        timestamp: result.updatedAt,
+        cwd: result.cwd,
+        hasTab: tabs.some((t) => t.resumeSessionId === result.sessionId),
+        isRunning: false,
+      }))
+    }
+
+    // Otherwise use local filtering for title tier
     if (!filter.trim()) return sessionItems
     const q = filter.toLowerCase()
     return sessionItems.filter(
@@ -163,7 +218,7 @@ export default function Sidebar({
         item.subtitle?.toLowerCase().includes(q) ||
         item.projectPath?.toLowerCase().includes(q)
     )
-  }, [sessionItems, filter])
+  }, [searchResults, sessionItems, filter, tabs])
 
   // Sort items based on settings
   const sortedItems = useMemo(() => {
