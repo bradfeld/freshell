@@ -134,13 +134,8 @@ export const persistMiddleware: Middleware<{}, RootState> = (store) => (next) =>
     }
     const panesJson = JSON.stringify(panesPayload)
     localStorage.setItem(PANES_STORAGE_KEY, panesJson)
-    // Debug: log when we persist a split pane
-    if (panesJson.includes('"type":"split"')) {
-      console.log('[Panes Persist] Saved split pane to localStorage')
-      console.log('[Panes Persist] Layout keys being saved:', Object.keys(state.panes.layouts))
-    }
-  } catch (err) {
-    console.error('[Panes Persist] Failed to save to localStorage:', err)
+  } catch {
+    // ignore quota errors
   }
 
   return result
