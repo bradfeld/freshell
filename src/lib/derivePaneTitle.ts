@@ -6,6 +6,10 @@ import type { PaneContent } from '@/store/paneTypes'
  * For browsers: based on URL hostname.
  */
 export function derivePaneTitle(content: PaneContent): string {
+  if (content.kind === 'picker') {
+    return 'New Tab'
+  }
+
   if (content.kind === 'browser') {
     if (!content.url) return 'Browser'
     try {
