@@ -11,7 +11,7 @@ import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
 import { configStore } from './config-store.js'
 import { TerminalRegistry } from './terminal-registry.js'
 import { WsHandler } from './ws-handler.js'
-import { claudeIndexer } from './claude-indexer.js'
+import { claudeIndexer, defaultClaudeHome } from './claude-indexer.js'
 import { claudeSessionManager } from './claude-session.js'
 import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts.js'
 import { migrateSettingsSortMode } from './settings-migrate.js'
@@ -141,6 +141,36 @@ async function main() {
   })
 
   // --- API: sessions ---
+  // Search endpoint must come BEFORE the generic /api/sessions route
+  app.get('/api/sessions/search', async (req, res) => {
+    try {
+      const { SearchRequestSchema, searchSessions } = await import('./session-search.js')
+
+      const parsed = SearchRequestSchema.safeParse({
+        query: req.query.q,
+        tier: req.query.tier || 'title',
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      })
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
+      }
+
+      const response = await searchSessions({
+        projects: claudeIndexer.getProjects(),
+        claudeHome: defaultClaudeHome(),
+        query: parsed.data.query,
+        tier: parsed.data.tier,
+        limit: parsed.data.limit,
+      })
+
+      res.json(response)
+    } catch (err: any) {
+      logger.error({ err }, 'Session search failed')
+      res.status(500).json({ error: 'Search failed' })
+    }
+  })
+
   app.get('/api/sessions', async (_req, res) => {
     res.json(claudeIndexer.getProjects())
   })
