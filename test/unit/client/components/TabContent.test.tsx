@@ -185,4 +185,48 @@ describe('TabContent', () => {
       )
     })
   })
+
+  describe('visibility CSS classes', () => {
+    it('applies tab-hidden class when hidden=true', () => {
+      const store = createStore([{ id: 'tab-1', mode: 'shell', terminalId: 'term-1' }])
+
+      const { container } = render(
+        <Provider store={store}>
+          <TabContent tabId="tab-1" hidden={true} />
+        </Provider>
+      )
+
+      const wrapper = container.firstChild as HTMLElement
+      expect(wrapper.className).toContain('tab-hidden')
+      // Ensure we're not using Tailwind's 'hidden' class (display:none) - check class list
+      expect(wrapper.classList.contains('hidden')).toBe(false)
+    })
+
+    it('applies tab-visible class when hidden=false', () => {
+      const store = createStore([{ id: 'tab-1', mode: 'shell', terminalId: 'term-1' }])
+
+      const { container } = render(
+        <Provider store={store}>
+          <TabContent tabId="tab-1" hidden={false} />
+        </Provider>
+      )
+
+      const wrapper = container.firstChild as HTMLElement
+      expect(wrapper.className).toContain('tab-visible')
+      expect(wrapper.className).not.toContain('tab-hidden')
+    })
+
+    it('applies tab-visible class when hidden is undefined', () => {
+      const store = createStore([{ id: 'tab-1', mode: 'shell', terminalId: 'term-1' }])
+
+      const { container } = render(
+        <Provider store={store}>
+          <TabContent tabId="tab-1" />
+        </Provider>
+      )
+
+      const wrapper = container.firstChild as HTMLElement
+      expect(wrapper.className).toContain('tab-visible')
+    })
+  })
 })
