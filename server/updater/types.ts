@@ -1,10 +1,6 @@
 // server/updater/types.ts
-export interface GitHubRelease {
-  tag_name: string
-  html_url: string
-  published_at: string
-  body: string
-}
+// Note: GitHubRelease type is now defined in version-checker.ts via Zod schema
+// and re-exported from there for validation purposes
 
 export interface UpdateCheckResult {
   updateAvailable: boolean
