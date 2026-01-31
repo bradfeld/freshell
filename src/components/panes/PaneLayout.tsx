@@ -30,31 +30,10 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, tabId, layout])
 
-  const handleAddTerminal = useCallback(() => {
+  const handleAddPane = useCallback(() => {
     dispatch(addPane({
       tabId,
-      newContent: { kind: 'terminal', mode: 'shell' },
-    }))
-  }, [dispatch, tabId])
-
-  const handleAddBrowser = useCallback(() => {
-    dispatch(addPane({
-      tabId,
-      newContent: { kind: 'browser', url: '', devToolsOpen: false },
-    }))
-  }, [dispatch, tabId])
-
-  const handleAddEditor = useCallback(() => {
-    dispatch(addPane({
-      tabId,
-      newContent: {
-        kind: 'editor',
-        filePath: null,
-        language: null,
-        readOnly: false,
-        content: '',
-        viewMode: 'source',
-      },
+      newContent: { kind: 'picker' },
     }))
   }, [dispatch, tabId])
 
@@ -65,11 +44,7 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
   return (
     <div ref={containerRef} className="relative h-full w-full">
       <PaneContainer tabId={tabId} node={layout} hidden={hidden} />
-      <FloatingActionButton
-        onAddTerminal={handleAddTerminal}
-        onAddBrowser={handleAddBrowser}
-        onAddEditor={handleAddEditor}
-      />
+      <FloatingActionButton onAdd={handleAddPane} />
     </div>
   )
 }

@@ -266,13 +266,9 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB to open menu
+      // Click FAB to add picker pane
       const fabButton = screen.getByTitle('Add pane')
       fireEvent.click(fabButton)
-
-      // Click Terminal option
-      const terminalOption = screen.getByText('Terminal')
-      fireEvent.click(terminalOption)
 
       // Layout should now be a split
       const state = store.getState().panes
@@ -315,9 +311,8 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB and add terminal
+      // Click FAB to add picker pane
       fireEvent.click(screen.getByTitle('Add pane'))
-      fireEvent.click(screen.getByText('Terminal'))
 
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
@@ -355,9 +350,8 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB and add terminal
+      // Click FAB to add picker pane
       fireEvent.click(screen.getByTitle('Add pane'))
-      fireEvent.click(screen.getByText('Terminal'))
 
       // With grid layout, 2 panes are always horizontal (side by side)
       const state = store.getState().panes
@@ -383,9 +377,8 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB and add terminal
+      // Click FAB to add picker pane
       fireEvent.click(screen.getByTitle('Add pane'))
-      fireEvent.click(screen.getByText('Terminal'))
 
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
@@ -414,22 +407,19 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB to open menu
+      // Click FAB to add picker pane
       fireEvent.click(screen.getByTitle('Add pane'))
 
-      // Click Browser option
-      fireEvent.click(screen.getByText('Browser'))
-
-      // Layout should now be a split with browser content
+      // Layout should now be a split with picker content
       const state = store.getState().panes
       expect(state.layouts['tab-1'].type).toBe('split')
 
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
       const newPane = splitNode.children[1] as Extract<PaneNode, { type: 'leaf' }>
-      expect(newPane.content.kind).toBe('browser')
+      expect(newPane.content.kind).toBe('picker')
     })
 
-    it('creates browser pane with empty url and devToolsOpen false', async () => {
+    it('creates picker pane when FAB is clicked', async () => {
       const paneId = 'pane-1'
       const store = createStore({
         layouts: {
@@ -447,17 +437,14 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB and add browser
+      // Click FAB to add picker pane
       fireEvent.click(screen.getByTitle('Add pane'))
-      fireEvent.click(screen.getByText('Browser'))
 
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
       const newPane = splitNode.children[1] as Extract<PaneNode, { type: 'leaf' }>
-      const browserContent = newPane.content as Extract<PaneContent, { kind: 'browser' }>
 
-      expect(browserContent.url).toBe('')
-      expect(browserContent.devToolsOpen).toBe(false)
+      expect(newPane.content.kind).toBe('picker')
     })
   })
 
@@ -480,9 +467,8 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Click FAB and add terminal - with grid layout, this works without active pane
+      // Click FAB to add picker pane - with grid layout, this works without active pane
       fireEvent.click(screen.getByTitle('Add pane'))
-      fireEvent.click(screen.getByText('Terminal'))
 
       // Layout should now be a split with 2 panes
       const state = store.getState().panes
@@ -507,17 +493,15 @@ describe('PaneLayout', () => {
         store
       )
 
-      // Add first terminal
+      // Add first picker pane
       fireEvent.click(screen.getByTitle('Add pane'))
-      fireEvent.click(screen.getByText('Terminal'))
 
       // Get the new active pane (which should be the newly added one)
       let state = store.getState().panes
       const firstNewPaneId = state.activePane['tab-1']
 
-      // Add second terminal
+      // Add second picker pane
       fireEvent.click(screen.getByTitle('Add pane'))
-      fireEvent.click(screen.getByText('Terminal'))
 
       state = store.getState().panes
       // Should have 3 panes now in a nested structure
