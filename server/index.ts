@@ -74,13 +74,14 @@ async function main() {
   app.use('/api', httpAuthMiddleware)
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true })
+    res.json({ ok: true, version: APP_VERSION })
   })
 
   app.get('/api/debug', async (_req, res) => {
     const cfg = await configStore.snapshot()
     res.json({
       version: 1,
+      appVersion: APP_VERSION,
       wsConnections: wsHandler.connectionCount(),
       settings: cfg.settings,
       sessionsProjects: claudeIndexer.getProjects(),
