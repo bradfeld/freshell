@@ -51,10 +51,10 @@ export default function TabItem({
   return (
     <div
       className={cn(
-        'group flex items-center gap-2 h-7 px-3 rounded-md text-sm cursor-pointer transition-all',
+        'group flex items-center gap-2 h-8 px-3 rounded-t-lg text-sm cursor-pointer transition-all border-x border-t',
         isActive
-          ? 'bg-muted text-foreground'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+          ? 'bg-background text-foreground border-border/30 relative z-10 -mb-px'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/30 border-transparent mt-1',
         isDragging && 'opacity-50'
       )}
       onClick={onClick}

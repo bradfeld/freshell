@@ -150,8 +150,8 @@ describe('TabBar', () => {
       const activeTabElement = screen.getByText('Active Tab').closest('div[class*="group"]')
       const inactiveTabElement = screen.getByText('Inactive Tab').closest('div[class*="group"]')
 
-      // Active tab should have bg-muted class
-      expect(activeTabElement?.className).toContain('bg-muted')
+      // Active tab should have bg-background class (tab-like styling)
+      expect(activeTabElement?.className).toContain('bg-background')
       expect(activeTabElement?.className).toContain('text-foreground')
 
       // Inactive tab should have text-muted-foreground class
@@ -171,7 +171,7 @@ describe('TabBar', () => {
 
       // Initial state - tab 1 is active
       let tab1Element = screen.getByText('Tab 1').closest('div[class*="group"]')
-      expect(tab1Element?.className).toContain('bg-muted')
+      expect(tab1Element?.className).toContain('bg-background')
 
       // Click tab 2 to change active tab
       fireEvent.click(screen.getByText('Tab 2'))
@@ -187,8 +187,8 @@ describe('TabBar', () => {
       const tab2Element = screen.getByText('Tab 2').closest('div[class*="group"]')
       tab1Element = screen.getByText('Tab 1').closest('div[class*="group"]')
 
-      expect(tab2Element?.className).toContain('bg-muted')
-      expect(tab1Element?.className).not.toContain('bg-muted text-foreground')
+      expect(tab2Element?.className).toContain('bg-background')
+      expect(tab1Element?.className).not.toContain('bg-background text-foreground')
     })
   })
 

@@ -176,7 +176,7 @@ export default function TabBar() {
   if (tabs.length === 0) return null
 
   return (
-    <div className="h-10 flex items-center gap-1 px-2 border-b border-border/30 bg-background">
+    <div className="h-10 flex items-end px-2 border-b border-border/30 bg-muted/30">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -187,7 +187,7 @@ export default function TabBar() {
           items={tabs.map((t: Tab) => t.id)}
           strategy={horizontalListSortingStrategy}
         >
-          <div className="flex items-center gap-0.5 overflow-x-auto flex-1 py-1">
+          <div className="flex items-end gap-0.5 overflow-x-auto flex-1">
             {tabs.map((tab: Tab) => (
               <SortableTab
                 key={tab.id}
@@ -228,6 +228,13 @@ export default function TabBar() {
                 }}
               />
             ))}
+            <button
+              className="flex-shrink-0 ml-1 mb-1 p-1 rounded-md border border-dashed border-muted-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground/50 hover:bg-muted/30 transition-colors"
+              title="New shell tab"
+              onClick={() => dispatch(addTab({ mode: 'shell' }))}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
           </div>
         </SortableContext>
 
@@ -258,14 +265,6 @@ export default function TabBar() {
           ) : null}
         </DragOverlay>
       </DndContext>
-
-      <button
-        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-        title="New shell tab"
-        onClick={() => dispatch(addTab({ mode: 'shell' }))}
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
     </div>
   )
 }
