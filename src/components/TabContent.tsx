@@ -24,7 +24,10 @@ export default function TabContent({ tabId, hidden }: TabContentProps) {
   let defaultContent: PaneContentInput
 
   // If tab already has a terminalId (e.g., restored from persistence), use that
-  if (tab.terminalId) {
+  // Or if the tab is claude/codex mode, or has a resumeSessionId, force terminal
+  const forceTerminal = tab.terminalId || tab.mode !== 'shell' || tab.resumeSessionId
+
+  if (forceTerminal) {
     defaultContent = {
       kind: 'terminal',
       mode: tab.mode,
@@ -47,7 +50,7 @@ export default function TabContent({ tabId, hidden }: TabContentProps) {
       viewMode: 'source',
     }
   } else {
-    // 'shell' or default - use tab's mode/shell settings
+    // 'shell' or default
     defaultContent = {
       kind: 'terminal',
       mode: tab.mode,

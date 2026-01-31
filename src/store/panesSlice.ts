@@ -358,6 +358,12 @@ export const panesSlice = createSlice({
       }
 
       state.layouts[tabId] = updateContent(root)
+
+      // Update pane title when content changes
+      if (!state.paneTitles[tabId]) {
+        state.paneTitles[tabId] = {}
+      }
+      state.paneTitles[tabId][paneId] = derivePaneTitle(content)
     },
 
     removeLayout: (

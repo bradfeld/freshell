@@ -16,6 +16,7 @@ const defaultProps = {
 describe('EditorToolbar', () => {
   afterEach(() => {
     cleanup()
+    vi.clearAllMocks()
   })
 
   it('renders path input', () => {
@@ -33,7 +34,12 @@ describe('EditorToolbar', () => {
   it('calls onPathSelect when Enter is pressed', () => {
     const onPathSelect = vi.fn()
 
-    render(<EditorToolbar {...defaultProps} onPathSelect={onPathSelect} />)
+    render(
+      <EditorToolbar
+        {...defaultProps}
+        onPathSelect={onPathSelect}
+      />
+    )
 
     const input = screen.getByPlaceholderText(/enter file path/i)
     fireEvent.change(input, { target: { value: '/path/to/file.ts' } })
@@ -43,11 +49,23 @@ describe('EditorToolbar', () => {
   })
 
   it('shows view toggle only when showViewToggle is true', () => {
-    const { rerender } = render(<EditorToolbar {...defaultProps} filePath="/test.md" />)
+    const { rerender } = render(
+      <EditorToolbar
+        {...defaultProps}
+        filePath="/test.md"
+        showViewToggle={false}
+      />
+    )
 
     expect(screen.queryByRole('button', { name: /preview|source/i })).not.toBeInTheDocument()
 
-    rerender(<EditorToolbar {...defaultProps} filePath="/test.md" showViewToggle={true} />)
+    rerender(
+      <EditorToolbar
+        {...defaultProps}
+        filePath="/test.md"
+        showViewToggle={true}
+      />
+    )
 
     expect(screen.getByRole('button', { name: /preview/i })).toBeInTheDocument()
   })

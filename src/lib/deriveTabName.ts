@@ -30,6 +30,13 @@ function isShellTerminal(content: PaneContent): content is TerminalPaneContent {
 }
 
 /**
+ * Check if content is a picker.
+ */
+function isPicker(content: PaneContent): boolean {
+  return content.kind === 'picker'
+}
+
+/**
  * Extract hostname (with port for localhost) from a URL.
  */
 function extractHostname(url: string): string | null {
@@ -93,6 +100,12 @@ export function deriveTabName(layout: PaneNode): string {
     if (!shell.initialCwd) return 'Shell'
     const segment = extractLastDirSegment(shell.initialCwd)
     return segment || 'Shell'
+  }
+
+  // Priority 4: Picker (when all panes are pickers)
+  const hasOnlyPickers = contents.every(isPicker)
+  if (hasOnlyPickers && contents.length > 0) {
+    return 'New Tab'
   }
 
   // Fallback (should never reach here if layout has content)
