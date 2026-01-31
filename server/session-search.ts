@@ -78,3 +78,77 @@ export function searchTitleTier(
   results.sort((a, b) => b.updatedAt - a.updatedAt)
   return results.slice(0, limit)
 }
+
+function extractTextFromContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => {
+        if (typeof block === 'string') return block
+        if (block?.type === 'text' && typeof block.text === 'string') return block.text
+        if (block?.type === 'thinking' && typeof block.thinking === 'string') return block.thinking
+        return ''
+      })
+      .filter(Boolean)
+      .join(' ')
+  }
+  return ''
+}
+
+function extractMessageText(obj: Record<string, unknown>): string | null {
+  // Direct message string
+  if (typeof obj.message === 'string') {
+    return obj.message
+  }
+  // Nested message.content
+  if (obj.message && typeof obj.message === 'object') {
+    const msg = obj.message as Record<string, unknown>
+    const content = msg.content
+    return extractTextFromContent(content) || null
+  }
+  // Direct content field
+  if (obj.content) {
+    return extractTextFromContent(obj.content) || null
+  }
+  return null
+}
+
+export function extractUserMessages(content: string): string[] {
+  const messages: string[] = []
+  const lines = content.split(/\r?\n/).filter(Boolean)
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line) as Record<string, unknown>
+      if (obj.type !== 'user') continue
+
+      const text = extractMessageText(obj)
+      if (text) messages.push(text)
+    } catch {
+      // Skip malformed JSON
+    }
+  }
+
+  return messages
+}
+
+export function extractAllMessages(content: string): string[] {
+  const messages: string[] = []
+  const lines = content.split(/\r?\n/).filter(Boolean)
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line) as Record<string, unknown>
+      if (obj.type !== 'user' && obj.type !== 'assistant') continue
+
+      const text = extractMessageText(obj)
+      if (text) messages.push(text)
+    } catch {
+      // Skip malformed JSON
+    }
+  }
+
+  return messages
+}

@@ -3,6 +3,8 @@ import {
   SearchTier,
   SearchResultSchema,
   searchTitleTier,
+  extractUserMessages,
+  extractAllMessages,
   type SearchResult,
   type SearchMatch,
 } from '../../../server/session-search.js'
@@ -111,5 +113,106 @@ describe('searchTitleTier()', () => {
   it('sorts by updatedAt descending', () => {
     const results = searchTitleTier(mockProjects, 'a')
     expect(results[0].updatedAt).toBeGreaterThanOrEqual(results[results.length - 1].updatedAt)
+  })
+})
+
+describe('extractUserMessages()', () => {
+  it('extracts user messages from simple format', () => {
+    const content = [
+      '{"type":"user","message":"Hello world","uuid":"1"}',
+      '{"type":"assistant","message":"Hi there","uuid":"2"}',
+      '{"type":"user","message":"How are you?","uuid":"3"}',
+    ].join('\n')
+
+    const messages = extractUserMessages(content)
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toBe('Hello world')
+    expect(messages[1]).toBe('How are you?')
+  })
+
+  it('extracts user messages from nested message.content format', () => {
+    const content = [
+      '{"type":"user","message":{"role":"user","content":"Nested message"},"uuid":"1"}',
+    ].join('\n')
+
+    const messages = extractUserMessages(content)
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toBe('Nested message')
+  })
+
+  it('extracts user messages from content array format', () => {
+    const content = [
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Array format"}]},"uuid":"1"}',
+    ].join('\n')
+
+    const messages = extractUserMessages(content)
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toBe('Array format')
+  })
+
+  it('skips non-user messages', () => {
+    const content = [
+      '{"type":"assistant","message":"Response","uuid":"1"}',
+      '{"type":"system","subtype":"init","uuid":"2"}',
+    ].join('\n')
+
+    const messages = extractUserMessages(content)
+
+    expect(messages).toHaveLength(0)
+  })
+
+  it('handles malformed JSON gracefully', () => {
+    const content = [
+      'not valid json',
+      '{"type":"user","message":"Valid","uuid":"1"}',
+    ].join('\n')
+
+    const messages = extractUserMessages(content)
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toBe('Valid')
+  })
+})
+
+describe('extractAllMessages()', () => {
+  it('extracts both user and assistant messages', () => {
+    const content = [
+      '{"type":"user","message":"User says hello","uuid":"1"}',
+      '{"type":"assistant","message":"Assistant responds","uuid":"2"}',
+    ].join('\n')
+
+    const messages = extractAllMessages(content)
+
+    expect(messages).toHaveLength(2)
+    expect(messages).toContain('User says hello')
+    expect(messages).toContain('Assistant responds')
+  })
+
+  it('extracts text from assistant content arrays', () => {
+    const content = [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Main response"},{"type":"thinking","thinking":"Internal thought"}]},"uuid":"1"}',
+    ].join('\n')
+
+    const messages = extractAllMessages(content)
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toContain('Main response')
+    expect(messages[0]).toContain('Internal thought')
+  })
+
+  it('skips system and progress messages', () => {
+    const content = [
+      '{"type":"system","subtype":"init","uuid":"1"}',
+      '{"type":"progress","content":"Loading...","uuid":"2"}',
+      '{"type":"user","message":"Hello","uuid":"3"}',
+    ].join('\n')
+
+    const messages = extractAllMessages(content)
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toBe('Hello')
   })
 })
