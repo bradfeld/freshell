@@ -21,6 +21,22 @@ import { getSessionRepairService } from './session-scanner/service.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// Find package.json by walking up from current directory
+function findPackageJson(): string {
+  let dir = __dirname
+  while (dir !== path.dirname(dir)) {
+    const candidate = path.join(dir, 'package.json')
+    if (fs.existsSync(candidate)) {
+      return candidate
+    }
+    dir = path.dirname(dir)
+  }
+  throw new Error('Could not find package.json')
+}
+
+const packageJson = JSON.parse(fs.readFileSync(findPackageJson(), 'utf-8'))
+const APP_VERSION: string = packageJson.version
+
 async function main() {
   validateStartupSecurity()
 
@@ -76,6 +92,7 @@ async function main() {
     const cfg = await configStore.snapshot()
     res.json({
       version: 1,
+      appVersion: APP_VERSION,
       wsConnections: wsHandler.connectionCount(),
       settings: cfg.settings,
       sessionsProjects: claudeIndexer.getProjects(),
@@ -119,6 +136,10 @@ async function main() {
 
   app.get('/api/lan-info', (_req, res) => {
     res.json({ ips: detectLanIps() })
+  })
+
+  app.get('/api/platform', (_req, res) => {
+    res.json({ platform: process.platform })
   })
 
   app.patch('/api/settings', async (req, res) => {
@@ -359,6 +380,17 @@ async function main() {
   const port = Number(process.env.PORT || 3001)
   server.listen(port, '0.0.0.0', () => {
     logger.info({ port }, 'Server listening')
+
+    // Print friendly startup message
+    const token = process.env.AUTH_TOKEN
+    const lanIps = detectLanIps()
+    const lanIp = lanIps[0] || 'localhost'
+    const url = `http://${lanIp}:${port}/?token=${token}`
+
+    console.log('')
+    console.log(`\x1b[32m\u{1F41A}\u{1F525} freshell is ready!\x1b[0m`)
+    console.log(`   Visit from anywhere on your network: \x1b[36m${url}\x1b[0m`)
+    console.log('')
   })
 
   // Graceful shutdown handler
