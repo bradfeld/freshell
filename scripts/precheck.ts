@@ -190,10 +190,11 @@ async function main(): Promise<void> {
   }
 
   // 3. Check for port conflicts
-  const [serverCheck, viteCheck] = await Promise.all([
-    checkServerPort(SERVER_PORT),
-    checkVitePort(),
-  ])
+  // Only check Vite port in dev mode (predev), not production (preserve)
+  const isDevMode = process.env.npm_lifecycle_event === 'predev'
+
+  const serverCheck = await checkServerPort(SERVER_PORT)
+  const viteCheck = isDevMode ? await checkVitePort() : { status: 'free' as const }
 
   const issues: string[] = []
 
