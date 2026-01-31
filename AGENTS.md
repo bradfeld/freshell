@@ -25,6 +25,20 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 - Then fast-forward main: `git merge --ff-only feature/branch` - this is atomic (pointer move, no intermediate states)
 - If `--ff-only` fails, go back to the worktree and rebase/merge until it can fast-forward
 
+## Releasing (Only When Explicitly Requested)
+
+**Never release without explicit user approval.** Merging to main does not mean releasing. The README points users to a specific release tag (e.g., `--branch v0.1.0`), so main can contain work-in-progress.
+
+When the user explicitly asks to release:
+
+1. Ensure all tests pass and main is stable
+2. Bump version in `package.json` (if not already done)
+3. Push main: `git push origin main`
+4. Create and push tag: `git tag -a vX.Y.Z -m "vX.Y.Z - Description" && git push origin vX.Y.Z`
+5. Create GitHub release: `gh release create vX.Y.Z --title "vX.Y.Z - Title" --notes "Release notes"`
+6. Update README.md to point to new tag: change `--branch vOLD` to `--branch vX.Y.Z`
+7. Commit and push the README change
+
 ## Codex Agent in CMD Instructions (Codex agents only; only when running in CMD on windows; all other agents must ignore)
 - Prefer bash/WSL over PowerShell; Windows paths map like `D:\...` -> `/mnt/d/...`.
 - Use `bash -lc "<cmd>"` for non-interactive commands; avoid interactive shells so commands return control.
