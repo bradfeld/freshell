@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import fsp from 'fs/promises'
+import path from 'path'
+import os from 'os'
 import {
   SearchTier,
   SearchResultSchema,
   searchTitleTier,
   extractUserMessages,
   extractAllMessages,
+  searchSessionFile,
   type SearchResult,
   type SearchMatch,
 } from '../../../server/session-search.js'
@@ -214,5 +218,87 @@ describe('extractAllMessages()', () => {
 
     expect(messages).toHaveLength(1)
     expect(messages[0]).toBe('Hello')
+  })
+})
+
+describe('searchSessionFile()', () => {
+  let tempDir: string
+
+  beforeEach(async () => {
+    tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'session-search-test-'))
+  })
+
+  afterEach(async () => {
+    await fsp.rm(tempDir, { recursive: true, force: true })
+  })
+
+  async function createTestSession(name: string, content: string): Promise<string> {
+    const filePath = path.join(tempDir, `${name}.jsonl`)
+    await fsp.writeFile(filePath, content)
+    return filePath
+  }
+
+  it('finds match in user message (tier userMessages)', async () => {
+    const filePath = await createTestSession('test1', [
+      '{"type":"user","message":"Fix the authentication bug","uuid":"1"}',
+      '{"type":"assistant","message":"I will fix that","uuid":"2"}',
+    ].join('\n'))
+
+    const result = await searchSessionFile(filePath, 'authentication', 'userMessages')
+
+    expect(result).not.toBeNull()
+    expect(result?.matchedIn).toBe('userMessage')
+    expect(result?.snippet).toContain('authentication')
+  })
+
+  it('does not search assistant messages in tier userMessages', async () => {
+    const filePath = await createTestSession('test2', [
+      '{"type":"user","message":"Hello","uuid":"1"}',
+      '{"type":"assistant","message":"The authentication is fixed","uuid":"2"}',
+    ].join('\n'))
+
+    const result = await searchSessionFile(filePath, 'authentication', 'userMessages')
+
+    expect(result).toBeNull()
+  })
+
+  it('searches assistant messages in tier fullText', async () => {
+    const filePath = await createTestSession('test3', [
+      '{"type":"user","message":"Hello","uuid":"1"}',
+      '{"type":"assistant","message":"The authentication is fixed","uuid":"2"}',
+    ].join('\n'))
+
+    const result = await searchSessionFile(filePath, 'authentication', 'fullText')
+
+    expect(result).not.toBeNull()
+    expect(result?.matchedIn).toBe('assistantMessage')
+  })
+
+  it('extracts snippet context around match', async () => {
+    const longMessage = 'A'.repeat(50) + 'TARGET' + 'B'.repeat(50)
+    const filePath = await createTestSession('test4', [
+      `{"type":"user","message":"${longMessage}","uuid":"1"}`,
+    ].join('\n'))
+
+    const result = await searchSessionFile(filePath, 'TARGET', 'userMessages')
+
+    expect(result?.snippet?.length).toBeLessThanOrEqual(120)
+    expect(result?.snippet).toContain('TARGET')
+  })
+
+  it('returns null for non-existent file', async () => {
+    const result = await searchSessionFile('/nonexistent/file.jsonl', 'test', 'fullText')
+
+    expect(result).toBeNull()
+  })
+
+  it('is case-insensitive', async () => {
+    const filePath = await createTestSession('test5', [
+      '{"type":"user","message":"Fix the BUG","uuid":"1"}',
+    ].join('\n'))
+
+    const result = await searchSessionFile(filePath, 'bug', 'userMessages')
+
+    expect(result).not.toBeNull()
   })
 })

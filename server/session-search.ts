@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import fs from 'fs'
 import type { ProjectGroup, ClaudeSession } from './claude-indexer.js'
 
 export const SearchTier = {
@@ -151,4 +152,67 @@ export function extractAllMessages(content: string): string[] {
   }
 
   return messages
+}
+
+function extractSnippet(text: string, query: string, contextLength = 50): string {
+  const lowerText = text.toLowerCase()
+  const lowerQuery = query.toLowerCase()
+  const index = lowerText.indexOf(lowerQuery)
+
+  if (index === -1) return text.slice(0, 100)
+
+  const start = Math.max(0, index - contextLength)
+  const end = Math.min(text.length, index + query.length + contextLength)
+
+  let snippet = text.slice(start, end)
+  if (start > 0) snippet = '...' + snippet
+  if (end < text.length) snippet = snippet + '...'
+
+  return snippet
+}
+
+export async function searchSessionFile(
+  filePath: string,
+  query: string,
+  tier: 'userMessages' | 'fullText'
+): Promise<Omit<SearchResult, 'sessionId' | 'projectPath' | 'updatedAt'> | null> {
+  const q = query.toLowerCase()
+
+  let content: string
+  try {
+    content = await fs.promises.readFile(filePath, 'utf-8')
+  } catch {
+    return null
+  }
+
+  const lines = content.split(/\r?\n/).filter(Boolean)
+
+  for (const line of lines) {
+    let obj: Record<string, unknown>
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+
+    const isUser = obj.type === 'user'
+    const isAssistant = obj.type === 'assistant'
+
+    // In userMessages tier, only search user messages
+    if (tier === 'userMessages' && !isUser) continue
+    // In fullText tier, search both
+    if (tier === 'fullText' && !isUser && !isAssistant) continue
+
+    const text = extractMessageText(obj)
+    if (!text) continue
+
+    if (text.toLowerCase().includes(q)) {
+      return {
+        matchedIn: isUser ? 'userMessage' : 'assistantMessage',
+        snippet: extractSnippet(text, query),
+      }
+    }
+  }
+
+  return null
 }
