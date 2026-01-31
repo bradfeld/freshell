@@ -49,9 +49,16 @@ export type EditorPaneContent = {
 }
 
 /**
+ * Picker pane content - shows pane type selection UI.
+ */
+export type PickerPaneContent = {
+  kind: 'picker'
+}
+
+/**
  * Union type for all pane content types.
  */
-export type PaneContent = TerminalPaneContent | BrowserPaneContent | EditorPaneContent
+export type PaneContent = TerminalPaneContent | BrowserPaneContent | EditorPaneContent | PickerPaneContent
 
 /**
  * Input type for creating terminal panes.
@@ -72,7 +79,7 @@ export type EditorPaneInput = EditorPaneContent
  * Input type for splitPane/initLayout actions.
  * Accepts either full content or partial terminal input.
  */
-export type PaneContentInput = TerminalPaneInput | BrowserPaneContent | EditorPaneInput
+export type PaneContentInput = TerminalPaneInput | BrowserPaneContent | EditorPaneInput | PickerPaneContent
 
 /**
  * Recursive tree structure for pane layouts.
