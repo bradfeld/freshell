@@ -24,13 +24,14 @@ describe('executor', () => {
 
     it('executes commands with correct project root cwd', async () => {
       const mockExec: ExecAsyncFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' })
+      const testProjectRoot = '/test/project/root'
 
-      await executeUpdate(() => {}, mockExec)
+      await executeUpdate(() => {}, mockExec, { projectRoot: testProjectRoot })
 
       expect(mockExec).toHaveBeenCalledTimes(3)
-      expect(mockExec).toHaveBeenNthCalledWith(1, 'git pull', expect.objectContaining({ cwd: expect.any(String) }))
-      expect(mockExec).toHaveBeenNthCalledWith(2, 'npm install', expect.objectContaining({ cwd: expect.any(String) }))
-      expect(mockExec).toHaveBeenNthCalledWith(3, 'npm run build', expect.objectContaining({ cwd: expect.any(String) }))
+      expect(mockExec).toHaveBeenNthCalledWith(1, 'git pull', { cwd: testProjectRoot })
+      expect(mockExec).toHaveBeenNthCalledWith(2, 'npm ci', { cwd: testProjectRoot })
+      expect(mockExec).toHaveBeenNthCalledWith(3, 'npm run build', { cwd: testProjectRoot })
     })
 
     it('reports error and stops if git pull fails', async () => {
@@ -51,10 +52,10 @@ describe('executor', () => {
       expect(mockExec).toHaveBeenCalledTimes(1)
     })
 
-    it('reports error and stops if npm install fails', async () => {
+    it('reports error and stops if npm ci fails', async () => {
       const mockExec: ExecAsyncFn = vi.fn().mockImplementation((cmd) => {
-        if (cmd.includes('npm install')) {
-          return Promise.reject(new Error('npm install failed'))
+        if (cmd.includes('npm ci')) {
+          return Promise.reject(new Error('npm ci failed'))
         }
         return Promise.resolve({ stdout: '', stderr: '' })
       })
@@ -63,7 +64,7 @@ describe('executor', () => {
       const result = await executeUpdate((p) => progress.push(p), mockExec)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('npm install failed')
+      expect(result.error).toContain('npm ci failed')
       expect(progress).toContainEqual({ step: 'npm-install', status: 'error', error: expect.any(String) })
       // Should have run git pull but not build
       expect(mockExec).toHaveBeenCalledTimes(2)
@@ -102,6 +103,19 @@ describe('executor', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toBe('string error')
+    })
+
+    it('includes stderr in error message when available', async () => {
+      const errorWithStderr = new Error('Command failed') as Error & { stderr?: string }
+      errorWithStderr.stderr = 'ENOENT: npm not found'
+      const mockExec: ExecAsyncFn = vi.fn().mockRejectedValue(errorWithStderr)
+
+      const progress: UpdateProgress[] = []
+      const result = await executeUpdate((p) => progress.push(p), mockExec)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Command failed')
+      expect(result.error).toContain('ENOENT: npm not found')
     })
   })
 })

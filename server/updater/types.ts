@@ -9,3 +9,18 @@ export interface UpdateCheckResult {
   releaseUrl: string | null
   error: string | null
 }
+
+// Executor types
+export type UpdateStep = 'git-pull' | 'npm-install' | 'build'
+export type UpdateStatus = 'running' | 'complete' | 'error'
+
+export interface UpdateProgress {
+  step: UpdateStep
+  status: UpdateStatus
+  error?: string
+}
+
+export interface UpdateResult {
+  success: boolean
+  error?: string
+}
