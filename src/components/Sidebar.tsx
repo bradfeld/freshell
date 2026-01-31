@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal, History, Settings, LayoutGrid, Search, Play, Loader2 } from 'lucide-react'
+import { Terminal, History, Settings, LayoutGrid, Search, Play, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
@@ -322,8 +322,17 @@ export default function Sidebar({
             placeholder="Search..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="w-full h-8 pl-8 pr-3 text-sm bg-muted/50 border-0 rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border"
+            className="w-full h-8 pl-8 pr-8 text-sm bg-muted/50 border-0 rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border"
           />
+          {filter && (
+            <button
+              aria-label="Clear search"
+              onClick={() => setFilter('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         {filter.trim() && (
           <div className="mt-2">

@@ -1242,6 +1242,43 @@ describe('Sidebar Component - Session-Centric Display', () => {
     })
   })
 
+  describe('Search clear button', () => {
+    it('shows clear button when search has text', async () => {
+      const store = createTestStore()
+      const { getByPlaceholderText, getByRole, queryByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // No clear button initially
+      expect(queryByRole('button', { name: /clear search/i })).not.toBeInTheDocument()
+
+      // Type in search
+      const input = getByPlaceholderText('Search...')
+      fireEvent.change(input, { target: { value: 'test' } })
+
+      // Should show clear button
+      expect(getByRole('button', { name: /clear search/i })).toBeInTheDocument()
+    })
+
+    it('clears search when clear button is clicked', async () => {
+      const store = createTestStore()
+      const { getByPlaceholderText, getByRole, queryByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // Type in search
+      const input = getByPlaceholderText('Search...')
+      fireEvent.change(input, { target: { value: 'test' } })
+      expect(input).toHaveValue('test')
+
+      // Click clear button
+      fireEvent.click(getByRole('button', { name: /clear search/i }))
+
+      // Search should be cleared
+      expect(input).toHaveValue('')
+      // Clear button should be hidden
+      expect(queryByRole('button', { name: /clear search/i })).not.toBeInTheDocument()
+    })
+  })
+
   describe('Search tier toggle', () => {
     it('renders tier selector when searching', async () => {
       const store = createTestStore()
