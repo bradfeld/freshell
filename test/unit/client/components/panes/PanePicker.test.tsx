@@ -139,7 +139,8 @@ describe('PanePicker', () => {
       render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
       const shellButton = screen.getByText('Shell').closest('button')!
       fireEvent.mouseEnter(shellButton)
-      expect(screen.getByText('S', { selector: '.shortcut-hint' })).toBeInTheDocument()
+      const hint = screen.getByText('S', { selector: '.shortcut-hint' })
+      expect(hint).toHaveClass('opacity-40')
     })
 
     it('hides shortcut hint on mouse leave', () => {
@@ -147,7 +148,8 @@ describe('PanePicker', () => {
       const shellButton = screen.getByText('Shell').closest('button')!
       fireEvent.mouseEnter(shellButton)
       fireEvent.mouseLeave(shellButton)
-      expect(screen.queryByText('S', { selector: '.shortcut-hint' })).not.toBeInTheDocument()
+      const hint = screen.getByText('S', { selector: '.shortcut-hint' })
+      expect(hint).toHaveClass('opacity-0')
     })
   })
 })

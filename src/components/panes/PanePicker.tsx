@@ -126,11 +126,12 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane }: PanePicke
           >
             <option.icon className="h-12 w-12" />
             <span className="text-sm font-medium">{option.label}</span>
-            {showHint(index) && (
-              <span className="shortcut-hint text-xs opacity-60 -mt-1">
-                {option.shortcut}
-              </span>
-            )}
+            <span className={cn(
+              'shortcut-hint text-xs -mt-1 transition-opacity duration-150',
+              showHint(index) ? 'opacity-40' : 'opacity-0'
+            )}>
+              {option.shortcut}
+            </span>
           </button>
         ))}
       </div>
