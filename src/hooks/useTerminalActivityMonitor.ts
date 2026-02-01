@@ -140,14 +140,17 @@ export function useTerminalActivityMonitor() {
         tabIsReady = false
       }
 
+      // Don't show working indicator for active tab (you can already see it)
+      const isActiveTab = tab.id === activeTabId
+
       states[tab.id] = {
-        isWorking: notifications?.visualWhenWorking ? tabIsWorking : false,
+        isWorking: notifications?.visualWhenWorking && !isActiveTab ? tabIsWorking : false,
         isReady: notifications?.visualWhenFinished ? tabIsReady : false,
       }
     }
 
     return states
-  }, [tabs, layouts, lastOutputAt, ready, notifications])
+  }, [tabs, layouts, lastOutputAt, ready, notifications, activeTabId])
 
   return { tabActivityStates }
 }
