@@ -221,7 +221,6 @@ export class ClaudeSessionIndexer {
 
     this.watcher = chokidar.watch(sessionsGlob, {
       ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
     })
 
     const scheduleUpsert = (filePath: string) => this.scheduleFileUpsert(filePath)
@@ -362,6 +361,9 @@ export class ClaudeSessionIndexer {
 
     this.sessionsById.delete(sessionId)
     this.removeSessionFromProject(existing.sessionId, existing.projectPath)
+    // Clean up createdAtPinned to prevent unbounded growth
+    this.createdAtPinned.delete(makeSessionKey('claude', sessionId))
+    this.createdAtPinned.delete(sessionId) // Also check legacy key format
     return true
   }
 

@@ -46,7 +46,6 @@ export class CodingCliSessionIndexer {
 
     this.watcher = chokidar.watch(globs, {
       ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
     })
 
     const schedule = () => this.scheduleRefresh()
