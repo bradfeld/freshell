@@ -392,14 +392,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             requestIdRef.current = newRequestId
             terminalIdRef.current = undefined
             updateContent({ terminalId: undefined, createRequestId: newRequestId, status: 'creating' })
-            ws.send({
-              type: 'terminal.create',
-              requestId: newRequestId,
-              mode,
-              shell: shell || 'system',
-              cwd: initialCwd,
-              resumeSessionId: getResumeSessionIdFromRef(contentRef),
-            })
           }
         }
       })

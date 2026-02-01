@@ -6,6 +6,7 @@ import tabsReducer from '@/store/tabsSlice'
 import panesReducer from '@/store/panesSlice'
 import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import connectionReducer from '@/store/connectionSlice'
+import { useAppSelector } from '@/store/hooks'
 import type { PaneNode, TerminalPaneContent } from '@/store/paneTypes'
 
 const wsMocks = vi.hoisted(() => ({
@@ -61,6 +62,16 @@ vi.mock('xterm-addon-fit', () => ({
 vi.mock('xterm/css/xterm.css', () => ({}))
 
 import TerminalView from '@/components/TerminalView'
+
+function TerminalViewFromStore({ tabId, paneId }: { tabId: string; paneId: string }) {
+  const paneContent = useAppSelector((state) => {
+    const layout = state.panes.layouts[tabId]
+    if (!layout || layout.type !== 'leaf') return null
+    return layout.content
+  })
+  if (!paneContent || paneContent.kind !== 'terminal') return null
+  return <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+}
 
 class MockResizeObserver {
   observe = vi.fn()
@@ -206,7 +217,7 @@ describe('TerminalView lifecycle updates', () => {
 
     render(
       <Provider store={store}>
-        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        <TerminalViewFromStore tabId={tabId} paneId={paneId} />
       </Provider>
     )
 
@@ -228,5 +239,102 @@ describe('TerminalView lifecycle updates', () => {
     expect(wsMocks.send).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'terminal.create',
     }))
+  })
+
+  it('recreates terminal once after INVALID_TERMINAL_ID for the current terminal', async () => {
+    const tabId = 'tab-3'
+    const paneId = 'pane-3'
+
+    const paneContent: TerminalPaneContent = {
+      kind: 'terminal',
+      createRequestId: 'req-3',
+      status: 'running',
+      mode: 'claude',
+      shell: 'system',
+      terminalId: 'term-3',
+      initialCwd: '/tmp',
+    }
+
+    const root: PaneNode = { type: 'leaf', id: paneId, content: paneContent }
+
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+        settings: settingsReducer,
+        connection: connectionReducer,
+      },
+      preloadedState: {
+        tabs: {
+          tabs: [{
+            id: tabId,
+            mode: 'claude',
+            status: 'running',
+            title: 'Claude',
+            titleSetByUser: false,
+            terminalId: 'term-3',
+            createRequestId: 'req-3',
+          }],
+          activeTabId: tabId,
+        },
+        panes: {
+          layouts: { [tabId]: root },
+          activePane: { [tabId]: paneId },
+          paneTitles: {},
+        },
+        settings: { settings: defaultSettings, status: 'loaded' },
+        connection: { status: 'connected', error: null },
+      },
+    })
+
+    const { rerender } = render(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(messageHandler).not.toBeNull()
+    })
+
+    wsMocks.send.mockClear()
+    const onMessageCallsBefore = wsMocks.onMessage.mock.calls.length
+
+    messageHandler!({
+      type: 'error',
+      code: 'INVALID_TERMINAL_ID',
+      message: 'Unknown terminalId',
+      terminalId: 'term-3',
+    })
+
+    await waitFor(() => {
+      const layout = store.getState().panes.layouts[tabId] as { type: 'leaf'; content: any }
+      expect(layout.content.terminalId).toBeUndefined()
+      expect(layout.content.createRequestId).not.toBe('req-3')
+    })
+
+    const layout = store.getState().panes.layouts[tabId] as { type: 'leaf'; content: any }
+    const newPaneContent = layout.content as TerminalPaneContent
+    const newRequestId = newPaneContent.createRequestId
+
+    rerender(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={newPaneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(wsMocks.onMessage.mock.calls.length).toBeGreaterThan(onMessageCallsBefore)
+    })
+
+    await waitFor(() => {
+      const createCalls = wsMocks.send.mock.calls.filter(([msg]) => msg?.type === 'terminal.create')
+      expect(createCalls.length).toBeGreaterThanOrEqual(1)
+    })
+
+    const createCalls = wsMocks.send.mock.calls.filter(([msg]) =>
+      msg?.type === 'terminal.create' && msg.requestId === newRequestId
+    )
+    expect(createCalls).toHaveLength(1)
   })
 })
