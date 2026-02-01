@@ -3,20 +3,33 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 /**
  * Transient state for tracking terminal output activity.
  * NOT persisted - this is purely runtime UI state.
+ *
+ * State machine:
+ * - Ready (default): idle, green dot
+ * - Working: streaming, pulsing grey (can only be entered when tab is active)
+ * - Finished: streaming stopped, green ring (only visible on background tabs)
+ *
+ * Transitions:
+ * - Ready → Working: output starts AND tab is active
+ * - Working → Finished: output stops (20s idle)
+ * - Finished → Ready: user clicks on tab
  */
 export interface TerminalActivityState {
   /** Map of paneId -> last output timestamp */
   lastOutputAt: Record<string, number>
   /** Map of paneId -> last input timestamp (for filtering echo) */
   lastInputAt: Record<string, number>
-  /** Set of paneIds that have finished streaming and are awaiting user attention */
-  ready: Record<string, boolean>
+  /** Set of paneIds currently in "working" state (streaming, entered while active) */
+  working: Record<string, boolean>
+  /** Set of paneIds in "finished" state (was working, now idle, awaiting attention) */
+  finished: Record<string, boolean>
 }
 
 const initialState: TerminalActivityState = {
   lastOutputAt: {},
   lastInputAt: {},
-  ready: {},
+  working: {},
+  finished: {},
 }
 
 /** Threshold in ms to consider a terminal "streaming" (must be idle this long to trigger finished) */
@@ -36,8 +49,8 @@ export const terminalActivitySlice = createSlice({
     recordOutput: (state, action: PayloadAction<{ paneId: string }>) => {
       const { paneId } = action.payload
       state.lastOutputAt[paneId] = Date.now()
-      // Clear ready state when new output arrives (terminal is working again)
-      delete state.ready[paneId]
+      // Clear finished state when new output arrives (terminal is working again)
+      delete state.finished[paneId]
     },
 
     /** Record input activity for a pane (to filter out echo) */
@@ -46,32 +59,34 @@ export const terminalActivitySlice = createSlice({
       state.lastInputAt[paneId] = Date.now()
     },
 
-    /** Mark a pane as ready (finished streaming, awaiting attention) */
-    markReady: (state, action: PayloadAction<{ paneId: string }>) => {
+    /** Enter working state (only called when tab is active and output starts) */
+    enterWorking: (state, action: PayloadAction<{ paneId: string }>) => {
       const { paneId } = action.payload
-      state.ready[paneId] = true
+      state.working[paneId] = true
     },
 
-    /** Clear ready state for a pane (user viewed it) */
-    clearReady: (state, action: PayloadAction<{ paneId: string }>) => {
+    /** Transition from working to finished (output stopped) */
+    finishWorking: (state, action: PayloadAction<{ paneId: string }>) => {
       const { paneId } = action.payload
-      delete state.ready[paneId]
+      delete state.working[paneId]
+      state.finished[paneId] = true
     },
 
-    /** Clear all ready states for a tab's panes */
-    clearReadyForTab: (state, action: PayloadAction<{ paneIds: string[] }>) => {
+    /** Clear finished state for a tab's panes (user clicked on tab) */
+    clearFinishedForTab: (state, action: PayloadAction<{ paneIds: string[] }>) => {
       const { paneIds } = action.payload
       for (const paneId of paneIds) {
-        delete state.ready[paneId]
+        delete state.finished[paneId]
       }
     },
 
-    /** Clean up state for removed panes */
+    /** Clean up all state for removed panes */
     removePaneActivity: (state, action: PayloadAction<{ paneId: string }>) => {
       const { paneId } = action.payload
       delete state.lastOutputAt[paneId]
       delete state.lastInputAt[paneId]
-      delete state.ready[paneId]
+      delete state.working[paneId]
+      delete state.finished[paneId]
     },
   },
 })
@@ -79,9 +94,9 @@ export const terminalActivitySlice = createSlice({
 export const {
   recordOutput,
   recordInput,
-  markReady,
-  clearReady,
-  clearReadyForTab,
+  enterWorking,
+  finishWorking,
+  clearFinishedForTab,
   removePaneActivity,
 } = terminalActivitySlice.actions
 

@@ -83,7 +83,8 @@ function createStore(initialState: Partial<TabsState> = {}) {
       terminalActivity: {
         lastOutputAt: {},
         lastInputAt: {},
-        ready: {},
+        working: {},
+        finished: {},
       },
     },
   })

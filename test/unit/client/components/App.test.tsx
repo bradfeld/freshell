@@ -110,7 +110,8 @@ function createTestStore() {
       terminalActivity: {
         lastOutputAt: {},
         lastInputAt: {},
-        ready: {},
+        working: {},
+        finished: {},
       },
     },
   })

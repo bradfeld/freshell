@@ -47,7 +47,8 @@ function createStore(tabsState: any, panesState: any) {
       terminalActivity: {
         lastOutputAt: {},
         lastInputAt: {},
-        ready: {},
+        working: {},
+        finished: {},
       },
     },
   })

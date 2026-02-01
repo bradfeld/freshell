@@ -1,6 +1,12 @@
 import { useEffect, useRef, useMemo, useCallback } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { markReady, clearReadyForTab, STREAMING_THRESHOLD_MS, INPUT_ECHO_WINDOW_MS } from '@/store/terminalActivitySlice'
+import {
+  enterWorking,
+  finishWorking,
+  clearFinishedForTab,
+  STREAMING_THRESHOLD_MS,
+  INPUT_ECHO_WINDOW_MS,
+} from '@/store/terminalActivitySlice'
 import { useNotificationSound } from './useNotificationSound'
 import type { PaneNode } from '@/store/paneTypes'
 
@@ -29,21 +35,24 @@ function isPaneStreaming(
 }
 
 export interface TabActivityState {
-  /** Terminal stopped streaming on background tab (needs attention) */
+  /** Tab has panes in working state (streaming, pulsing grey) */
+  isWorking: boolean
+  /** Tab has panes in finished state AND is a background tab (green ring) */
   isFinished: boolean
 }
 
 /**
- * Monitor terminal activity and handle transitions.
+ * Monitor terminal activity and handle state transitions.
  *
- * States:
- * - Ready (default): green dot - terminal is idle (all tabs show this normally)
- * - Finished: green dot + blue tab bg - streaming stopped on background tab
+ * State machine:
+ * - Ready (default): green dot - terminal is idle
+ * - Working: pulsing grey - terminal is streaming (can only enter when tab is active)
+ * - Finished: green ring - streaming stopped (only visible on background tabs)
  *
- * Rules:
- * - Active tab always shows ready (green)
- * - Finished is entered when background tab stops streaming
- * - Selecting a finished tab clears it to ready
+ * Transitions:
+ * - Ready → Working: output starts AND tab is active
+ * - Working → Finished: output stops (20s idle)
+ * - Finished → Ready: user clicks on tab
  */
 export function useTerminalActivityMonitor() {
   const dispatch = useAppDispatch()
@@ -54,7 +63,8 @@ export function useTerminalActivityMonitor() {
   const layouts = useAppSelector((s) => s.panes.layouts)
   const lastOutputAt = useAppSelector((s) => s.terminalActivity.lastOutputAt)
   const lastInputAt = useAppSelector((s) => s.terminalActivity.lastInputAt)
-  const ready = useAppSelector((s) => s.terminalActivity.ready)
+  const working = useAppSelector((s) => s.terminalActivity.working)
+  const finished = useAppSelector((s) => s.terminalActivity.finished)
   const notifications = useAppSelector((s) => s.settings.settings.notifications)
 
   // Track previous streaming state to detect transitions
@@ -63,7 +73,22 @@ export function useTerminalActivityMonitor() {
   // Track if we had streaming recently (to keep interval running long enough to catch transitions)
   const hadStreamingRef = useRef(false)
 
-  // Check if any pane is currently streaming (to know if we need timeout)
+  // Find which tab owns a pane
+  const findOwnerTab = useCallback(
+    (paneId: string): string | null => {
+      for (const tab of tabs) {
+        const layout = layouts[tab.id]
+        const paneIds = collectPaneIds(layout)
+        if (paneIds.includes(paneId)) {
+          return tab.id
+        }
+      }
+      return null
+    },
+    [tabs, layouts]
+  )
+
+  // Check if any pane is currently streaming (to know if we need interval)
   const hasActiveStreaming = useMemo(() => {
     const now = Date.now()
     for (const paneId of Object.keys(lastOutputAt)) {
@@ -74,11 +99,30 @@ export function useTerminalActivityMonitor() {
     return false
   }, [lastOutputAt, lastInputAt])
 
-  // Callback to check for transitions
+  // Handle entering working state when output starts on active tab
+  useEffect(() => {
+    const now = Date.now()
+    for (const paneId of Object.keys(lastOutputAt)) {
+      // Skip if already working
+      if (working[paneId]) continue
+
+      // Check if this pane is streaming (has recent output, not echo)
+      if (!isPaneStreaming(lastOutputAt[paneId], lastInputAt[paneId], now)) continue
+
+      // Check if this pane's tab is active
+      const ownerTabId = findOwnerTab(paneId)
+      if (ownerTabId === activeTabId) {
+        // Enter working state
+        dispatch(enterWorking({ paneId }))
+      }
+    }
+  }, [lastOutputAt, lastInputAt, working, activeTabId, findOwnerTab, dispatch])
+
+  // Callback to check for working → finished transitions
   const checkTransitions = useCallback(() => {
     const now = Date.now()
 
-    // Calculate current streaming state (filtering out input echo)
+    // Calculate current streaming state
     const currentStreaming: Record<string, boolean> = {}
     for (const paneId of Object.keys(lastOutputAt)) {
       currentStreaming[paneId] = isPaneStreaming(lastOutputAt[paneId], lastInputAt[paneId], now)
@@ -92,36 +136,25 @@ export function useTerminalActivityMonitor() {
 
       // Transition: streaming -> idle
       if (wasStreaming && !isNowStreaming) {
-        // Find which tab this pane belongs to
-        let ownerTabId: string | null = null
-        for (const tab of tabs) {
-          const layout = layouts[tab.id]
-          const paneIds = collectPaneIds(layout)
-          if (paneIds.includes(paneId)) {
-            ownerTabId = tab.id
-            break
-          }
-        }
+        // Only transition to finished if the pane was in working state
+        if (working[paneId]) {
+          dispatch(finishWorking({ paneId }))
 
-        // Only mark finished if this isn't the active tab
-        if (ownerTabId && ownerTabId !== activeTabId) {
-          if (notifications?.visualWhenFinished) {
-            dispatch(markReady({ paneId }))
-          }
-          if (notifications?.soundWhenFinished) {
+          // Play sound only for background tabs
+          const ownerTabId = findOwnerTab(paneId)
+          if (ownerTabId && ownerTabId !== activeTabId && notifications?.soundWhenFinished) {
             shouldPlaySound = true
           }
         }
       }
     }
 
-    // Play sound (debounced by the hook)
     if (shouldPlaySound) {
       playSound()
     }
 
     prevStreamingRef.current = currentStreaming
-  }, [lastOutputAt, lastInputAt, tabs, layouts, activeTabId, notifications, dispatch, playSound])
+  }, [lastOutputAt, lastInputAt, working, activeTabId, findOwnerTab, notifications, dispatch, playSound])
 
   // Run transition check when output changes
   useEffect(() => {
@@ -135,50 +168,56 @@ export function useTerminalActivityMonitor() {
       const interval = setInterval(checkTransitions, 1000)
       return () => clearInterval(interval)
     } else if (hadStreamingRef.current) {
-      // Streaming just stopped - run one final check to detect the transition
       hadStreamingRef.current = false
       checkTransitions()
     }
   }, [hasActiveStreaming, checkTransitions])
 
-  // Clear ready state when tab is selected
+  // Clear finished state when tab is selected
   useEffect(() => {
     if (!activeTabId) return
 
     const layout = layouts[activeTabId]
     const paneIds = collectPaneIds(layout)
     if (paneIds.length > 0) {
-      dispatch(clearReadyForTab({ paneIds }))
+      dispatch(clearFinishedForTab({ paneIds }))
     }
   }, [activeTabId, layouts, dispatch])
 
-  // Compute activity states for all tabs (only finished state matters for display)
+  // Compute activity states for all tabs
   const tabActivityStates = useMemo(() => {
     const states: Record<string, TabActivityState> = {}
 
     for (const tab of tabs) {
       const layout = layouts[tab.id]
       const paneIds = collectPaneIds(layout)
+      const isActiveTab = tab.id === activeTabId
 
-      let tabIsFinished = false
+      // Check if any pane in this tab is working
+      let isWorking = false
       for (const paneId of paneIds) {
-        if (ready[paneId]) {
-          tabIsFinished = true
+        if (working[paneId]) {
+          isWorking = true
           break
         }
       }
 
-      const isActiveTab = tab.id === activeTabId
-
-      // Finished: shown on background tabs that stopped streaming
-      // Active tab always shows ready (green dot)
-      states[tab.id] = {
-        isFinished: notifications?.visualWhenFinished && !isActiveTab && tabIsFinished,
+      // Check if any pane in this tab is finished (only show on background tabs)
+      let isFinished = false
+      if (!isActiveTab && notifications?.visualWhenFinished) {
+        for (const paneId of paneIds) {
+          if (finished[paneId]) {
+            isFinished = true
+            break
+          }
+        }
       }
+
+      states[tab.id] = { isWorking, isFinished }
     }
 
     return states
-  }, [tabs, layouts, ready, notifications, activeTabId])
+  }, [tabs, layouts, working, finished, notifications, activeTabId])
 
   return { tabActivityStates }
 }

@@ -5,7 +5,11 @@ import type { Tab } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
-function StatusIndicator({ status }: { status: string }) {
+function StatusIndicator({ status, isWorking }: { status: string; isWorking: boolean }) {
+  // Working state: pulsing grey (terminal is streaming)
+  if (isWorking) {
+    return <Circle className="h-2 w-2 fill-muted-foreground text-muted-foreground animate-pulse" />
+  }
   // Ready state (default): green dot for running terminals
   if (status === 'running') {
     return <Circle className="h-2 w-2 fill-success text-success" />
@@ -25,6 +29,7 @@ export interface TabItemProps {
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
+  isWorking: boolean
   isFinished: boolean
   renameValue: string
   onRenameChange: (value: string) => void
@@ -40,6 +45,7 @@ export default function TabItem({
   isActive,
   isDragging,
   isRenaming,
+  isWorking,
   isFinished,
   renameValue,
   onRenameChange,
@@ -57,15 +63,15 @@ export default function TabItem({
           ? 'bg-background text-foreground shadow-sm'
           : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-accent mt-1',
         isDragging && 'opacity-50',
-        // Finished state: blue tint on background tabs
-        isFinished && !isActive && 'bg-blue-500/20'
+        // Finished state: green ring on background tabs that need attention
+        isFinished && !isActive && 'ring-2 ring-success'
       )}
       data-context={ContextIds.Tab}
       data-tab-id={tab.id}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <StatusIndicator status={tab.status} />
+      <StatusIndicator status={tab.status} isWorking={isWorking} />
 
       {isRenaming ? (
         <input

@@ -35,6 +35,7 @@ interface SortableTabProps {
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
+  isWorking: boolean
   isFinished: boolean
   renameValue: string
   onRenameChange: (value: string) => void
@@ -51,6 +52,7 @@ function SortableTab({
   isActive,
   isDragging,
   isRenaming,
+  isWorking,
   isFinished,
   renameValue,
   onRenameChange,
@@ -86,6 +88,7 @@ function SortableTab({
         isActive={isActive}
         isDragging={isDragging}
         isRenaming={isRenaming}
+        isWorking={isWorking}
         isFinished={isFinished}
         renameValue={renameValue}
         onRenameChange={onRenameChange}
@@ -197,6 +200,7 @@ export default function TabBar() {
                 isActive={tab.id === activeTabId}
                 isDragging={activeId === tab.id}
                 isRenaming={renamingId === tab.id}
+                isWorking={activityState.isWorking}
                 isFinished={activityState.isFinished}
                 renameValue={renameValue}
                 onRenameChange={setRenameValue}
@@ -267,6 +271,7 @@ export default function TabBar() {
                 isActive={activeTab.id === activeTabId}
                 isDragging={false}
                 isRenaming={false}
+                isWorking={tabActivityStates[activeTab.id]?.isWorking ?? false}
                 isFinished={tabActivityStates[activeTab.id]?.isFinished ?? false}
                 renameValue=""
                 onRenameChange={() => {}}
