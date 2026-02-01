@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolvePerfConfig } from '../../../server/perf-logger'
+import { resolvePerfConfig, setPerfLoggingEnabled, isPerfLoggingEnabled } from '../../../server/perf-logger'
 
 describe('perf logger config', () => {
   it('defaults to disabled with standard thresholds', () => {
@@ -29,5 +29,12 @@ describe('perf logger config', () => {
 
     const fallback = resolvePerfConfig({ PERF_HTTP_SLOW_MS: 'nope' } as NodeJS.ProcessEnv)
     expect(fallback.httpSlowMs).toBe(500)
+  })
+
+  it('can toggle at runtime', () => {
+    setPerfLoggingEnabled(true, 'test')
+    expect(isPerfLoggingEnabled()).toBe(true)
+    setPerfLoggingEnabled(false, 'test')
+    expect(isPerfLoggingEnabled()).toBe(false)
   })
 })

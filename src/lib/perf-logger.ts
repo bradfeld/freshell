@@ -54,7 +54,11 @@ export function setClientPerfEnabled(enabled: boolean, source?: string): void {
   if (perfConfig.enabled === enabled) return
   if (enabled) {
     perfConfig.enabled = true
-    initClientPerfLogging()
+    if (perfInitialized) {
+      startMemorySampling()
+    } else {
+      initClientPerfLogging()
+    }
     logClientPerf('perf_logging_toggled', { enabled: true, source })
     return
   }

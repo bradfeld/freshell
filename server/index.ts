@@ -25,7 +25,7 @@ import { filesRouter } from './files-router.js'
 import { getSessionRepairService } from './session-scanner/service.js'
 import { createClientLogsRouter } from './client-logs.js'
 import { createStartupState } from './startup-state.js'
-import { getPerfConfig, initPerfLogging, startPerfTimer, withPerfSpan } from './perf-logger.js'
+import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, startPerfTimer, withPerfSpan } from './perf-logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -108,6 +108,12 @@ async function main() {
 
   app.use('/api', httpAuthMiddleware)
   app.use('/api', createClientLogsRouter())
+  app.post('/api/perf', (req, res) => {
+    const enabled = req.body?.enabled === true
+    setPerfLoggingEnabled(enabled, 'api')
+    wsHandler.broadcast({ type: 'perf.logging', enabled })
+    res.json({ ok: true, enabled })
+  })
 
   const codingCliProviders = [claudeProvider, codexProvider]
   const codingCliIndexer = new CodingCliSessionIndexer(codingCliProviders)

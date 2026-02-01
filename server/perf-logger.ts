@@ -48,6 +48,10 @@ const perfConfig = resolvePerfConfig()
 const perfLogger = logger.child({ component: 'perf' })
 const lastLogByKey = new Map<string, number>()
 let perfInitialized = false
+let perfTimer: NodeJS.Timeout | null = null
+let eventLoopHistogram: ReturnType<typeof monitorEventLoopDelay> | null = null
+let lastCpu: NodeJS.CpuUsage | null = null
+let lastUptime = 0
 
 export function getPerfConfig(): PerfConfig {
   return perfConfig
@@ -55,6 +59,30 @@ export function getPerfConfig(): PerfConfig {
 
 export function isPerfLoggingEnabled(): boolean {
   return perfConfig.enabled
+}
+
+export function setPerfLoggingEnabled(enabled: boolean, source?: string): void {
+  if (perfConfig.enabled === enabled) return
+  perfConfig.enabled = enabled
+
+  if (enabled) {
+    initPerfLogging()
+    perfLogger.info({ event: 'perf_logging_toggled', enabled: true, source }, 'Perf logging toggled')
+    return
+  }
+
+  if (perfTimer) {
+    clearInterval(perfTimer)
+    perfTimer = null
+  }
+  if (eventLoopHistogram) {
+    eventLoopHistogram.disable()
+    eventLoopHistogram = null
+  }
+  lastCpu = null
+  lastUptime = 0
+  perfInitialized = false
+  perfLogger.info({ event: 'perf_logging_toggled', enabled: false, source }, 'Perf logging toggled')
 }
 
 export function shouldLog(key: string, intervalMs: number): boolean {
@@ -117,13 +145,14 @@ export function initPerfLogging(): void {
 
   perfLogger.info({ event: 'perf_logging_enabled', config: perfConfig }, 'Perf logging enabled')
 
-  const histogram = monitorEventLoopDelay({ resolution: perfConfig.eventLoopResolutionMs })
-  histogram.enable()
+  eventLoopHistogram = monitorEventLoopDelay({ resolution: perfConfig.eventLoopResolutionMs })
+  eventLoopHistogram.enable()
 
-  let lastCpu = process.cpuUsage()
-  let lastUptime = process.uptime()
+  lastCpu = process.cpuUsage()
+  lastUptime = process.uptime()
 
-  const timer = setInterval(() => {
+  perfTimer = setInterval(() => {
+    if (!eventLoopHistogram || !lastCpu) return
     const cpuDelta = process.cpuUsage(lastCpu)
     lastCpu = process.cpuUsage()
     const uptime = process.uptime()
@@ -132,12 +161,12 @@ export function initPerfLogging(): void {
 
     const mem = process.memoryUsage()
     const eventLoop = {
-      minMs: toMs(histogram.min),
-      maxMs: toMs(histogram.max),
-      meanMs: toMs(histogram.mean),
-      p50Ms: toMs(histogram.percentile(50)),
-      p90Ms: toMs(histogram.percentile(90)),
-      p99Ms: toMs(histogram.percentile(99)),
+      minMs: toMs(eventLoopHistogram.min),
+      maxMs: toMs(eventLoopHistogram.max),
+      meanMs: toMs(eventLoopHistogram.mean),
+      p50Ms: toMs(eventLoopHistogram.percentile(50)),
+      p90Ms: toMs(eventLoopHistogram.percentile(90)),
+      p99Ms: toMs(eventLoopHistogram.percentile(99)),
     }
 
     perfLogger.info(
@@ -157,8 +186,8 @@ export function initPerfLogging(): void {
       'Perf system sample',
     )
 
-    histogram.reset()
+    eventLoopHistogram.reset()
   }, perfConfig.processSampleMs)
 
-  timer.unref?.()
+  perfTimer.unref?.()
 }
