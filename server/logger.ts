@@ -1,4 +1,4 @@
-import pino, { type DestinationStream } from 'pino'
+import pino, { type DestinationStream, type LevelWithSilent } from 'pino'
 import { AsyncLocalStorage } from 'async_hooks'
 import fs from 'fs'
 import path from 'path'
@@ -89,3 +89,7 @@ export function createLogger(destination?: DestinationStream) {
 }
 
 export const logger = createLogger()
+
+export function setLogLevel(nextLevel: LevelWithSilent): void {
+  logger.level = nextLevel
+}

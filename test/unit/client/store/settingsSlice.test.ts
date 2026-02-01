@@ -64,6 +64,9 @@ describe('settingsSlice', () => {
       const newSettings: AppSettings = {
         theme: 'dark',
         uiScale: 1.5,
+        logging: {
+          debug: true,
+        },
         terminal: {
           fontSize: 16,
           fontFamily: 'Consolas',
@@ -377,6 +380,7 @@ describe('settingsSlice', () => {
       expect(defaultSettings).toHaveProperty('theme')
       expect(defaultSettings).toHaveProperty('uiScale')
       expect(defaultSettings).toHaveProperty('terminal')
+      expect(defaultSettings).toHaveProperty('logging')
       expect(defaultSettings).toHaveProperty('safety')
       expect(defaultSettings).toHaveProperty('sidebar')
       expect(defaultSettings).toHaveProperty('codingCli')

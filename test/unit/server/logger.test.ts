@@ -83,5 +83,12 @@ describe('logger', () => {
       const childLogger = logger.child({ component: 'test' })
       expect(typeof childLogger.info).toBe('function')
     }, TEST_TIMEOUT_MS)
+
+    it('can update log level at runtime', async () => {
+      const { logger, setLogLevel } = await import('../../../server/logger')
+
+      setLogLevel('info')
+      expect(logger.level).toBe('info')
+    }, TEST_TIMEOUT_MS)
   })
 })

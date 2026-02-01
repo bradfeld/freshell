@@ -74,6 +74,9 @@ function createTestSettings(overrides?: Partial<AppSettings>): AppSettings {
   return {
     theme: 'system',
     uiScale: 1.0,
+    logging: {
+      debug: false,
+    },
     terminal: {
       fontFamily: 'monospace',
       fontSize: 14,

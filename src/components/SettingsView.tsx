@@ -568,6 +568,19 @@ export default function SettingsView() {
             </SettingsRow>
           </SettingsSection>
 
+          {/* Debugging */}
+          <SettingsSection title="Debugging" description="Debug-level logs and perf instrumentation">
+            <SettingsRow label="Debug logging">
+              <Toggle
+                checked={settings.logging?.debug ?? false}
+                onChange={(checked) => {
+                  dispatch(updateSettingsLocal({ logging: { debug: checked } } as any))
+                  scheduleSave({ logging: { debug: checked } })
+                }}
+              />
+            </SettingsRow>
+          </SettingsSection>
+
           {/* Coding CLIs */}
           <SettingsSection title="Coding CLIs" description="Providers and defaults for coding sessions">
             {CODING_CLI_PROVIDER_CONFIGS.map((provider) => (

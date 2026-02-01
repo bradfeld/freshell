@@ -44,6 +44,9 @@ export type AppSettings = {
       | 'github-light'
   }
   defaultCwd?: string
+  logging: {
+    debug: boolean
+  }
   safety: {
     autoKillIdleMinutes: number
     warnBeforeKillMinutes: number
@@ -102,6 +105,9 @@ export const defaultSettings: AppSettings = {
     theme: 'auto',
   },
   defaultCwd: undefined,
+  logging: {
+    debug: false,
+  },
   safety: {
     autoKillIdleMinutes: 180,
     warnBeforeKillMinutes: 5,
@@ -193,10 +199,12 @@ async function readConfigFile(): Promise<UserConfig | null> {
 }
 
 function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
+  const baseLogging = base.logging ?? defaultSettings.logging
   return {
     ...base,
     ...patch,
     terminal: { ...base.terminal, ...(patch.terminal || {}) },
+    logging: { ...baseLogging, ...(patch.logging || {}) },
     safety: { ...base.safety, ...(patch.safety || {}) },
     panes: { ...base.panes, ...(patch.panes || {}) },
     sidebar: { ...base.sidebar, ...(patch.sidebar || {}) },

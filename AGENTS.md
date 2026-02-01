@@ -16,7 +16,7 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 - Specific user instructions override ALL other instructions, including the above, and including superpowers or skills
 - Server uses NodeNext/ESM; relative imports must include `.js` extensions
 - Always consider checking logs for debugging; server logs (including client console logs) are in the server process stdout/stderr (e.g., `npm run dev`/`npm start`).
-- Perf debugging flag: set `PERF_LOGGING=1` to enable perf logs (recommended to keep OFF outside perf investigations).
+- Debug logging toggle (UI Settings → Debugging → Debug logging) enables debug-level logs and perf logging; keep OFF outside perf investigations.
 
 ## Merging to Main (CRITICAL - Read This)
 

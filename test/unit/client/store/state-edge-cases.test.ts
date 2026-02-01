@@ -802,6 +802,9 @@ describe('State Edge Cases', () => {
         const customSettings: AppSettings = {
           theme: 'light',
           uiScale: 2.0,
+          logging: {
+            debug: false,
+          },
           terminal: {
             fontSize: 24,
             fontFamily: 'Fira Code',

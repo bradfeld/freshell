@@ -13,6 +13,9 @@ export const defaultSettings: AppSettings = {
     theme: 'auto',
   },
   defaultCwd: undefined,
+  logging: {
+    debug: false,
+  },
   safety: {
     autoKillIdleMinutes: 180,
     warnBeforeKillMinutes: 5,
@@ -56,11 +59,13 @@ const initialState: SettingsState = {
 }
 
 export function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
+  const baseLogging = base.logging ?? defaultSettings.logging
   const baseCodingCli = base.codingCli ?? defaultSettings.codingCli
   const merged = {
     ...base,
     ...patch,
     terminal: { ...base.terminal, ...(patch.terminal || {}) },
+    logging: { ...baseLogging, ...(patch.logging || {}) },
     safety: { ...base.safety, ...(patch.safety || {}) },
     sidebar: { ...base.sidebar, ...(patch.sidebar || {}) },
     panes: { ...base.panes, ...(patch.panes || {}) },

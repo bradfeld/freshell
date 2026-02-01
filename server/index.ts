@@ -7,7 +7,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
-import { logger } from './logger.js'
+import { logger, setLogLevel } from './logger.js'
 import { requestLogger } from './request-logger.js'
 import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
 import { configStore } from './config-store.js'
@@ -108,12 +108,6 @@ async function main() {
 
   app.use('/api', httpAuthMiddleware)
   app.use('/api', createClientLogsRouter())
-  app.post('/api/perf', (req, res) => {
-    const enabled = req.body?.enabled === true
-    setPerfLoggingEnabled(enabled, 'api')
-    wsHandler.broadcast({ type: 'perf.logging', enabled })
-    res.json({ ok: true, enabled })
-  })
 
   const codingCliProviders = [claudeProvider, codexProvider]
   const codingCliIndexer = new CodingCliSessionIndexer(codingCliProviders)
@@ -145,6 +139,25 @@ async function main() {
       projects: codingCliIndexer.getProjects(),
       perfLogging: perfConfig.enabled,
     }
+  })
+
+  const applyDebugLogging = (enabled: boolean, source: string) => {
+    const nextEnabled = !!enabled
+    setLogLevel(nextEnabled ? 'debug' : 'info')
+    setPerfLoggingEnabled(nextEnabled, source)
+    wsHandler.broadcast({ type: 'perf.logging', enabled: nextEnabled })
+  }
+
+  applyDebugLogging(!!settings.logging?.debug, 'settings')
+
+  app.post('/api/perf', async (req, res) => {
+    const enabled = req.body?.enabled === true
+    const updated = await configStore.patchSettings({ logging: { debug: enabled } })
+    const migrated = migrateSettingsSortMode(updated)
+    registry.setSettings(migrated)
+    applyDebugLogging(!!migrated.logging?.debug, 'api')
+    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
+    res.json({ ok: true, enabled })
   })
 
   // --- API: settings ---
@@ -183,6 +196,7 @@ async function main() {
     const updated = await configStore.patchSettings(patch)
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)
+    applyDebugLogging(!!migrated.logging?.debug, 'settings')
     wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
     await withPerfSpan(
       'coding_cli_refresh',
@@ -206,6 +220,7 @@ async function main() {
     const updated = await configStore.patchSettings(patch)
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)
+    applyDebugLogging(!!migrated.logging?.debug, 'settings')
     wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
     await withPerfSpan(
       'coding_cli_refresh',

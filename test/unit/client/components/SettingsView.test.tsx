@@ -113,6 +113,9 @@ describe('SettingsView Component', () => {
       expect(screen.getByText('Safety')).toBeInTheDocument()
       expect(screen.getByText('Auto-kill and idle terminal management')).toBeInTheDocument()
 
+      expect(screen.getByText('Debugging')).toBeInTheDocument()
+      expect(screen.getByText('Debug-level logs and perf instrumentation')).toBeInTheDocument()
+
       expect(screen.getByText('Coding CLIs')).toBeInTheDocument()
       expect(screen.getByText('Providers and defaults for coding sessions')).toBeInTheDocument()
 
@@ -711,6 +714,31 @@ describe('SettingsView Component', () => {
 
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
         terminal: { cursorBlink: false },
+      })
+    })
+
+    it('toggles debug logging', async () => {
+      const store = createTestStore({
+        settings: {
+          ...defaultSettings,
+          logging: { ...defaultSettings.logging, debug: false },
+        },
+      })
+      renderWithStore(store)
+
+      const debugRow = screen.getByText('Debug logging').closest('div')
+      expect(debugRow).toBeTruthy()
+      const debugToggle = within(debugRow!).getByRole('button')
+      fireEvent.click(debugToggle)
+
+      expect(store.getState().settings.settings.logging.debug).toBe(true)
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        logging: { debug: true },
       })
     })
 

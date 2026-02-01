@@ -122,6 +122,9 @@ export interface AppSettings {
     theme: TerminalTheme
   }
   defaultCwd?: string
+  logging: {
+    debug: boolean
+  }
   safety: {
     autoKillIdleMinutes: number
     warnBeforeKillMinutes: number
