@@ -6,9 +6,11 @@ import App from '@/App'
 import '@/index.css'
 import { initializeAuthToken } from '@/lib/ws-client'
 import { createClientLogger } from '@/lib/client-logger'
+import { initClientPerfLogging } from '@/lib/perf-logger'
 
 initializeAuthToken()
 createClientLogger().installConsoleCapture()
+initClientPerfLogging()
 
 if (import.meta.env.DEV) {
   document.title = 'freshell:dev'

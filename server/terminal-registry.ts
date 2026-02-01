@@ -5,11 +5,13 @@ import os from 'os'
 import path from 'path'
 import fs from 'fs'
 import { logger } from './logger.js'
+import { getPerfConfig, logPerfEvent, shouldLog, startPerfTimer } from './perf-logger.js'
 import type { AppSettings } from './config-store.js'
 
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 const DEFAULT_MAX_SCROLLBACK_CHARS = Number(process.env.MAX_SCROLLBACK_CHARS || 64 * 1024)
 const MAX_TERMINALS = Number(process.env.MAX_TERMINALS || 50)
+const perfConfig = getPerfConfig()
 
 // TerminalMode includes 'shell' for regular terminals, plus coding CLI providers.
 // Provider command defaults are configurable via env vars; resume semantics
@@ -92,6 +94,11 @@ export type TerminalRecord = {
   warnedIdle?: boolean
   buffer: ChunkRingBuffer
   pty: pty.IPty
+  perf?: {
+    outBytes: number
+    outChunks: number
+    droppedMessages: number
+  }
 }
 
 export class ChunkRingBuffer {
@@ -293,12 +300,14 @@ export class TerminalRegistry {
   private terminals = new Map<string, TerminalRecord>()
   private settings: AppSettings | undefined
   private idleTimer: NodeJS.Timeout | null = null
+  private perfTimer: NodeJS.Timeout | null = null
   private maxTerminals: number
 
   constructor(settings?: AppSettings, maxTerminals?: number) {
     this.settings = settings
     this.maxTerminals = maxTerminals ?? MAX_TERMINALS
     this.startIdleMonitor()
+    this.startPerfMonitor()
   }
 
   setSettings(settings: AppSettings) {
@@ -310,6 +319,34 @@ export class TerminalRegistry {
     this.idleTimer = setInterval(() => {
       this.enforceIdleKills().catch((err) => logger.warn({ err }, 'Idle monitor error'))
     }, 30_000)
+  }
+
+  private startPerfMonitor() {
+    if (!perfConfig.enabled) return
+    if (this.perfTimer) clearInterval(this.perfTimer)
+    this.perfTimer = setInterval(() => {
+      for (const term of this.terminals.values()) {
+        if (!term.perf) continue
+        if (term.perf.outBytes === 0 && term.perf.droppedMessages === 0) continue
+        logPerfEvent(
+          'terminal_output',
+          {
+            terminalId: term.terminalId,
+            mode: term.mode,
+            status: term.status,
+            clients: term.clients.size,
+            outBytes: term.perf.outBytes,
+            outChunks: term.perf.outChunks,
+            droppedMessages: term.perf.droppedMessages,
+          },
+          term.perf.droppedMessages > 0 ? 'warn' : 'info',
+        )
+        term.perf.outBytes = 0
+        term.perf.outChunks = 0
+        term.perf.droppedMessages = 0
+      }
+    }, perfConfig.terminalSampleMs)
+    this.perfTimer.unref?.()
   }
 
   private async enforceIdleKills() {
@@ -348,6 +385,12 @@ export class TerminalRegistry {
 
     const { file, args, env, cwd: procCwd } = buildSpawnSpec(opts.mode, cwd, opts.shell || 'system', opts.resumeSessionId)
 
+    const endSpawnTimer = startPerfTimer(
+      'terminal_spawn',
+      { terminalId, mode: opts.mode, shell: opts.shell || 'system' },
+      { minDurationMs: perfConfig.slowTerminalCreateMs, level: 'warn' },
+    )
+
     logger.info({ terminalId, file, args, cwd: procCwd, mode: opts.mode, shell: opts.shell || 'system' }, 'Spawning terminal')
 
     const ptyProc = pty.spawn(file, args, {
@@ -357,6 +400,7 @@ export class TerminalRegistry {
       cwd: procCwd,
       env: env as any,
     })
+    endSpawnTimer({ cwd: procCwd })
 
     const title = getModeLabel(opts.mode)
 
@@ -375,13 +419,24 @@ export class TerminalRegistry {
       clients: new Set(),
       buffer: new ChunkRingBuffer(DEFAULT_MAX_SCROLLBACK_CHARS),
       pty: ptyProc,
+      perf: perfConfig.enabled
+        ? {
+            outBytes: 0,
+            outChunks: 0,
+            droppedMessages: 0,
+          }
+        : undefined,
     }
 
     ptyProc.onData((data) => {
       record.lastActivityAt = Date.now()
       record.buffer.append(data)
+      if (record.perf) {
+        record.perf.outBytes += data.length
+        record.perf.outChunks += 1
+      }
       for (const client of record.clients) {
-        this.safeSend(client, { type: 'terminal.output', terminalId, data })
+        this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf: record.perf })
       }
     })
 
@@ -390,7 +445,7 @@ export class TerminalRegistry {
       record.exitCode = e.exitCode
       record.lastActivityAt = Date.now()
       for (const client of record.clients) {
-        this.safeSend(client, { type: 'terminal.exit', terminalId, exitCode: e.exitCode })
+        this.safeSend(client, { type: 'terminal.exit', terminalId, exitCode: e.exitCode }, { terminalId, perf: record.perf })
       }
       record.clients.clear()
     })
@@ -489,11 +544,26 @@ export class TerminalRegistry {
     return this.terminals.get(terminalId)
   }
 
-  safeSend(client: WebSocket, msg: unknown) {
+  safeSend(client: WebSocket, msg: unknown, context?: { terminalId?: string; perf?: TerminalRecord['perf'] }) {
     // Backpressure guard.
     // @ts-ignore
     const buffered = client.bufferedAmount as number | undefined
     if (typeof buffered === 'number' && buffered > MAX_WS_BUFFERED_AMOUNT) {
+      if (context?.perf) context.perf.droppedMessages += 1
+      if (perfConfig.enabled && context?.terminalId) {
+        const key = `terminal_drop_${context.terminalId}`
+        if (shouldLog(key, perfConfig.rateLimitMs)) {
+          logPerfEvent(
+            'terminal_output_dropped',
+            {
+              terminalId: context.terminalId,
+              bufferedBytes: buffered,
+              limitBytes: MAX_WS_BUFFERED_AMOUNT,
+            },
+            'warn',
+          )
+        }
+      }
       // Drop output to prevent unbounded memory.
       return
     }

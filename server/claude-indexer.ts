@@ -4,6 +4,7 @@ import fsp from 'fs/promises'
 import fs from 'fs'
 import chokidar from 'chokidar'
 import { logger } from './logger.js'
+import { getPerfConfig, startPerfTimer } from './perf-logger.js'
 import { configStore, SessionOverride } from './config-store.js'
 import { makeSessionKey } from './coding-cli/types.js'
 import { extractTitleFromMessage } from './title-utils.js'
@@ -11,6 +12,7 @@ import { extractTitleFromMessage } from './title-utils.js'
 const SEEN_SESSION_RETENTION_MS = Number(process.env.CLAUDE_SEEN_SESSION_RETENTION_MS || 7 * 24 * 60 * 60 * 1000)
 const MAX_SEEN_SESSION_IDS = Number(process.env.CLAUDE_SEEN_SESSION_MAX || 10_000)
 const INCREMENTAL_DEBOUNCE_MS = Number(process.env.CLAUDE_INDEXER_DEBOUNCE_MS || 250)
+const perfConfig = getPerfConfig()
 
 export type ClaudeSession = {
   sessionId: string
@@ -501,12 +503,19 @@ export class ClaudeSessionIndexer {
   }
 
   async refresh() {
+    const endRefreshTimer = startPerfTimer(
+      'claude_refresh',
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
     const projectsDir = path.join(this.claudeHome, 'projects')
     const colors = await configStore.getProjectColors()
     const cfg = await configStore.snapshot()
 
     const groups: ProjectGroup[] = []
     let projectDirs: string[] = []
+    let fileCount = 0
+    let sessionCount = 0
     try {
       projectDirs = (await fsp.readdir(projectsDir)).map((name) => path.join(projectsDir, name))
     } catch (err: any) {
@@ -515,6 +524,7 @@ export class ClaudeSessionIndexer {
       this.sessionsById.clear()
       this.projectsByPath.clear()
       this.emitUpdate()
+      endRefreshTimer({ error: 'projects_read_failed' })
       return
     }
 
@@ -535,6 +545,7 @@ export class ClaudeSessionIndexer {
       } catch {
         continue
       }
+      fileCount += files.length
 
       const projectPath = await resolveProjectPath(projectDir)
 
@@ -569,7 +580,10 @@ export class ClaudeSessionIndexer {
         }
 
         const merged = applyOverride(baseSession, ov)
-        if (merged) sessions.push(merged)
+        if (merged) {
+          sessions.push(merged)
+          sessionCount += 1
+        }
       }
 
       if (sessions.length === 0) continue
@@ -598,6 +612,7 @@ export class ClaudeSessionIndexer {
 
     this.projects = groups
     this.emitUpdate()
+    endRefreshTimer({ projectCount: groups.length, sessionCount, projectDirCount: projectDirs.length, fileCount })
   }
 
   private emitUpdate() {

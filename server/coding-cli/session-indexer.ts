@@ -2,10 +2,13 @@ import fs from 'fs'
 import fsp from 'fs/promises'
 import chokidar from 'chokidar'
 import { logger } from '../logger.js'
+import { getPerfConfig, startPerfTimer } from '../perf-logger.js'
 import { configStore, SessionOverride } from '../config-store.js'
 import type { CodingCliProvider } from './provider.js'
 import type { CodingCliSession, ProjectGroup } from './types.js'
 import { makeSessionKey } from './types.js'
+
+const perfConfig = getPerfConfig()
 
 function applyOverride(session: CodingCliSession, ov: SessionOverride | undefined): CodingCliSession | null {
   if (ov?.deleted) return null
@@ -79,12 +82,19 @@ export class CodingCliSessionIndexer {
   }
 
   async refresh() {
+    const endRefreshTimer = startPerfTimer(
+      'coding_cli_refresh',
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
     const colors = await configStore.getProjectColors()
     const cfg = await configStore.snapshot()
     const enabledProviders = cfg.settings?.codingCli?.enabledProviders
     const enabledSet = new Set(enabledProviders ?? this.providers.map((p) => p.name))
 
     const groupsByPath = new Map<string, ProjectGroup>()
+    let fileCount = 0
+    let sessionCount = 0
 
     for (const provider of this.providers) {
       if (!enabledSet.has(provider.name)) continue
@@ -95,6 +105,7 @@ export class CodingCliSessionIndexer {
         logger.warn({ err, provider: provider.name }, 'Could not list session files')
         continue
       }
+      fileCount += files.length
 
       for (const file of files) {
         let stat: any
@@ -134,6 +145,7 @@ export class CodingCliSessionIndexer {
         }
         group.sessions.push(merged)
         groupsByPath.set(projectPath, group)
+        sessionCount += 1
       }
     }
 
@@ -148,6 +160,7 @@ export class CodingCliSessionIndexer {
 
     this.projects = groups
     this.emitUpdate()
+    endRefreshTimer({ projectCount: groups.length, sessionCount, fileCount })
   }
 
   private emitUpdate() {

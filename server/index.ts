@@ -25,6 +25,7 @@ import { filesRouter } from './files-router.js'
 import { getSessionRepairService } from './session-scanner/service.js'
 import { createClientLogsRouter } from './client-logs.js'
 import { createStartupState } from './startup-state.js'
+import { getPerfConfig, initPerfLogging, startPerfTimer, withPerfSpan } from './perf-logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -45,9 +46,11 @@ function findPackageJson(): string {
 const packageJson = JSON.parse(fs.readFileSync(findPackageJson(), 'utf-8'))
 const APP_VERSION: string = packageJson.version
 const log = logger.child({ component: 'server' })
+const perfConfig = getPerfConfig()
 
 async function main() {
   validateStartupSecurity()
+  initPerfLogging()
 
   const app = express()
   app.disable('x-powered-by')
@@ -76,8 +79,8 @@ async function main() {
       return res.status(400).json({ error: 'Cannot serve directories' })
     }
 
-    // Send the file with appropriate content type
-    res.sendFile(resolved)
+  // Send the file with appropriate content type
+  res.sendFile(resolved)
   })
 
   const startupState = createStartupState()
@@ -126,14 +129,13 @@ async function main() {
   const settings = migrateSettingsSortMode(await configStore.getSettings())
   const registry = new TerminalRegistry(settings)
 
-  // Start session repair service (background scanning of Claude sessions)
   const sessionRepairService = getSessionRepairService()
 
   const server = http.createServer(app)
   const wsHandler = new WsHandler(server, registry, codingCliSessionManager, sessionRepairService, async () => {
-    const settings = migrateSettingsSortMode(await configStore.getSettings())
+    const currentSettings = migrateSettingsSortMode(await configStore.getSettings())
     return {
-      settings,
+      settings: currentSettings,
       projects: codingCliIndexer.getProjects(),
     }
   })
@@ -175,9 +177,19 @@ async function main() {
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)
     wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-    await codingCliIndexer.refresh()
+    await withPerfSpan(
+      'coding_cli_refresh',
+      () => codingCliIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
     wsHandler.broadcast({ type: 'sessions.updated', projects: codingCliIndexer.getProjects() })
-    await claudeIndexer.refresh()
+    await withPerfSpan(
+      'claude_refresh',
+      () => claudeIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
     res.json(migrated)
   })
 
@@ -188,9 +200,19 @@ async function main() {
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)
     wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-    await codingCliIndexer.refresh()
+    await withPerfSpan(
+      'coding_cli_refresh',
+      () => codingCliIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
     wsHandler.broadcast({ type: 'sessions.updated', projects: codingCliIndexer.getProjects() })
-    await claudeIndexer.refresh()
+    await withPerfSpan(
+      'claude_refresh',
+      () => claudeIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
     res.json(migrated)
   })
 
@@ -210,6 +232,16 @@ async function main() {
         return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
       }
 
+      const endSearchTimer = startPerfTimer(
+        'sessions_search',
+        {
+          queryLength: parsed.data.query.length,
+          tier: parsed.data.tier,
+          limit: parsed.data.limit,
+        },
+        { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+      )
+
       const response = await searchSessions({
         projects: codingCliIndexer.getProjects(),
         providers: codingCliProviders,
@@ -217,6 +249,8 @@ async function main() {
         tier: parsed.data.tier,
         limit: parsed.data.limit,
       })
+
+      endSearchTimer({ resultCount: response.results.length, totalScanned: response.totalScanned })
 
       res.json(response)
     } catch (err: any) {
@@ -345,6 +379,14 @@ async function main() {
       return res.json({ description: heuristic(), source: 'heuristic' })
     }
 
+    const endSummaryTimer = startPerfTimer(
+      'ai_summary',
+      { terminalId, snapshotChars: snapshot.length },
+      { minDurationMs: perfConfig.slowAiSummaryMs, level: 'warn' },
+    )
+    let summarySource: 'ai' | 'heuristic' = 'ai'
+    let summaryError = false
+
     try {
       const { generateText } = await import('ai')
       const { google } = await import('@ai-sdk/google')
@@ -361,8 +403,12 @@ async function main() {
       const description = (result.text || '').trim().slice(0, 240) || heuristic()
       res.json({ description, source: 'ai' })
     } catch (err: any) {
+      summarySource = 'heuristic'
+      summaryError = true
       log.warn({ err }, 'AI summary failed; using heuristic')
       res.json({ description: heuristic(), source: 'heuristic' })
+    } finally {
+      endSummaryTimer({ source: summarySource, error: summaryError })
     }
   })
 
@@ -379,6 +425,7 @@ async function main() {
     app.get('*', (_req, res) => res.sendFile(indexHtml))
   }
 
+  // Coding CLI watcher hooks
   codingCliIndexer.onUpdate((projects) => {
     wsHandler.broadcast({ type: 'sessions.updated', projects })
 
@@ -410,6 +457,8 @@ async function main() {
     }
   })
 
+  // Claude watcher hooks (for search + session association)
+
   // One-time session association for new Claude sessions
   // When Claude creates a session file, associate it with the oldest unassociated
   // claude-mode terminal matching the session's cwd. This allows the terminal to
@@ -439,7 +488,12 @@ async function main() {
   })
 
   const startBackgroundTasks = () => {
-    void sessionRepairService.start()
+    void withPerfSpan(
+      'session_repair_start',
+      () => sessionRepairService.start(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
       .then(() => {
         startupState.markReady('sessionRepairService')
         logger.info({ task: 'sessionRepairService' }, 'Startup task ready')
@@ -448,7 +502,12 @@ async function main() {
         logger.error({ err }, 'Session repair service failed to start')
       })
 
-    void codingCliIndexer.start()
+    void withPerfSpan(
+      'coding_cli_indexer_start',
+      () => codingCliIndexer.start(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
       .then(() => {
         startupState.markReady('codingCliIndexer')
         logger.info({ task: 'codingCliIndexer' }, 'Startup task ready')
@@ -457,7 +516,12 @@ async function main() {
         logger.error({ err }, 'Coding CLI indexer failed to start')
       })
 
-    void claudeIndexer.start()
+    void withPerfSpan(
+      'claude_indexer_start',
+      () => claudeIndexer.start(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
       .then(() => {
         startupState.markReady('claudeIndexer')
         logger.info({ task: 'claudeIndexer' }, 'Startup task ready')

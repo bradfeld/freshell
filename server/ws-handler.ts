@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
 import { logger } from './logger.js'
+import { getPerfConfig, logPerfEvent, shouldLog, startPerfTimer } from './perf-logger.js'
 import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed } from './auth.js'
 import type { TerminalRegistry, TerminalMode } from './terminal-registry.js'
 import { configStore, type AppSettings } from './config-store.js'
@@ -17,6 +18,7 @@ const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 
 const log = logger.child({ component: 'ws' })
+const perfConfig = getPerfConfig()
 
 // Extended WebSocket with liveness tracking for keepalive
 interface LiveWebSocket extends WebSocket {
@@ -408,6 +410,17 @@ export class WsHandler {
       // @ts-ignore
       const buffered = ws.bufferedAmount as number | undefined
       if (typeof buffered === 'number' && buffered > MAX_WS_BUFFERED_AMOUNT) {
+        if (perfConfig.enabled && shouldLog(`ws_backpressure_${ws.connectionId || 'unknown'}`, perfConfig.rateLimitMs)) {
+          logPerfEvent(
+            'ws_backpressure_close',
+            {
+              connectionId: ws.connectionId,
+              bufferedBytes: buffered,
+              limitBytes: MAX_WS_BUFFERED_AMOUNT,
+            },
+            'warn',
+          )
+        }
         ws.close(CLOSE_CODES.BACKPRESSURE, 'Backpressure')
         return
       }
@@ -460,69 +473,93 @@ export class WsHandler {
   }
 
   private async onMessage(ws: LiveWebSocket, state: ClientState, data: WebSocket.RawData) {
-    let msg: any
+    const endMessageTimer = startPerfTimer(
+      'ws_message',
+      { connectionId: ws.connectionId },
+      { minDurationMs: perfConfig.wsSlowMs, level: 'warn' },
+    )
+    let messageType: string | undefined
+    let payloadBytes: number | undefined
+    if (perfConfig.enabled) {
+      if (typeof data === 'string') payloadBytes = data.length
+      else if (Array.isArray(data)) payloadBytes = data.reduce((sum, item) => sum + item.length, 0)
+      else if (Buffer.isBuffer(data)) payloadBytes = data.length
+      else if (data instanceof ArrayBuffer) payloadBytes = data.byteLength
+    }
+
     try {
-      msg = JSON.parse(data.toString())
-    } catch {
-      this.sendError(ws, { code: 'INVALID_MESSAGE', message: 'Invalid JSON' })
-      return
-    }
-
-    const parsed = ClientMessageSchema.safeParse(msg)
-    if (!parsed.success) {
-      this.sendError(ws, { code: 'INVALID_MESSAGE', message: parsed.error.message, requestId: msg?.requestId })
-      return
-    }
-
-    const m = parsed.data
-
-    if (m.type === 'ping') {
-      // Respond to confirm liveness.
-      this.send(ws, { type: 'pong', timestamp: nowIso() })
-      return
-    }
-
-    if (m.type === 'hello') {
-      const expected = getRequiredAuthToken()
-      if (!m.token || m.token !== expected) {
-        log.warn({ event: 'ws_auth_failed', connectionId: ws.connectionId }, 'WebSocket auth failed')
-        this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Invalid token' })
-        ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Invalid token')
+      let msg: any
+      try {
+        msg = JSON.parse(data.toString())
+      } catch {
+        this.sendError(ws, { code: 'INVALID_MESSAGE', message: 'Invalid JSON' })
         return
       }
-      state.authenticated = true
-      if (state.helloTimer) clearTimeout(state.helloTimer)
 
-      log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')
-
-      // Track and prioritize sessions from client
-      if (m.sessions && this.sessionRepairService) {
-        const allSessions = [
-          m.sessions.active,
-          ...(m.sessions.visible || []),
-          ...(m.sessions.background || []),
-        ].filter((s): s is string => !!s)
-
-        for (const sessionId of allSessions) {
-          state.interestedSessions.add(sessionId)
-        }
-
-        this.sessionRepairService.prioritizeSessions(m.sessions)
+      const parsed = ClientMessageSchema.safeParse(msg)
+      if (!parsed.success) {
+        this.sendError(ws, { code: 'INVALID_MESSAGE', message: parsed.error.message, requestId: msg?.requestId })
+        return
       }
 
-      this.send(ws, { type: 'ready', timestamp: nowIso() })
-      this.scheduleHandshakeSnapshot(ws)
-      return
-    }
+      const m = parsed.data
+      messageType = m.type
 
-    if (!state.authenticated) {
-      this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Send hello first' })
-      ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Not authenticated')
-      return
-    }
+      if (m.type === 'ping') {
+        // Respond to confirm liveness.
+        this.send(ws, { type: 'pong', timestamp: nowIso() })
+        return
+      }
 
-    switch (m.type) {
+      if (m.type === 'hello') {
+        const expected = getRequiredAuthToken()
+        if (!m.token || m.token !== expected) {
+          log.warn({ event: 'ws_auth_failed', connectionId: ws.connectionId }, 'WebSocket auth failed')
+          this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Invalid token' })
+          ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Invalid token')
+          return
+        }
+        state.authenticated = true
+        if (state.helloTimer) clearTimeout(state.helloTimer)
+
+        log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')
+
+        // Track and prioritize sessions from client
+        if (m.sessions && this.sessionRepairService) {
+          const allSessions = [
+            m.sessions.active,
+            ...(m.sessions.visible || []),
+            ...(m.sessions.background || []),
+          ].filter((s): s is string => !!s)
+
+          for (const sessionId of allSessions) {
+            state.interestedSessions.add(sessionId)
+          }
+
+          this.sessionRepairService.prioritizeSessions(m.sessions)
+        }
+
+        this.send(ws, { type: 'ready', timestamp: nowIso() })
+        this.scheduleHandshakeSnapshot(ws)
+        return
+      }
+
+      if (!state.authenticated) {
+        this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Send hello first' })
+        ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Not authenticated')
+        return
+      }
+
+      switch (m.type) {
       case 'terminal.create': {
+        const endCreateTimer = startPerfTimer(
+          'terminal_create',
+          { connectionId: ws.connectionId, mode: m.mode, shell: m.shell },
+          { minDurationMs: perfConfig.slowTerminalCreateMs, level: 'warn' },
+        )
+        let terminalId: string | undefined
+        let reused = false
+        let error = false
         try {
           const existingId = state.createdByRequestId.get(m.requestId)
           if (existingId) {
@@ -530,6 +567,8 @@ export class WsHandler {
             if (existing) {
               this.registry.attach(existingId, ws)
               state.attachedTerminalIds.add(existingId)
+              terminalId = existingId
+              reused = true
               this.send(ws, { type: 'terminal.created', requestId: m.requestId, terminalId: existingId, snapshot: existing.buffer.snapshot(), createdAt: existing.createdAt })
               return
             }
@@ -562,6 +601,7 @@ export class WsHandler {
           })
 
           state.createdByRequestId.set(m.requestId, record.terminalId)
+          terminalId = record.terminalId
 
           // Attach creator immediately
           this.registry.attach(record.terminalId, ws)
@@ -578,12 +618,15 @@ export class WsHandler {
           // Notify all clients that list changed
           this.broadcast({ type: 'terminal.list.updated' })
         } catch (err: any) {
+          error = true
           log.warn({ err, connectionId: ws.connectionId }, 'terminal.create failed')
           this.sendError(ws, {
             code: 'PTY_SPAWN_FAILED',
             message: err?.message || 'Failed to spawn PTY',
             requestId: m.requestId,
           })
+        } finally {
+          endCreateTimer({ terminalId, reused, error })
         }
         return
       }
@@ -664,6 +707,13 @@ export class WsHandler {
           return
         }
 
+        const endCodingTimer = startPerfTimer(
+          'codingcli_create',
+          { connectionId: ws.connectionId, provider: m.provider },
+          { minDurationMs: perfConfig.slowTerminalCreateMs, level: 'warn' },
+        )
+        let sessionId: string | undefined
+        let error = false
         try {
           const cfg = await awaitConfig()
           if (!this.codingCliManager.hasProvider(m.provider)) {
@@ -697,6 +747,7 @@ export class WsHandler {
 
           // Track this client's session
           state.codingCliSessions.add(session.id)
+          sessionId = session.id
 
           // Stream events to client with detachable listeners
           const onEvent = (event: unknown) => {
@@ -744,12 +795,15 @@ export class WsHandler {
             provider: session.provider.name,
           })
         } catch (err: any) {
+          error = true
           log.warn({ err, connectionId: ws.connectionId }, 'codingcli.create failed')
           this.sendError(ws, {
             code: 'INTERNAL_ERROR',
             message: err?.message || 'Failed to create coding CLI session',
             requestId: m.requestId,
           })
+        } finally {
+          endCodingTimer({ sessionId, error })
         }
         return
       }
@@ -790,6 +844,9 @@ export class WsHandler {
       default:
         this.sendError(ws, { code: 'UNKNOWN_MESSAGE', message: 'Unknown message type' })
         return
+      }
+    } finally {
+      endMessageTimer({ messageType, payloadBytes })
     }
   }
 

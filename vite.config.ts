@@ -14,6 +14,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    define: {
+      __PERF_LOGGING__: JSON.stringify(env.PERF_LOGGING || ''),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
