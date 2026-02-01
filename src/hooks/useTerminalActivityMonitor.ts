@@ -60,6 +60,9 @@ export function useTerminalActivityMonitor() {
   // Track previous streaming state to detect transitions
   const prevStreamingRef = useRef<Record<string, boolean>>({})
 
+  // Track if we had streaming recently (to keep interval running long enough to catch transitions)
+  const hadStreamingRef = useRef(false)
+
   // Check if any pane is currently streaming (to know if we need timeout)
   const hasActiveStreaming = useMemo(() => {
     const now = Date.now()
@@ -125,11 +128,17 @@ export function useTerminalActivityMonitor() {
     checkTransitions()
   }, [checkTransitions])
 
-  // Only run interval when there's active streaming (to detect when it stops)
+  // Run interval when streaming, and trigger final check when streaming stops
   useEffect(() => {
-    if (!hasActiveStreaming) return
-    const interval = setInterval(checkTransitions, 1000)
-    return () => clearInterval(interval)
+    if (hasActiveStreaming) {
+      hadStreamingRef.current = true
+      const interval = setInterval(checkTransitions, 1000)
+      return () => clearInterval(interval)
+    } else if (hadStreamingRef.current) {
+      // Streaming just stopped - run one final check to detect the transition
+      hadStreamingRef.current = false
+      checkTransitions()
+    }
   }, [hasActiveStreaming, checkTransitions])
 
   // Clear ready state when tab is selected
