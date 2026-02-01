@@ -165,6 +165,7 @@ type ClientState = {
 type HandshakeSnapshot = {
   settings?: AppSettings
   projects?: ProjectGroup[]
+  perfLogging?: boolean
 }
 
 type HandshakeSnapshotProvider = () => Promise<HandshakeSnapshot>
@@ -473,6 +474,9 @@ export class WsHandler {
       }
       if (snapshot.projects) {
         this.safeSend(ws, { type: 'sessions.updated', projects: snapshot.projects })
+      }
+      if (typeof snapshot.perfLogging === 'boolean') {
+        this.safeSend(ws, { type: 'perf.logging', enabled: snapshot.perfLogging })
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to send handshake snapshot')

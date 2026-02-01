@@ -137,6 +137,7 @@ async function main() {
     return {
       settings: currentSettings,
       projects: codingCliIndexer.getProjects(),
+      perfLogging: perfConfig.enabled,
     }
   })
 
@@ -242,17 +243,26 @@ async function main() {
         { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
       )
 
-      const response = await searchSessions({
-        projects: codingCliIndexer.getProjects(),
-        providers: codingCliProviders,
-        query: parsed.data.query,
-        tier: parsed.data.tier,
-        limit: parsed.data.limit,
-      })
+      try {
+        const response = await searchSessions({
+          projects: codingCliIndexer.getProjects(),
+          providers: codingCliProviders,
+          query: parsed.data.query,
+          tier: parsed.data.tier,
+          limit: parsed.data.limit,
+        })
 
-      endSearchTimer({ resultCount: response.results.length, totalScanned: response.totalScanned })
+        endSearchTimer({ resultCount: response.results.length, totalScanned: response.totalScanned })
 
-      res.json(response)
+        res.json(response)
+      } catch (err: any) {
+        endSearchTimer({
+          error: true,
+          errorName: err?.name,
+          errorMessage: err?.message,
+        })
+        throw err
+      }
     } catch (err: any) {
       log.error({ err }, 'Session search failed')
       res.status(500).json({ error: 'Search failed' })

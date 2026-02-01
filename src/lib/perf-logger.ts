@@ -40,6 +40,7 @@ const perfFlag = typeof __PERF_LOGGING__ !== 'undefined' && __PERF_LOGGING__
 const perfConfig = resolveClientPerfConfig(perfFlag)
 const lastLogByKey = new Map<string, number>()
 let perfInitialized = false
+let memoryTimer: number | null = null
 
 export function getClientPerfConfig(): ClientPerfConfig {
   return perfConfig
@@ -47,6 +48,24 @@ export function getClientPerfConfig(): ClientPerfConfig {
 
 export function isClientPerfLoggingEnabled(): boolean {
   return perfConfig.enabled
+}
+
+export function setClientPerfEnabled(enabled: boolean, source?: string): void {
+  if (perfConfig.enabled === enabled) return
+  if (enabled) {
+    perfConfig.enabled = true
+    initClientPerfLogging()
+    logClientPerf('perf_logging_toggled', { enabled: true, source })
+    return
+  }
+
+  // Log before disabling to ensure it is recorded.
+  logClientPerf('perf_logging_toggled', { enabled: false, source })
+  perfConfig.enabled = false
+  if (memoryTimer !== null && typeof window !== 'undefined') {
+    window.clearInterval(memoryTimer)
+    memoryTimer = null
+  }
 }
 
 function shouldLog(key: string, intervalMs: number): boolean {
@@ -149,7 +168,12 @@ function observePaint() {
 function startMemorySampling() {
   const perfAny = performance as any
   if (!perfAny?.memory) return
-  const timer = window.setInterval(() => {
+  if (memoryTimer !== null) {
+    window.clearInterval(memoryTimer)
+    memoryTimer = null
+  }
+
+  memoryTimer = window.setInterval(() => {
     if (!shouldLog('perf.memory', perfConfig.rateLimitMs)) return
     const memory = perfAny.memory
     logClientPerf('perf.memory', {
@@ -158,7 +182,6 @@ function startMemorySampling() {
       jsHeapSizeLimit: memory.jsHeapSizeLimit,
     })
   }, perfConfig.memorySampleMs)
-  void timer
 }
 
 export function initClientPerfLogging(): void {

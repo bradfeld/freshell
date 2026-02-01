@@ -7,7 +7,6 @@ type HelloExtensionProvider = () => { sessions?: { active?: string; visible?: st
 
 const CONNECTION_TIMEOUT_MS = 10_000
 const perfConfig = getClientPerfConfig()
-const perfEnabled = isClientPerfLoggingEnabled()
 
 // Single source of auth token: sessionStorage only.
 function getAuthToken(): string | undefined {
@@ -74,7 +73,7 @@ export class WsClient {
 
     this.intentionalClose = false
     this._state = 'connecting'
-    if (perfEnabled) {
+    if (perfConfig.enabled) {
       this.connectStartedAt = performance.now()
     }
 
@@ -125,7 +124,7 @@ export class WsClient {
           this.wasConnectedOnce = true
           this._state = 'ready'
 
-          if (perfEnabled && this.connectStartedAt !== null) {
+          if (perfConfig.enabled && this.connectStartedAt !== null) {
             const durationMs = performance.now() - this.connectStartedAt
             this.connectStartedAt = null
             if (durationMs >= perfConfig.wsReadySlowMs) {
@@ -160,7 +159,7 @@ export class WsClient {
           return
         }
 
-        if (perfEnabled) {
+        if (perfConfig.enabled) {
           const start = performance.now()
           this.messageHandlers.forEach((handler) => handler(msg))
           const durationMs = performance.now() - start
@@ -205,7 +204,7 @@ export class WsClient {
           finishReject(new Error('Connection closed before ready'))
         }
 
-        if (perfEnabled) {
+        if (perfConfig.enabled) {
           logClientPerf('perf.ws_closed', {
             code: event.code,
             reason: event.reason,
@@ -242,7 +241,7 @@ export class WsClient {
       }
     }, delay)
 
-    if (perfEnabled) {
+    if (perfConfig.enabled) {
       logClientPerf('perf.ws_reconnect_scheduled', {
         delayMs: delay,
         attempt: this.reconnectAttempts,
@@ -276,7 +275,7 @@ export class WsClient {
     }
     this.pendingMessages.push(msg)
 
-    if (perfEnabled && this.pendingMessages.length >= perfConfig.wsQueueWarnSize) {
+    if (perfConfig.enabled && this.pendingMessages.length >= perfConfig.wsQueueWarnSize) {
       const now = Date.now()
       if (now - this.lastQueueLogAt >= perfConfig.rateLimitMs) {
         this.lastQueueLogAt = now
