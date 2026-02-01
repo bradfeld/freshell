@@ -174,6 +174,7 @@ export class WsHandler {
   private connections = new Set<LiveWebSocket>()
   private clientStates = new Map<LiveWebSocket, ClientState>()
   private pingInterval: NodeJS.Timeout | null = null
+  private closed = false
   private sessionRepairService?: SessionRepairService
   private handshakeSnapshotProvider?: HandshakeSnapshotProvider
   private sessionRepairListeners?: {
@@ -196,6 +197,12 @@ export class WsHandler {
       path: '/ws',
       maxPayload: 1_000_000,
     })
+
+    const originalClose = server.close.bind(server)
+    ;(server as any).close = (callback?: (err?: Error) => void) => {
+      this.close()
+      return originalClose(callback)
+    }
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws as LiveWebSocket, req))
 
@@ -862,6 +869,9 @@ export class WsHandler {
    * Gracefully close all WebSocket connections and the server.
    */
   close(): void {
+    if (this.closed) return
+    this.closed = true
+
     if (this.sessionRepairService && this.sessionRepairListeners) {
       this.sessionRepairService.off('scanned', this.sessionRepairListeners.scanned)
       this.sessionRepairService.off('repaired', this.sessionRepairListeners.repaired)

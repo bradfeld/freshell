@@ -245,6 +245,7 @@ export class ClaudeSessionIndexer {
   private sessionsById = new Map<string, ClaudeSession>()
   private projectsByPath = new Map<string, ProjectGroup>()
   private incrementalTimers = new Map<string, NodeJS.Timeout>()
+  private createdAtPinned = new Set<string>()
 
   async start() {
     // Initial scan (populates knownSessionIds with existing sessions)
