@@ -25,8 +25,8 @@ export const STREAMING_THRESHOLD_MS = 1000
 /** Window after input where output is considered echo (not streaming) */
 export const INPUT_ECHO_WINDOW_MS = 200
 
-/** Debounce window for sound notifications */
-export const SOUND_DEBOUNCE_MS = 2000
+/** Debounce window for sound notifications (10 seconds) */
+export const SOUND_DEBOUNCE_MS = 10000
 
 export const terminalActivitySlice = createSlice({
   name: 'terminalActivity',

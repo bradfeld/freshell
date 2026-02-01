@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useMemo, useCallback } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { markReady, clearReadyForTab, STREAMING_THRESHOLD_MS, INPUT_ECHO_WINDOW_MS } from '@/store/terminalActivitySlice'
 import { useNotificationSound } from './useNotificationSound'
@@ -29,8 +29,6 @@ function isPaneStreaming(
 }
 
 export interface TabActivityState {
-  /** Terminal is actively streaming (only shown on active tab) */
-  isWorking: boolean
   /** Terminal stopped streaming on background tab (needs attention) */
   isFinished: boolean
 }
@@ -39,12 +37,11 @@ export interface TabActivityState {
  * Monitor terminal activity and handle transitions.
  *
  * States:
- * - Ready (default): green dot - terminal is idle
- * - Working: pulsing grey - terminal is streaming (only shown on active tab)
+ * - Ready (default): green dot - terminal is idle (all tabs show this normally)
  * - Finished: green dot + blue tab bg - streaming stopped on background tab
  *
  * Rules:
- * - Working can only be shown when tab is active
+ * - Active tab always shows ready (green)
  * - Finished is entered when background tab stops streaming
  * - Selecting a finished tab clears it to ready
  */
@@ -60,18 +57,22 @@ export function useTerminalActivityMonitor() {
   const ready = useAppSelector((s) => s.terminalActivity.ready)
   const notifications = useAppSelector((s) => s.settings.settings.notifications)
 
-  // Force re-render periodically to update streaming state (time-based)
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    const interval = setInterval(() => setTick((t) => t + 1), 500)
-    return () => clearInterval(interval)
-  }, [])
-
   // Track previous streaming state to detect transitions
   const prevStreamingRef = useRef<Record<string, boolean>>({})
 
-  // Check for streaming -> idle transitions and handle notifications
-  useEffect(() => {
+  // Check if any pane is currently streaming (to know if we need timeout)
+  const hasActiveStreaming = useMemo(() => {
+    const now = Date.now()
+    for (const paneId of Object.keys(lastOutputAt)) {
+      if (isPaneStreaming(lastOutputAt[paneId], lastInputAt[paneId], now)) {
+        return true
+      }
+    }
+    return false
+  }, [lastOutputAt, lastInputAt])
+
+  // Callback to check for transitions
+  const checkTransitions = useCallback(() => {
     const now = Date.now()
 
     // Calculate current streaming state (filtering out input echo)
@@ -119,6 +120,18 @@ export function useTerminalActivityMonitor() {
     prevStreamingRef.current = currentStreaming
   }, [lastOutputAt, lastInputAt, tabs, layouts, activeTabId, notifications, dispatch, playSound])
 
+  // Run transition check when output changes
+  useEffect(() => {
+    checkTransitions()
+  }, [checkTransitions])
+
+  // Only run interval when there's active streaming (to detect when it stops)
+  useEffect(() => {
+    if (!hasActiveStreaming) return
+    const interval = setInterval(checkTransitions, 1000)
+    return () => clearInterval(interval)
+  }, [hasActiveStreaming, checkTransitions])
+
   // Clear ready state when tab is selected
   useEffect(() => {
     if (!activeTabId) return
@@ -130,39 +143,33 @@ export function useTerminalActivityMonitor() {
     }
   }, [activeTabId, layouts, dispatch])
 
-  // Compute activity states for all tabs
+  // Compute activity states for all tabs (only finished state matters for display)
   const tabActivityStates = useMemo(() => {
-    const now = Date.now()
     const states: Record<string, TabActivityState> = {}
 
     for (const tab of tabs) {
       const layout = layouts[tab.id]
       const paneIds = collectPaneIds(layout)
 
-      let tabIsStreaming = false
       let tabIsFinished = false
-
       for (const paneId of paneIds) {
-        if (isPaneStreaming(lastOutputAt[paneId], lastInputAt[paneId], now)) {
-          tabIsStreaming = true
-        }
         if (ready[paneId]) {
           tabIsFinished = true
+          break
         }
       }
 
       const isActiveTab = tab.id === activeTabId
 
-      // Working: only shown on active tab when streaming
       // Finished: shown on background tabs that stopped streaming
+      // Active tab always shows ready (green dot)
       states[tab.id] = {
-        isWorking: notifications?.visualWhenWorking && isActiveTab && tabIsStreaming,
         isFinished: notifications?.visualWhenFinished && !isActiveTab && tabIsFinished,
       }
     }
 
     return states
-  }, [tabs, layouts, lastOutputAt, lastInputAt, ready, notifications, activeTabId])
+  }, [tabs, layouts, ready, notifications, activeTabId])
 
   return { tabActivityStates }
 }

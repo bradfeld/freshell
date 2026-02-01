@@ -4,12 +4,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import type { Tab } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
 
-function StatusIndicator({ status, isWorking }: { status: string; isWorking: boolean }) {
-  // Working state: pulsing grey (only on active tab when streaming)
-  if (isWorking) {
-    return <Circle className="h-2 w-2 fill-muted-foreground text-muted-foreground animate-pulse" />
-  }
-
+function StatusIndicator({ status }: { status: string }) {
   // Ready state (default): green dot for running terminals
   if (status === 'running') {
     return <Circle className="h-2 w-2 fill-success text-success" />
@@ -29,7 +24,6 @@ export interface TabItemProps {
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
-  isWorking: boolean
   isFinished: boolean
   renameValue: string
   onRenameChange: (value: string) => void
@@ -45,7 +39,6 @@ export default function TabItem({
   isActive,
   isDragging,
   isRenaming,
-  isWorking,
   isFinished,
   renameValue,
   onRenameChange,
@@ -69,7 +62,7 @@ export default function TabItem({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <StatusIndicator status={tab.status} isWorking={isWorking} />
+      <StatusIndicator status={tab.status} />
 
       {isRenaming ? (
         <input
