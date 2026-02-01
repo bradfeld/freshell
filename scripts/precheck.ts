@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { runUpdateCheck } from '../server/updater/index.js'
+import { runUpdateCheck, shouldSkipUpdateCheck } from '../server/updater/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = resolve(__dirname, '..')
@@ -77,9 +77,6 @@ function loadEnv(): Record<string, string> {
 const env = loadEnv()
 const VITE_PORT = parseInt(env.VITE_PORT || '5173', 10)
 const SERVER_PORT = parseInt(env.PORT || '3001', 10)
-const SKIP_UPDATE_CHECK = process.argv.includes('--skip-update-check') ||
-                          process.env.SKIP_UPDATE_CHECK === 'true' ||
-                          process.env.NODE_ENV === 'development'
 
 interface PortCheckResult {
   status: 'freshell' | 'other' | 'free'
@@ -159,7 +156,7 @@ async function checkVitePort(): Promise<PortCheckResult> {
 
 async function main(): Promise<void> {
   // 1. Check for updates first (before anything else can fail)
-  if (!SKIP_UPDATE_CHECK) {
+  if (!shouldSkipUpdateCheck()) {
     const currentVersion = getPackageVersion()
     const updateResult = await runUpdateCheck(currentVersion)
 

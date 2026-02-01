@@ -15,7 +15,7 @@ vi.mock('../../../../server/updater/executor.js', () => ({
 }))
 
 // Import after mocking
-import { runUpdateCheck, type UpdateAction, type UpdateCheckResult } from '../../../../server/updater/index.js'
+import { runUpdateCheck, shouldSkipUpdateCheck, type UpdateAction, type UpdateCheckResult } from '../../../../server/updater/index.js'
 import { checkForUpdate } from '../../../../server/updater/version-checker.js'
 import { promptForUpdate } from '../../../../server/updater/prompt.js'
 import { executeUpdate } from '../../../../server/updater/executor.js'
@@ -336,6 +336,72 @@ describe('update orchestrator', () => {
         error: 'Some error'
       }
       expect(result.error).toBe('Some error')
+    })
+  })
+
+  describe('shouldSkipUpdateCheck', () => {
+    it('returns false by default when no skip conditions are met', () => {
+      const result = shouldSkipUpdateCheck({
+        argv: ['node', 'script.js'],
+        env: { npm_lifecycle_event: 'preserve' }
+      })
+      expect(result).toBe(false)
+    })
+
+    it('returns true when --skip-update-check flag is present', () => {
+      const result = shouldSkipUpdateCheck({
+        argv: ['node', 'script.js', '--skip-update-check'],
+        env: {}
+      })
+      expect(result).toBe(true)
+    })
+
+    it('returns true when SKIP_UPDATE_CHECK env var is "true"', () => {
+      const result = shouldSkipUpdateCheck({
+        argv: ['node', 'script.js'],
+        env: { SKIP_UPDATE_CHECK: 'true' }
+      })
+      expect(result).toBe(true)
+    })
+
+    it('returns false when SKIP_UPDATE_CHECK env var is other value', () => {
+      const result = shouldSkipUpdateCheck({
+        argv: ['node', 'script.js'],
+        env: { SKIP_UPDATE_CHECK: 'false' }
+      })
+      expect(result).toBe(false)
+    })
+
+    it('returns true when npm_lifecycle_event is "predev"', () => {
+      const result = shouldSkipUpdateCheck({
+        argv: ['node', 'script.js'],
+        env: { npm_lifecycle_event: 'predev' }
+      })
+      expect(result).toBe(true)
+    })
+
+    it('returns false when npm_lifecycle_event is "preserve"', () => {
+      const result = shouldSkipUpdateCheck({
+        argv: ['node', 'script.js'],
+        env: { npm_lifecycle_event: 'preserve' }
+      })
+      expect(result).toBe(false)
+    })
+
+    it('does NOT skip based on NODE_ENV=development', () => {
+      // This is the key behavior change - NODE_ENV should not affect the check
+      const result = shouldSkipUpdateCheck({
+        argv: ['node', 'script.js'],
+        env: { NODE_ENV: 'development', npm_lifecycle_event: 'preserve' }
+      })
+      expect(result).toBe(false)
+    })
+
+    it('uses process.argv and process.env by default', () => {
+      // When called with no options, it should use the actual process values
+      // Just verify it returns a boolean without throwing
+      const result = shouldSkipUpdateCheck()
+      expect(typeof result).toBe('boolean')
     })
   })
 })

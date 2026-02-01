@@ -60,6 +60,33 @@ export async function runUpdateCheck(currentVersion: string): Promise<UpdateChec
   return { action: 'updated', newVersion: checkResult.latestVersion }
 }
 
+/**
+ * Determines if the update check should be skipped based on environment.
+ *
+ * Skips when:
+ * - --skip-update-check CLI flag is present
+ * - SKIP_UPDATE_CHECK env var is 'true'
+ * - Running via 'npm run dev' (predev lifecycle event)
+ *
+ * Does NOT skip based on NODE_ENV because that may be set persistently
+ * in dev environments even when running 'npm run serve'.
+ */
+export interface SkipCheckOptions {
+  argv?: string[]
+  env?: NodeJS.ProcessEnv
+}
+
+export function shouldSkipUpdateCheck(options: SkipCheckOptions = {}): boolean {
+  const argv = options.argv ?? process.argv
+  const env = options.env ?? process.env
+
+  if (argv.includes('--skip-update-check')) return true
+  if (env.SKIP_UPDATE_CHECK === 'true') return true
+  if (env.npm_lifecycle_event === 'predev') return true
+
+  return false
+}
+
 // Re-export for convenience
 export { checkForUpdate } from './version-checker.js'
 export { executeUpdate } from './executor.js'
