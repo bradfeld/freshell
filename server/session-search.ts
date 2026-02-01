@@ -220,6 +220,7 @@ export async function searchSessionFile(
 
       if (text.toLowerCase().includes(q)) {
         return {
+          provider: provider.name,
           matchedIn: event.type === 'message.user' ? 'userMessage' : 'assistantMessage',
           snippet: extractSnippet(text, query),
         }

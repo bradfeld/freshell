@@ -137,6 +137,8 @@ export interface CodingCliSession {
   sessionId: string
   projectPath: string
   updatedAt: number
+  createdAt?: number
+  archived?: boolean
   messageCount?: number
   title?: string
   summary?: string
