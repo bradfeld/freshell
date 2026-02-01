@@ -21,7 +21,8 @@
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run --config vitest.server.config.ts test/server",
     "test:client": "vitest run test/unit/client",
-    "test:all": "vitest run && vitest run --config vitest.server.config.ts"
+    "test:all": "vitest run && vitest run --config vitest.server.config.ts",
+    "prepare:icons": "node assets/icons/prepare-icons.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.0.0",
