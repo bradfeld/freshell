@@ -2,8 +2,11 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TerminalStatus } from '@/store/types'
 import PaneHeader from './PaneHeader'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 interface PaneProps {
+  tabId: string
+  paneId: string
   isActive: boolean
   isOnlyPane: boolean
   title?: string
@@ -14,6 +17,8 @@ interface PaneProps {
 }
 
 export default function Pane({
+  tabId,
+  paneId,
   isActive,
   isOnlyPane,
   title,
@@ -34,12 +39,14 @@ export default function Pane({
     >
       {/* Pane header - shown when multiple panes and title available */}
       {showHeader && (
-        <PaneHeader
-          title={title}
-          status={status || 'creating'}
-          isActive={isActive}
-          onClose={onClose}
-        />
+        <div data-context={ContextIds.Pane} data-tab-id={tabId} data-pane-id={paneId}>
+          <PaneHeader
+            title={title}
+            status={status || 'creating'}
+            isActive={isActive}
+            onClose={onClose}
+          />
+        </div>
       )}
 
       {/* Fallback close button - shown when no header but multiple panes */}

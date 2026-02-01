@@ -9,6 +9,9 @@ import MarkdownPreview from './MarkdownPreview'
 import { api } from '@/lib/api'
 import { getFirstTerminalCwd } from '@/lib/pane-utils'
 import { isAbsolutePath, joinPath } from '@/lib/path-utils'
+import { copyText } from '@/lib/clipboard'
+import { registerEditorActions } from '@/lib/pane-action-registry'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 const AUTO_SAVE_DELAY = 5000
 
@@ -151,6 +154,14 @@ export default function EditorPane({
   const defaultBrowseRoot = firstTerminalCwd || defaultCwd || null
   const isHtmlPreview = isHtml(filePath, currentLanguage)
   const showEmptyState = !filePath && !editorValue
+
+  const resolvePath = useCallback((pathValue: string | null): string | null => {
+    if (!pathValue) return null
+    if (!isAbsolutePath(pathValue) && defaultBrowseRoot) {
+      return joinPath(defaultBrowseRoot, pathValue)
+    }
+    return pathValue
+  }, [defaultBrowseRoot])
 
   useEffect(() => {
     setEditorValue(content)
@@ -518,8 +529,10 @@ export default function EditorPane({
           }
 
           if (filePath) {
+            const resolved = resolvePath(filePath)
+            if (!resolved) return
             await api.post('/api/files/write', {
-              path: filePath,
+              path: resolved,
               content: value,
             })
           }
@@ -535,8 +548,57 @@ export default function EditorPane({
         }
       }, AUTO_SAVE_DELAY)
     },
-    [filePath, readOnly]
+    [filePath, readOnly, resolvePath]
   )
+
+  const performSave = useCallback(async () => {
+    if (readOnly) return
+    if (!filePath && !fileHandleRef.current) return
+    const value = pendingContent.current
+    try {
+      const handle = fileHandleRef.current
+      if (handle?.createWritable) {
+        const writable = await handle.createWritable()
+        await writable.write(value)
+        await writable.close()
+        return
+      }
+      if (filePath) {
+        const resolved = resolvePath(filePath)
+        if (!resolved) return
+        await api.post('/api/files/write', {
+          path: resolved,
+          content: value,
+        })
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(
+        JSON.stringify({
+          severity: 'error',
+          event: 'editor_manual_save_failed',
+          error: message,
+        })
+      )
+    }
+  }, [filePath, readOnly, resolvePath])
+
+  const openSystemViewer = useCallback(async (reveal: boolean) => {
+    const resolved = resolvePath(filePath)
+    if (!resolved) return
+    try {
+      await api.post('/api/files/open', { path: resolved, reveal })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(
+        JSON.stringify({
+          severity: 'error',
+          event: 'editor_open_external_failed',
+          error: message,
+        })
+      )
+    }
+  }, [filePath, resolvePath])
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
@@ -555,8 +617,31 @@ export default function EditorPane({
     updateContent({ viewMode: nextMode })
   }, [currentViewMode, updateContent])
 
+  useEffect(() => {
+    return registerEditorActions(paneId, {
+      cut: () => editorRef.current?.getAction('editor.action.clipboardCutAction')?.run(),
+      copy: () => editorRef.current?.getAction('editor.action.clipboardCopyAction')?.run(),
+      paste: () => editorRef.current?.getAction('editor.action.clipboardPasteAction')?.run(),
+      selectAll: () => editorRef.current?.getAction('editor.action.selectAll')?.run(),
+      saveNow: performSave,
+      togglePreview: handleToggleViewMode,
+      copyPath: async () => {
+        const resolved = resolvePath(filePath)
+        if (resolved) await copyText(resolved)
+      },
+      revealInExplorer: () => openSystemViewer(true),
+      openWithSystemViewer: () => openSystemViewer(false),
+    })
+  }, [paneId, performSave, handleToggleViewMode, filePath, resolvePath, openSystemViewer])
+
   return (
-    <div className="h-full w-full flex flex-col" data-testid="editor-pane" data-pane-id={paneId}>
+    <div
+      className="h-full w-full flex flex-col"
+      data-testid="editor-pane"
+      data-context={ContextIds.Editor}
+      data-pane-id={paneId}
+      data-tab-id={tabId}
+    >
       <div className="flex items-center border-b border-border">
         <div className="flex-1">
           <EditorToolbar

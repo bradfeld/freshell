@@ -45,11 +45,13 @@ export interface BackgroundTerminal {
 export interface ClaudeSession {
   sessionId: string
   projectPath: string
+  createdAt?: number
   updatedAt: number
   messageCount?: number
   title?: string
   summary?: string
   cwd?: string
+  archived?: boolean
 }
 
 export interface ProjectGroup {
@@ -62,6 +64,8 @@ export interface SessionOverride {
   titleOverride?: string
   summaryOverride?: string
   deleted?: boolean
+  archived?: boolean
+  createdAtOverride?: number
 }
 
 export interface TerminalOverride {

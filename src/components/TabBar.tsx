@@ -2,7 +2,7 @@ import { Plus } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, closeTab, setActiveTab, updateTab, reorderTabs } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
-import { deriveTabName } from '@/lib/deriveTabName'
+import { getTabDisplayTitle } from '@/lib/tab-title'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import TabItem from './TabItem'
 import {
@@ -25,6 +25,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Tab } from '@/store/types'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 interface SortableTabProps {
   tab: Tab
@@ -105,20 +106,10 @@ export default function TabBar() {
 
   // Compute display title for a single tab
   // Priority: user-set title > programmatically-set title (e.g., from Claude) > derived name
-  const getDisplayTitle = useCallback((tab: Tab): string => {
-    const title = tab.title ?? ''
-    const layout = paneLayouts[tab.id]
-    const derivedName = layout ? deriveTabName(layout) : null
-    if (tab.titleSetByUser) {
-      return title || derivedName || 'Tab'
-    }
-    // If tab has a non-default title (not "Tab N"), prefer it over derived name
-    // This preserves titles set by Claude via terminal.title.updated
-    if (title && !title.match(/^Tab \d+$/) && title !== derivedName) {
-      return title
-    }
-    return derivedName ?? (title || 'Tab')
-  }, [paneLayouts])
+  const getDisplayTitle = useCallback(
+    (tab: Tab): string => getTabDisplayTitle(tab, paneLayouts[tab.id]),
+    [paneLayouts]
+  )
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -176,7 +167,10 @@ export default function TabBar() {
   if (tabs.length === 0) return null
 
   return (
-    <div className="h-10 flex items-end px-2 border-b border-border/30 bg-muted/30">
+    <div
+      className="h-10 flex items-end px-2 border-b border-border/30 bg-muted/30"
+      data-context={ContextIds.Global}
+    >
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -232,6 +226,7 @@ export default function TabBar() {
               className="flex-shrink-0 ml-1 mb-1 p-1 rounded-md border border-dashed border-muted-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground/50 hover:bg-muted/30 transition-colors"
               title="New shell tab"
               onClick={() => dispatch(addTab({ mode: 'shell' }))}
+              data-context={ContextIds.TabAdd}
             >
               <Plus className="h-3.5 w-3.5" />
             </button>

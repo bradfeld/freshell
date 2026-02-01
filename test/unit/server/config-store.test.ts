@@ -382,6 +382,18 @@ describe('ConfigStore', () => {
       expect(result.summaryOverride).toBe('Summary')
     })
 
+    it('preserves archived and createdAtOverride when patching other fields', async () => {
+      const store = new ConfigStore()
+      await store.load()
+
+      await store.patchSessionOverride('session-1', { archived: true, createdAtOverride: 123 })
+      const result = await store.patchSessionOverride('session-1', { titleOverride: 'Updated' })
+
+      expect(result.archived).toBe(true)
+      expect(result.createdAtOverride).toBe(123)
+      expect(result.titleOverride).toBe('Updated')
+    })
+
     it('deleteSession marks session as deleted', async () => {
       const store = new ConfigStore()
       await store.load()

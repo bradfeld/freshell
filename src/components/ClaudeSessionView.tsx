@@ -107,7 +107,7 @@ export default function ClaudeSessionView({ sessionId, hidden }: ClaudeSessionVi
     return (
       <div ref={rowRef} style={{ ...style, paddingBottom: 16 }} {...ariaAttributes}>
         {row.kind === 'message' ? (
-          <MessageBubble event={row.event} />
+          <MessageBubble event={row.event} sessionId={sessionId} />
         ) : (
           <div className="text-center text-sm text-muted-foreground py-4 border-t">
             <span className="bg-muted px-2 py-1 rounded">

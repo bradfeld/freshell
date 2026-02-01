@@ -6,6 +6,7 @@ import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import rateLimit from 'express-rate-limit'
+import { z } from 'zod'
 import { logger } from './logger.js'
 import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
 import { configStore } from './config-store.js'
@@ -198,11 +199,28 @@ async function main() {
 
   app.patch('/api/sessions/:sessionId', async (req, res) => {
     const sessionId = req.params.sessionId
-    const { titleOverride, summaryOverride, deleted } = req.body || {}
+    const SessionPatchSchema = z.object({
+      titleOverride: z.string().optional().nullable(),
+      summaryOverride: z.string().optional().nullable(),
+      deleted: z.coerce.boolean().optional(),
+      archived: z.coerce.boolean().optional(),
+      createdAtOverride: z.coerce.number().optional(),
+    })
+    const parsed = SessionPatchSchema.safeParse(req.body || {})
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
+    }
+    const cleanString = (value: string | null | undefined) => {
+      const trimmed = typeof value === 'string' ? value.trim() : value
+      return trimmed ? trimmed : undefined
+    }
+    const { titleOverride, summaryOverride, deleted, archived, createdAtOverride } = parsed.data
     const next = await configStore.patchSessionOverride(sessionId, {
-      titleOverride,
-      summaryOverride,
+      titleOverride: cleanString(titleOverride),
+      summaryOverride: cleanString(summaryOverride),
       deleted,
+      archived,
+      createdAtOverride,
     })
     await claudeIndexer.refresh()
     wsHandler.broadcast({ type: 'sessions.updated', projects: claudeIndexer.getProjects() })

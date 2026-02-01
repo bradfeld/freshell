@@ -179,6 +179,22 @@ export const panesSlice = createSlice({
       state.activePane[tabId] = paneId
     },
 
+    resetLayout: (
+      state,
+      action: PayloadAction<{ tabId: string; content: PaneContentInput }>
+    ) => {
+      const { tabId, content } = action.payload
+      const paneId = nanoid()
+      const normalized = normalizeContent(content)
+      state.layouts[tabId] = {
+        type: 'leaf',
+        id: paneId,
+        content: normalized,
+      }
+      state.activePane[tabId] = paneId
+      state.paneTitles[tabId] = { [paneId]: derivePaneTitle(normalized) }
+    },
+
     splitPane: (
       state,
       action: PayloadAction<{
@@ -336,6 +352,54 @@ export const panesSlice = createSlice({
       state.layouts[tabId] = updateSizes(root)
     },
 
+    resetSplit: (
+      state,
+      action: PayloadAction<{ tabId: string; splitId: string }>
+    ) => {
+      const { tabId, splitId } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      function update(node: PaneNode): PaneNode {
+        if (node.type === 'leaf') return node
+        if (node.id === splitId) {
+          return { ...node, sizes: [50, 50] }
+        }
+        return {
+          ...node,
+          children: [update(node.children[0]), update(node.children[1])],
+        }
+      }
+
+      state.layouts[tabId] = update(root)
+    },
+
+    swapSplit: (
+      state,
+      action: PayloadAction<{ tabId: string; splitId: string }>
+    ) => {
+      const { tabId, splitId } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      function update(node: PaneNode): PaneNode {
+        if (node.type === 'leaf') return node
+        if (node.id === splitId) {
+          return {
+            ...node,
+            children: [node.children[1], node.children[0]],
+            sizes: [node.sizes[1], node.sizes[0]],
+          }
+        }
+        return {
+          ...node,
+          children: [update(node.children[0]), update(node.children[1])],
+        }
+      }
+
+      state.layouts[tabId] = update(root)
+    },
+
     updatePaneContent: (
       state,
       action: PayloadAction<{ tabId: string; paneId: string; content: PaneContent }>
@@ -397,11 +461,14 @@ export const panesSlice = createSlice({
 
 export const {
   initLayout,
+  resetLayout,
   splitPane,
   addPane,
   closePane,
   setActivePane,
   resizePanes,
+  resetSplit,
+  swapSplit,
   updatePaneContent,
   removeLayout,
   hydratePanes,

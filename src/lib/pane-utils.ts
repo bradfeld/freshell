@@ -21,3 +21,24 @@ export function getFirstTerminalCwd(
 
   return getFirstTerminalCwd(node.children[1], cwdMap)
 }
+
+export function collectTerminalIds(node: PaneNode): string[] {
+  if (node.type === 'leaf') {
+    if (node.content.kind === 'terminal' && node.content.terminalId) {
+      return [node.content.terminalId]
+    }
+    return []
+  }
+
+  return [
+    ...collectTerminalIds(node.children[0]),
+    ...collectTerminalIds(node.children[1]),
+  ]
+}
+
+export function findPaneContent(node: PaneNode, paneId: string) {
+  if (node.type === 'leaf') {
+    return node.id === paneId ? node.content : null
+  }
+  return findPaneContent(node.children[0], paneId) || findPaneContent(node.children[1], paneId)
+}

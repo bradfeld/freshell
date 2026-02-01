@@ -47,6 +47,8 @@ export type SessionOverride = {
   titleOverride?: string
   summaryOverride?: string
   deleted?: boolean
+  archived?: boolean
+  createdAtOverride?: number
 }
 
 export type TerminalOverride = {

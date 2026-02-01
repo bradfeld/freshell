@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal, Globe, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppSelector } from '@/store/hooks'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 type PaneType = 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' | 'editor'
 
@@ -34,9 +35,11 @@ interface PanePickerProps {
   onSelect: (type: PaneType) => void
   onCancel: () => void
   isOnlyPane: boolean
+  tabId?: string
+  paneId?: string
 }
 
-export default function PanePicker({ onSelect, onCancel, isOnlyPane }: PanePickerProps) {
+export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, paneId }: PanePickerProps) {
   const platform = useAppSelector((s) => s.connection?.platform ?? null)
   const options = getOptions(platform)
 
@@ -120,6 +123,9 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane }: PanePicke
         'transition-opacity duration-150 ease-out',
         fading && 'opacity-0'
       )}
+      data-context={ContextIds.PanePicker}
+      data-tab-id={tabId}
+      data-pane-id={paneId}
       onTransitionEnd={handleTransitionEnd}
     >
       <div className="flex flex-wrap justify-center gap-8">

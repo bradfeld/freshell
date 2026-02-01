@@ -14,11 +14,13 @@ const INCREMENTAL_DEBOUNCE_MS = Number(process.env.CLAUDE_INDEXER_DEBOUNCE_MS ||
 export type ClaudeSession = {
   sessionId: string
   projectPath: string
+  createdAt: number
   updatedAt: number
   messageCount?: number
   title?: string
   summary?: string
   cwd?: string
+  archived?: boolean
 }
 
 export type ProjectGroup = {
@@ -173,12 +175,22 @@ export async function parseSessionJsonlMeta(filePath: string): Promise<JsonlMeta
   }
 }
 
-function applyOverride(session: ClaudeSession, ov: SessionOverride | undefined): ClaudeSession | null {
+function deriveCreatedAt(stat: fs.Stats): number {
+  const birth = Number(stat.birthtimeMs || 0)
+  if (birth > 0) return birth
+  const ctime = Number(stat.ctimeMs || 0)
+  if (ctime > 0) return ctime
+  return Number(stat.mtimeMs || stat.mtime.getTime())
+}
+
+export function applyOverride(session: ClaudeSession, ov: SessionOverride | undefined): ClaudeSession | null {
   if (ov?.deleted) return null
   return {
     ...session,
     title: ov?.titleOverride || session.title,
     summary: ov?.summaryOverride || session.summary,
+    createdAt: ov?.createdAtOverride ?? session.createdAt,
+    archived: ov?.archived ?? session.archived ?? false,
   }
 }
 
@@ -194,6 +206,7 @@ export class ClaudeSessionIndexer {
   private sessionsById = new Map<string, ClaudeSession>()
   private projectsByPath = new Map<string, ProjectGroup>()
   private incrementalTimers = new Map<string, NodeJS.Timeout>()
+  private createdAtPinned = new Set<string>()
 
   async start() {
     // Initial scan (populates knownSessionIds with existing sessions)
@@ -303,6 +316,14 @@ export class ClaudeSessionIndexer {
 
   getProjects(): ProjectGroup[] {
     return this.projects
+  }
+
+  private ensureCreatedAtOverride(sessionId: string, createdAt: number, ov?: SessionOverride) {
+    if (ov?.createdAtOverride || this.createdAtPinned.has(sessionId)) return
+    this.createdAtPinned.add(sessionId)
+    void configStore.patchSessionOverride(sessionId, { createdAtOverride: createdAt }).catch((err) => {
+      logger.warn({ err, sessionId }, 'Failed to persist createdAt override')
+    })
   }
 
   private scheduleFileUpsert(filePath: string) {
@@ -422,9 +443,14 @@ export class ClaudeSessionIndexer {
     const cfg = await configStore.snapshot()
     const colors = await configStore.getProjectColors()
 
+    const ov = cfg.sessionOverrides?.[sessionId]
+    const createdAt = ov?.createdAtOverride ?? deriveCreatedAt(stat)
+    this.ensureCreatedAtOverride(sessionId, createdAt, ov)
+
     const baseSession: ClaudeSession = {
       sessionId,
       projectPath,
+      createdAt,
       updatedAt: stat.mtimeMs || stat.mtime.getTime(),
       messageCount: meta.messageCount,
       title: meta.title,
@@ -432,7 +458,6 @@ export class ClaudeSessionIndexer {
       cwd: meta.cwd,
     }
 
-    const ov = cfg.sessionOverrides?.[sessionId]
     const merged = applyOverride(baseSession, ov)
     if (!merged) {
       if (this.removeSession(sessionId)) {
@@ -498,9 +523,14 @@ export class ClaudeSessionIndexer {
         // Skip orphaned sessions (no conversation events, just snapshots)
         if (!meta.cwd) continue
 
+        const ov = cfg.sessionOverrides?.[sessionId]
+        const createdAt = ov?.createdAtOverride ?? deriveCreatedAt(stat)
+        this.ensureCreatedAtOverride(sessionId, createdAt, ov)
+
         const baseSession: ClaudeSession = {
           sessionId,
           projectPath,
+          createdAt,
           updatedAt: stat.mtimeMs || stat.mtime.getTime(),
           messageCount: meta.messageCount,
           title: meta.title,
@@ -508,7 +538,6 @@ export class ClaudeSessionIndexer {
           cwd: meta.cwd,
         }
 
-        const ov = cfg.sessionOverrides?.[sessionId]
         const merged = applyOverride(baseSession, ov)
         if (merged) sessions.push(merged)
       }

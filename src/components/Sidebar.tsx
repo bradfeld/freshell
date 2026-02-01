@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal, History, Settings, LayoutGrid, Search, Play, Loader2, X } from 'lucide-react'
+import { Terminal, History, Settings, LayoutGrid, Search, Play, Loader2, X, Archive } from 'lucide-react'
 import { List, type RowComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -9,6 +9,7 @@ import { getWsClient } from '@/lib/ws-client'
 import { searchSessions, type SearchResult } from '@/lib/api'
 import type { BackgroundTerminal } from '@/store/types'
 import { makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
 
@@ -139,6 +140,7 @@ export default function Sidebar({
         subtitle: getProjectName(result.projectPath),
         projectPath: result.projectPath,
         timestamp: result.updatedAt,
+        archived: result.archived,
         cwd: result.cwd,
         hasTab: tabs.some((t) => t.resumeSessionId === result.sessionId),
         isRunning: false,
@@ -366,6 +368,10 @@ function SidebarItem({
           ? 'bg-muted'
           : 'hover:bg-muted/50'
       )}
+      data-context={ContextIds.SidebarSession}
+      data-session-id={item.sessionId}
+      data-running-terminal-id={item.runningTerminalId}
+      data-has-tab={item.hasTab ? 'true' : 'false'}
     >
       {/* Status indicator */}
       <div className="flex-shrink-0">
@@ -398,6 +404,9 @@ function SidebarItem({
             </TooltipTrigger>
             <TooltipContent>{item.title}</TooltipContent>
           </Tooltip>
+          {item.archived && (
+            <Archive className="h-3 w-3 text-muted-foreground/70" aria-label="Archived session" />
+          )}
         </div>
         {item.subtitle && showProjectBadge && (
           <Tooltip>

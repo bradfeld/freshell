@@ -6,6 +6,9 @@ import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
+import { copyText, readText } from '@/lib/clipboard'
+import { registerTerminalActions } from '@/lib/pane-action-registry'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
@@ -111,6 +114,26 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     term.open(containerRef.current)
 
+    const unregisterActions = registerTerminalActions(paneId, {
+      copySelection: async () => {
+        const selection = term.getSelection()
+        if (selection) {
+          await copyText(selection)
+        }
+      },
+      paste: async () => {
+        const text = await readText()
+        if (!text) return
+        const tid = terminalIdRef.current
+        if (!tid) return
+        ws.send({ type: 'terminal.input', terminalId: tid, data: text })
+      },
+      selectAll: () => term.selectAll(),
+      clearScrollback: () => term.clear(),
+      reset: () => term.reset(),
+      hasSelection: () => term.getSelection().length > 0,
+    })
+
     requestAnimationFrame(() => {
       if (termRef.current === term) {
         try { fit.fit() } catch { /* disposed */ }
@@ -163,6 +186,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     return () => {
       ro.disconnect()
+      unregisterActions()
       if (termRef.current === term) {
         term.dispose()
         termRef.current = null
@@ -434,7 +458,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const showSpinner = terminalContent.status === 'creating' || isAttaching
 
   return (
-    <div className={cn('h-full w-full', hidden ? 'tab-hidden' : 'tab-visible relative')}>
+    <div
+      className={cn('h-full w-full', hidden ? 'tab-hidden' : 'tab-visible relative')}
+      data-context={ContextIds.Terminal}
+      data-pane-id={paneId}
+      data-tab-id={tabId}
+    >
       <div ref={containerRef} className="h-full w-full" />
       {showSpinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">

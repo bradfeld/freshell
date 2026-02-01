@@ -3,13 +3,15 @@ import type { MessageEvent, ContentBlock } from '@/lib/claude-types'
 import { isTextContent, isToolUseContent, isToolResultContent } from '@/lib/claude-types'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolResultBlock } from './ToolResultBlock'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 interface MessageBubbleProps {
   event: MessageEvent
+  sessionId: string
   className?: string
 }
 
-export function MessageBubble({ event, className }: MessageBubbleProps) {
+export function MessageBubble({ event, sessionId, className }: MessageBubbleProps) {
   const isAssistant = event.type === 'assistant'
 
   const renderContent = (block: ContentBlock, index: number) => {
@@ -46,6 +48,8 @@ export function MessageBubble({ event, className }: MessageBubbleProps) {
         isAssistant ? 'bg-muted self-start' : 'bg-primary text-primary-foreground self-end',
         className
       )}
+      data-context={ContextIds.ClaudeMessage}
+      data-session-id={sessionId}
     >
       {event.message.content.map(renderContent)}
     </div>

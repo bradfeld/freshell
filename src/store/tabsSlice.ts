@@ -50,6 +50,7 @@ function loadInitialTabsState(): TabsState {
 const initialState: TabsState = loadInitialTabsState()
 
 type AddTabPayload = {
+  id?: string
   title?: string
   description?: string
   terminalId?: string
@@ -59,6 +60,7 @@ type AddTabPayload = {
   shell?: ShellType
   initialCwd?: string
   resumeSessionId?: string
+  forceNew?: boolean
 }
 
 export const tabsSlice = createSlice({
@@ -69,7 +71,7 @@ export const tabsSlice = createSlice({
       const payload = action.payload || {}
 
       // Deduplicate: if resuming a session that already has a tab, switch to it instead
-      if (payload.resumeSessionId) {
+      if (payload.resumeSessionId && !payload.forceNew) {
         const existingTab = state.tabs.find((t) => t.resumeSessionId === payload.resumeSessionId)
         if (existingTab) {
           state.activeTabId = existingTab.id
@@ -77,7 +79,7 @@ export const tabsSlice = createSlice({
         }
       }
 
-      const id = nanoid()
+      const id = payload.id || nanoid()
       const tab: Tab = {
         id,
         createRequestId: id,

@@ -1,6 +1,7 @@
 import express from 'express'
 import fsp from 'fs/promises'
 import path from 'path'
+import { spawn } from 'child_process'
 
 export const filesRouter = express.Router()
 
@@ -110,6 +111,53 @@ filesRouter.get('/complete', async (req, res) => {
     if (err.code === 'ENOENT') {
       return res.json({ suggestions: [] })
     }
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+filesRouter.post('/open', async (req, res) => {
+  const { path: filePath, reveal } = req.body || {}
+  if (!filePath) {
+    return res.status(400).json({ error: 'path is required' })
+  }
+
+  const resolved = path.resolve(filePath)
+
+  try {
+    await fsp.stat(resolved)
+  } catch (err: any) {
+    if (err.code === 'ENOENT') {
+      return res.status(404).json({ error: 'File not found' })
+    }
+    return res.status(500).json({ error: err.message })
+  }
+
+  const platform = process.platform
+  let command: string
+  let args: string[] = []
+
+  if (platform === 'win32') {
+    if (reveal) {
+      command = 'explorer.exe'
+      args = ['/select,', resolved]
+    } else {
+      command = 'cmd'
+      args = ['/c', 'start', '', resolved]
+    }
+  } else if (platform === 'darwin') {
+    command = 'open'
+    args = reveal ? ['-R', resolved] : [resolved]
+  } else {
+    command = 'xdg-open'
+    const target = reveal ? path.dirname(resolved) : resolved
+    args = [target]
+  }
+
+  try {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' })
+    child.unref()
+    return res.json({ ok: true })
+  } catch (err: any) {
     return res.status(500).json({ error: err.message })
   }
 })

@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { addTab } from '@/store/tabsSlice'
 import { cn } from '@/lib/utils'
 import { Search, ChevronRight, MoreHorizontal, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 function formatTime(ts: number) {
   const now = Date.now()
@@ -177,6 +178,8 @@ function ProjectCard({
       <button
         onClick={onToggle}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors"
+        data-context={ContextIds.HistoryProject}
+        data-project-path={project.projectPath}
       >
         <div
           className="h-3 w-3 rounded-sm flex-shrink-0"
@@ -309,6 +312,8 @@ function SessionRow({
       onClick={onOpen}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
+      data-context={ContextIds.HistorySession}
+      data-session-id={session.sessionId}
     >
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">

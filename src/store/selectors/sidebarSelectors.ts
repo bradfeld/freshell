@@ -9,6 +9,7 @@ export interface SidebarSessionItem {
   subtitle?: string
   projectPath?: string
   projectColor?: string
+  archived?: boolean
   timestamp: number
   cwd?: string
   hasTab: boolean
@@ -78,6 +79,7 @@ function buildSessionItems(
         subtitle: getProjectName(project.projectPath),
         projectPath: project.projectPath,
         projectColor: project.color,
+        archived: session.archived,
         timestamp: session.updatedAt,
         cwd: session.cwd,
         hasTab: tabInfo?.hasTab ?? false,
@@ -106,42 +108,51 @@ function filterSessionItems(items: SidebarSessionItem[], filter: string): Sideba
 function sortSessionItems(items: SidebarSessionItem[], sortMode: string): SidebarSessionItem[] {
   const sorted = [...items]
 
-  if (sortMode === 'recency') {
-    return sorted.sort((a, b) => b.timestamp - a.timestamp)
+  const active = sorted.filter((i) => !i.archived)
+  const archived = sorted.filter((i) => i.archived)
+
+  const sortByMode = (list: SidebarSessionItem[]) => {
+    const copy = [...list]
+
+    if (sortMode === 'recency') {
+      return copy.sort((a, b) => b.timestamp - a.timestamp)
+    }
+
+    if (sortMode === 'activity') {
+      const withTabs = copy.filter((i) => i.hasTab)
+      const withoutTabs = copy.filter((i) => !i.hasTab)
+
+      withTabs.sort((a, b) => {
+        const aTime = a.tabLastInputAt ?? a.timestamp
+        const bTime = b.tabLastInputAt ?? b.timestamp
+        return bTime - aTime
+      })
+
+      withoutTabs.sort((a, b) => {
+        const aHasRatcheted = typeof a.ratchetedActivity === 'number'
+        const bHasRatcheted = typeof b.ratchetedActivity === 'number'
+        if (aHasRatcheted !== bHasRatcheted) return aHasRatcheted ? -1 : 1
+        const aTime = a.ratchetedActivity ?? a.timestamp
+        const bTime = b.ratchetedActivity ?? b.timestamp
+        return bTime - aTime
+      })
+
+      return [...withTabs, ...withoutTabs]
+    }
+
+    if (sortMode === 'project') {
+      return copy.sort((a, b) => {
+        const projA = a.projectPath || a.subtitle || ''
+        const projB = b.projectPath || b.subtitle || ''
+        if (projA !== projB) return projA.localeCompare(projB)
+        return b.timestamp - a.timestamp
+      })
+    }
+
+    return copy
   }
 
-  if (sortMode === 'activity') {
-    const withTabs = sorted.filter((i) => i.hasTab)
-    const withoutTabs = sorted.filter((i) => !i.hasTab)
-
-    withTabs.sort((a, b) => {
-      const aTime = a.tabLastInputAt ?? a.timestamp
-      const bTime = b.tabLastInputAt ?? b.timestamp
-      return bTime - aTime
-    })
-
-    withoutTabs.sort((a, b) => {
-      const aHasRatcheted = typeof a.ratchetedActivity === 'number'
-      const bHasRatcheted = typeof b.ratchetedActivity === 'number'
-      if (aHasRatcheted !== bHasRatcheted) return aHasRatcheted ? -1 : 1
-      const aTime = a.ratchetedActivity ?? a.timestamp
-      const bTime = b.ratchetedActivity ?? b.timestamp
-      return bTime - aTime
-    })
-
-    return [...withTabs, ...withoutTabs]
-  }
-
-  if (sortMode === 'project') {
-    return sorted.sort((a, b) => {
-      const projA = a.projectPath || a.subtitle || ''
-      const projB = b.projectPath || b.subtitle || ''
-      if (projA !== projB) return projA.localeCompare(projB)
-      return b.timestamp - a.timestamp
-    })
-  }
-
-  return sorted
+  return [...sortByMode(active), ...sortByMode(archived)]
 }
 
 export const makeSelectSortedSessionItems = () =>

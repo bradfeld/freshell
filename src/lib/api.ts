@@ -67,6 +67,8 @@ export type SearchResult = {
   matchedIn: 'title' | 'userMessage' | 'assistantMessage' | 'summary'
   snippet?: string
   updatedAt: number
+  createdAt?: number
+  archived?: boolean
   cwd?: string
 }
 

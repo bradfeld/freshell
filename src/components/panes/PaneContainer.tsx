@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
 import { nanoid } from 'nanoid'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 // Stable empty object to avoid selector memoization issues
 const EMPTY_PANE_TITLES: Record<string, string> = {}
@@ -77,6 +78,8 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
 
     return (
       <Pane
+        tabId={tabId}
+        paneId={node.id}
         isActive={activePane === node.id}
         isOnlyPane={isOnlyPane}
         title={paneTitle}
@@ -108,6 +111,9 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         direction={node.direction}
         onResize={(delta) => handleResize(node.id, delta, node.direction)}
         onResizeEnd={handleResizeEnd}
+        dataContext={ContextIds.PaneDivider}
+        dataTabId={tabId}
+        dataSplitId={node.id}
       />
 
       <div style={{ [node.direction === 'horizontal' ? 'width' : 'height']: `${size2}%` }} className="min-w-0 min-h-0">
@@ -199,6 +205,8 @@ function PickerWrapper({
       onSelect={handleSelect}
       onCancel={handleCancel}
       isOnlyPane={isOnlyPane}
+      tabId={tabId}
+      paneId={paneId}
     />
   )
 }

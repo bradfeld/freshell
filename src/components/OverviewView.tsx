@@ -5,6 +5,7 @@ import { addTab, setActiveTab, updateTab } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { cn } from '@/lib/utils'
 import { RefreshCw, Circle, Play, Pencil, Trash2, Sparkles, ExternalLink } from 'lucide-react'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 type TerminalOverview = {
   terminalId: string
@@ -317,6 +318,8 @@ function TerminalCard({
       onClick={onOpen}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
+      data-context={ContextIds.OverviewTerminal}
+      data-terminal-id={terminal.terminalId}
     >
       <div className="flex items-start gap-4">
         {/* Status */}

@@ -119,6 +119,40 @@ describe('searchTitleTier()', () => {
     const results = searchTitleTier(mockProjects, 'a')
     expect(results[0].updatedAt).toBeGreaterThanOrEqual(results[results.length - 1].updatedAt)
   })
+
+  it('sorts non-archived before archived and by updatedAt within groups', () => {
+    const projects: ProjectGroup[] = [
+      {
+        projectPath: '/home/user/project-a',
+        sessions: [
+          {
+            sessionId: 's1',
+            projectPath: '/home/user/project-a',
+            updatedAt: 2000,
+            title: 'Alpha task',
+            archived: false,
+          },
+          {
+            sessionId: 's2',
+            projectPath: '/home/user/project-a',
+            updatedAt: 3000,
+            title: 'Albatross review',
+            archived: true,
+          },
+          {
+            sessionId: 's3',
+            projectPath: '/home/user/project-a',
+            updatedAt: 1000,
+            title: 'Alaska note',
+            archived: false,
+          },
+        ],
+      },
+    ]
+
+    const results = searchTitleTier(projects, 'al')
+    expect(results.map((r) => r.sessionId)).toEqual(['s1', 's3', 's2'])
+  })
 })
 
 describe('extractUserMessages()', () => {

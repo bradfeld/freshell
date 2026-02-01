@@ -144,6 +144,7 @@ export default function EditorToolbar({
               inputRef.current = node
             }
           }}
+          data-native-context="true"
           type="text"
           value={inputValue}
           onChange={handleInputChange}

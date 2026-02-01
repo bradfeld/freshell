@@ -27,6 +27,8 @@ export const SearchResultSchema = z.object({
   matchedIn: z.enum(['title', 'userMessage', 'assistantMessage', 'summary']),
   snippet: z.string().optional(),
   updatedAt: z.number(),
+  createdAt: z.number().optional(),
+  archived: z.boolean().optional(),
   cwd: z.string().optional(),
 })
 
@@ -71,14 +73,23 @@ export function searchTitleTier(
           matchedIn: titleMatch ? 'title' : 'summary',
           snippet: titleMatch ? session.title : session.summary,
           updatedAt: session.updatedAt,
+          createdAt: session.createdAt,
+          archived: session.archived,
           cwd: session.cwd,
         })
       }
     }
   }
 
-  results.sort((a, b) => b.updatedAt - a.updatedAt)
+  results.sort(sortWithArchived)
   return results.slice(0, limit)
+}
+
+function sortWithArchived(a: SearchResult, b: SearchResult): number {
+  const aArchived = !!a.archived
+  const bArchived = !!b.archived
+  if (aArchived !== bArchived) return aArchived ? 1 : -1
+  return b.updatedAt - a.updatedAt
 }
 
 function extractTextFromContent(content: unknown): string {
@@ -281,6 +292,8 @@ export async function searchSessions(
           matchedIn: match.matchedIn!,
           snippet: match.snippet,
           updatedAt: session.updatedAt,
+          createdAt: session.createdAt,
+          archived: session.archived,
           cwd: session.cwd,
         })
 
@@ -291,7 +304,7 @@ export async function searchSessions(
   }
 
   // Sort by updatedAt descending
-  results.sort((a, b) => b.updatedAt - a.updatedAt)
+  results.sort(sortWithArchived)
 
   return {
     results,

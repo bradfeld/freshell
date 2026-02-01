@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Tab } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 function StatusIndicator({ status }: { status: string }) {
   if (status === 'running') {
@@ -57,6 +58,8 @@ export default function TabItem({
           : 'text-muted-foreground hover:text-foreground hover:bg-muted/30 border-transparent mt-1',
         isDragging && 'opacity-50'
       )}
+      data-context={ContextIds.Tab}
+      data-tab-id={tab.id}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >

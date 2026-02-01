@@ -17,6 +17,8 @@ import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
 import PaneDivider from '@/components/panes/PaneDivider'
+import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 
@@ -336,7 +338,16 @@ export default function App() {
   })()
 
   return (
-    <div className="h-full flex flex-col bg-background text-foreground">
+    <ContextMenuProvider
+      view={view}
+      onViewChange={setView}
+      onToggleSidebar={toggleSidebarCollapse}
+      sidebarCollapsed={sidebarCollapsed}
+    >
+      <div
+        className="h-full flex flex-col bg-background text-foreground"
+        data-context={ContextIds.Global}
+      >
       {/* Top header bar spanning full width */}
       <div className="h-8 px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -420,7 +431,7 @@ export default function App() {
       {/* Share modal for Windows */}
       {shareModalUrl && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
           onClick={() => setShareModalUrl(null)}
         >
           <div
@@ -461,6 +472,7 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ContextMenuProvider>
   )
 }
