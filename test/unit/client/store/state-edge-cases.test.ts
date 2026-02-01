@@ -818,6 +818,23 @@ describe('State Edge Cases', () => {
           sidebar: {
             sortMode: 'activity',
             showProjectBadges: false,
+            width: 400,
+            collapsed: true,
+          },
+          panes: {
+            defaultNewPane: 'shell',
+          },
+          notifications: {
+            visualWhenWorking: false,
+            visualWhenFinished: false,
+            soundWhenFinished: false,
+          },
+          codingCli: {
+            enabledProviders: ['claude', 'codex'],
+            providers: {
+              claude: { permissionMode: 'default' },
+              codex: { model: 'gpt-5-codex' },
+            },
           },
         }
 

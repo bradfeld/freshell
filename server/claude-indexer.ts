@@ -5,6 +5,7 @@ import fs from 'fs'
 import chokidar from 'chokidar'
 import { logger } from './logger.js'
 import { configStore, SessionOverride } from './config-store.js'
+import { makeSessionKey } from './coding-cli/types.js'
 import { extractTitleFromMessage } from './title-utils.js'
 
 const SEEN_SESSION_RETENTION_MS = Number(process.env.CLAUDE_SEEN_SESSION_RETENTION_MS || 7 * 24 * 60 * 60 * 1000)
@@ -318,11 +319,11 @@ export class ClaudeSessionIndexer {
     return this.projects
   }
 
-  private ensureCreatedAtOverride(sessionId: string, createdAt: number, ov?: SessionOverride) {
-    if (ov?.createdAtOverride || this.createdAtPinned.has(sessionId)) return
-    this.createdAtPinned.add(sessionId)
-    void configStore.patchSessionOverride(sessionId, { createdAtOverride: createdAt }).catch((err) => {
-      logger.warn({ err, sessionId }, 'Failed to persist createdAt override')
+  private ensureCreatedAtOverride(sessionKey: string, createdAt: number, ov?: SessionOverride) {
+    if (ov?.createdAtOverride || this.createdAtPinned.has(sessionKey)) return
+    this.createdAtPinned.add(sessionKey)
+    void configStore.patchSessionOverride(sessionKey, { createdAtOverride: createdAt }).catch((err) => {
+      logger.warn({ err, sessionKey }, 'Failed to persist createdAt override')
     })
   }
 
@@ -443,9 +444,15 @@ export class ClaudeSessionIndexer {
     const cfg = await configStore.snapshot()
     const colors = await configStore.getProjectColors()
 
-    const ov = cfg.sessionOverrides?.[sessionId]
+    const compositeKey = makeSessionKey('claude', sessionId)
+    const ov = cfg.sessionOverrides?.[compositeKey] || cfg.sessionOverrides?.[sessionId]
+    const overrideKey = cfg.sessionOverrides?.[compositeKey]
+      ? compositeKey
+      : cfg.sessionOverrides?.[sessionId]
+        ? sessionId
+        : compositeKey
     const createdAt = ov?.createdAtOverride ?? deriveCreatedAt(stat)
-    this.ensureCreatedAtOverride(sessionId, createdAt, ov)
+    this.ensureCreatedAtOverride(overrideKey, createdAt, ov)
 
     const baseSession: ClaudeSession = {
       sessionId,
@@ -523,9 +530,15 @@ export class ClaudeSessionIndexer {
         // Skip orphaned sessions (no conversation events, just snapshots)
         if (!meta.cwd) continue
 
-        const ov = cfg.sessionOverrides?.[sessionId]
+        const compositeKey = makeSessionKey('claude', sessionId)
+        const ov = cfg.sessionOverrides?.[compositeKey] || cfg.sessionOverrides?.[sessionId]
+        const overrideKey = cfg.sessionOverrides?.[compositeKey]
+          ? compositeKey
+          : cfg.sessionOverrides?.[sessionId]
+            ? sessionId
+            : compositeKey
         const createdAt = ov?.createdAtOverride ?? deriveCreatedAt(stat)
-        this.ensureCreatedAtOverride(sessionId, createdAt, ov)
+        this.ensureCreatedAtOverride(overrideKey, createdAt, ov)
 
         const baseSession: ClaudeSession = {
           sessionId,

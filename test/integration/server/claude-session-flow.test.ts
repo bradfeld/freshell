@@ -14,7 +14,8 @@ import express from 'express'
 import WebSocket from 'ws'
 import { WsHandler } from '../../../server/ws-handler'
 import { TerminalRegistry } from '../../../server/terminal-registry'
-import { ClaudeSessionManager } from '../../../server/claude-session'
+import { CodingCliSessionManager } from '../../../server/coding-cli/session-manager'
+import { claudeProvider } from '../../../server/coding-cli/providers/claude'
 
 vi.mock('node-pty', () => ({
   spawn: vi.fn(() => ({
@@ -37,14 +38,14 @@ describe.skipIf(!runClaudeIntegration)('Claude Session Flow Integration', () => 
   let port: number
   let wsHandler: WsHandler
   let registry: TerminalRegistry
-  let claudeManager: ClaudeSessionManager
+  let cliManager: CodingCliSessionManager
 
   beforeAll(async () => {
     const app = express()
     server = http.createServer(app)
     registry = new TerminalRegistry()
-    claudeManager = new ClaudeSessionManager()
-    wsHandler = new WsHandler(server, registry, claudeManager)
+    cliManager = new CodingCliSessionManager([claudeProvider])
+    wsHandler = new WsHandler(server, registry, cliManager)
 
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', () => {
@@ -55,7 +56,7 @@ describe.skipIf(!runClaudeIntegration)('Claude Session Flow Integration', () => 
   })
 
   afterAll(async () => {
-    claudeManager.shutdown()
+    cliManager.shutdown()
     registry.shutdown()
     wsHandler.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))
@@ -85,24 +86,25 @@ describe.skipIf(!runClaudeIntegration)('Claude Session Flow Integration', () => 
       ws.on('message', (data) => {
         const msg = JSON.parse(data.toString())
 
-        if (msg.type === 'claude.created') {
+        if (msg.type === 'codingcli.created') {
           sessionId = msg.sessionId
         }
 
-        if (msg.type === 'claude.event') {
+        if (msg.type === 'codingcli.event') {
           events.push(msg.event)
         }
 
-        if (msg.type === 'claude.exit') {
+        if (msg.type === 'codingcli.exit') {
           resolve()
         }
       })
     })
 
     ws.send(JSON.stringify({
-      type: 'claude.create',
+      type: 'codingcli.create',
       requestId: 'test-req-1',
-      prompt: 'say "hello world" and nothing else',
+      provider: 'claude',
+      prompt: 'say \"hello world\" and nothing else',
       permissionMode: 'bypassPermissions',
     }))
 
@@ -111,9 +113,9 @@ describe.skipIf(!runClaudeIntegration)('Claude Session Flow Integration', () => 
     expect(sessionId).toBeDefined()
     expect(events.length).toBeGreaterThan(0)
 
-    // Should have at least init and result events
-    const hasInit = events.some((e) => e.type === 'system' && e.subtype === 'init')
-    const hasResult = events.some((e) => e.type === 'result')
+    // Should have at least init and end events
+    const hasInit = events.some((e) => e.type === 'session.init')
+    const hasResult = events.some((e) => e.type === 'session.end')
     expect(hasInit || hasResult).toBe(true)
 
     ws.close()

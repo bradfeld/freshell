@@ -3,6 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
+import { recordOutput, recordInput } from '@/store/terminalActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
@@ -145,6 +146,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       if (!tid) return
       ws.send({ type: 'terminal.input', terminalId: tid, data })
 
+      // Track input for activity monitoring (to filter out echo)
+      dispatch(recordInput({ paneId }))
+
       const currentTab = tabRef.current
       if (currentTab) {
         const now = Date.now()
@@ -152,7 +156,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (currentTab.resumeSessionId) {
           if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
             lastSessionActivityAtRef.current = now
-            dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, lastInputAt: now }))
+            const provider =
+              currentTab.codingCliProvider ||
+              (currentTab.mode !== 'shell' ? currentTab.mode : undefined) ||
+              'claude'
+            dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, provider, lastInputAt: now }))
           }
         }
       }
@@ -304,6 +312,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'terminal.output' && msg.terminalId === tid) {
           term.write(msg.data || '')
+          // Track output activity for notification system
+          dispatch(recordOutput({ paneId }))
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {

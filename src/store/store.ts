@@ -1,11 +1,15 @@
+// Storage migration MUST be imported first (before slices load from localStorage)
+import './storage-migration'
+
 import { configureStore } from '@reduxjs/toolkit'
 import tabsReducer from './tabsSlice'
 import connectionReducer from './connectionSlice'
 import sessionsReducer from './sessionsSlice'
 import settingsReducer from './settingsSlice'
-import claudeReducer from './claudeSlice'
+import codingCliReducer from './codingCliSlice'
 import panesReducer from './panesSlice'
 import sessionActivityReducer from './sessionActivitySlice'
+import terminalActivityReducer from './terminalActivitySlice'
 import { persistMiddleware } from './persistMiddleware'
 import { sessionActivityPersistMiddleware } from './sessionActivityPersistence'
 
@@ -15,9 +19,10 @@ export const store = configureStore({
     connection: connectionReducer,
     sessions: sessionsReducer,
     settings: settingsReducer,
-    claude: claudeReducer,
+    codingCli: codingCliReducer,
     panes: panesReducer,
     sessionActivity: sessionActivityReducer,
+    terminalActivity: terminalActivityReducer,
   },
   middleware: (getDefault) =>
     getDefault({

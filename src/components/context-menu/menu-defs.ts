@@ -25,15 +25,15 @@ export type MenuActions = {
   getTerminalActions: (paneId: string) => TerminalActions | undefined
   getEditorActions: (paneId: string) => EditorActions | undefined
   getBrowserActions: (paneId: string) => BrowserActions | undefined
-  openSessionInNewTab: (sessionId: string) => void
-  openSessionInThisTab: (sessionId: string) => void
-  renameSession: (sessionId: string, withSummary?: boolean) => void
-  toggleArchiveSession: (sessionId: string, next: boolean) => void
-  deleteSession: (sessionId: string) => void
+  openSessionInNewTab: (sessionId: string, provider?: string) => void
+  openSessionInThisTab: (sessionId: string, provider?: string) => void
+  renameSession: (sessionId: string, provider?: string, withSummary?: boolean) => void
+  toggleArchiveSession: (sessionId: string, provider: string | undefined, next: boolean) => void
+  deleteSession: (sessionId: string, provider?: string) => void
   copySessionId: (sessionId: string) => void
-  copySessionCwd: (sessionId: string) => void
-  copySessionSummary: (sessionId: string) => void
-  copySessionMetadata: (sessionId: string) => void
+  copySessionCwd: (sessionId: string, provider?: string) => void
+  copySessionSummary: (sessionId: string, provider?: string) => void
+  copySessionMetadata: (sessionId: string, provider?: string) => void
   setProjectColor: (projectPath: string) => void
   toggleProjectExpanded: (projectPath: string, expanded: boolean) => void
   openAllSessionsInProject: (projectPath: string) => void
@@ -58,10 +58,10 @@ export type MenuBuildContext = {
   actions: MenuActions
 }
 
-function getSessionById(projects: ProjectGroup[], sessionId: string) {
+function getSessionById(projects: ProjectGroup[], sessionId: string, provider?: string) {
   for (const project of projects) {
     const session = project.sessions.find((s) => s.sessionId === sessionId)
-    if (session) return { session, project }
+    if (session && (!provider || session.provider === provider)) return { session, project }
   }
   return null
 }
@@ -244,32 +244,32 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
   }
 
   if (target.kind === 'sidebar-session') {
-    const sessionInfo = getSessionById(sessions, target.sessionId)
+    const sessionInfo = getSessionById(sessions, target.sessionId, target.provider)
     const archived = sessionInfo?.session.archived ?? false
     const isRunning = !!target.runningTerminalId
 
     return [
-      { type: 'item', id: 'session-open-new', label: 'Open in new tab', onSelect: () => actions.openSessionInNewTab(target.sessionId) },
-      { type: 'item', id: 'session-open-this', label: 'Open in this tab', onSelect: () => actions.openSessionInThisTab(target.sessionId) },
-      { type: 'item', id: 'session-rename', label: 'Rename', onSelect: () => actions.renameSession(target.sessionId) },
+      { type: 'item', id: 'session-open-new', label: 'Open in new tab', onSelect: () => actions.openSessionInNewTab(target.sessionId, target.provider) },
+      { type: 'item', id: 'session-open-this', label: 'Open in this tab', onSelect: () => actions.openSessionInThisTab(target.sessionId, target.provider) },
+      { type: 'item', id: 'session-rename', label: 'Rename', onSelect: () => actions.renameSession(target.sessionId, target.provider) },
       {
         type: 'item',
         id: 'session-archive',
         label: archived ? 'Unarchive' : 'Archive',
-        onSelect: () => actions.toggleArchiveSession(target.sessionId, !archived),
+        onSelect: () => actions.toggleArchiveSession(target.sessionId, target.provider, !archived),
       },
       {
         type: 'item',
         id: 'session-delete',
         label: 'Delete',
-        onSelect: () => actions.deleteSession(target.sessionId),
+        onSelect: () => actions.deleteSession(target.sessionId, target.provider),
         danger: true,
         disabled: isRunning,
       },
       { type: 'separator', id: 'session-sep' },
       { type: 'item', id: 'session-copy-id', label: 'Copy session ID', onSelect: () => actions.copySessionId(target.sessionId) },
-      { type: 'item', id: 'session-copy-cwd', label: 'Copy CWD', onSelect: () => actions.copySessionCwd(target.sessionId) },
-      { type: 'item', id: 'session-copy-meta', label: 'Copy full metadata', onSelect: () => actions.copySessionMetadata(target.sessionId) },
+      { type: 'item', id: 'session-copy-cwd', label: 'Copy CWD', onSelect: () => actions.copySessionCwd(target.sessionId, target.provider) },
+      { type: 'item', id: 'session-copy-meta', label: 'Copy full metadata', onSelect: () => actions.copySessionMetadata(target.sessionId, target.provider) },
     ]
   }
 
@@ -290,17 +290,21 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
   }
 
   if (target.kind === 'history-session') {
-    const sessionInfo = getSessionById(sessions, target.sessionId)
+    const sessionInfo = getSessionById(sessions, target.sessionId, target.provider)
     const hasSummary = !!sessionInfo?.session.summary
-    const isOpen = tabs.some((t) => t.resumeSessionId === target.sessionId)
+    const isOpen = tabs.some(
+      (t) =>
+        t.resumeSessionId === target.sessionId &&
+        (t.codingCliProvider || t.mode || 'claude') === (target.provider || 'claude')
+    )
     return [
-      { type: 'item', id: 'history-session-open', label: 'Open session', onSelect: () => actions.openSessionInNewTab(target.sessionId) },
-      { type: 'item', id: 'history-session-rename', label: 'Rename', onSelect: () => actions.renameSession(target.sessionId, true) },
-      { type: 'item', id: 'history-session-delete', label: 'Delete session', onSelect: () => actions.deleteSession(target.sessionId), danger: true, disabled: isOpen },
+      { type: 'item', id: 'history-session-open', label: 'Open session', onSelect: () => actions.openSessionInNewTab(target.sessionId, target.provider) },
+      { type: 'item', id: 'history-session-rename', label: 'Rename', onSelect: () => actions.renameSession(target.sessionId, target.provider, true) },
+      { type: 'item', id: 'history-session-delete', label: 'Delete session', onSelect: () => actions.deleteSession(target.sessionId, target.provider), danger: true, disabled: isOpen },
       { type: 'separator', id: 'history-session-sep' },
       { type: 'item', id: 'history-session-copy-id', label: 'Copy session ID', onSelect: () => actions.copySessionId(target.sessionId) },
-      { type: 'item', id: 'history-session-copy-summary', label: 'Copy summary', onSelect: () => actions.copySessionSummary(target.sessionId), disabled: !hasSummary },
-      { type: 'item', id: 'history-session-copy-cwd', label: 'Copy CWD', onSelect: () => actions.copySessionCwd(target.sessionId) },
+      { type: 'item', id: 'history-session-copy-summary', label: 'Copy summary', onSelect: () => actions.copySessionSummary(target.sessionId, target.provider), disabled: !hasSummary },
+      { type: 'item', id: 'history-session-copy-cwd', label: 'Copy CWD', onSelect: () => actions.copySessionCwd(target.sessionId, target.provider) },
     ]
   }
 
@@ -322,7 +326,7 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
       { type: 'item', id: 'claude-copy-code', label: 'Copy code block', onSelect: () => actions.copyMessageCode(contextElement), disabled: !hasCode },
       { type: 'separator', id: 'claude-sep' },
       { type: 'item', id: 'claude-copy-session', label: 'Copy session ID', onSelect: () => actions.copySessionId(target.sessionId) },
-      { type: 'item', id: 'claude-open-session', label: 'Open session in new tab', onSelect: () => actions.openSessionInNewTab(target.sessionId) },
+      { type: 'item', id: 'claude-open-session', label: 'Open session in new tab', onSelect: () => actions.openSessionInNewTab(target.sessionId, target.provider) },
     ]
   }
 

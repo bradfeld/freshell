@@ -12,6 +12,7 @@ import { getTabDisplayTitle } from '@/lib/tab-title'
 import { getBrowserActions, getEditorActions, getTerminalActions } from '@/lib/pane-action-registry'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import type { AppView } from '@/components/Sidebar'
+import type { CodingCliProviderName } from '@/store/types'
 import type { ContextTarget } from './context-menu-types'
 import { ContextMenu } from './ContextMenu'
 import { ContextIds } from './context-menu-constants'
@@ -219,18 +220,21 @@ export function ContextMenuProvider({
     dispatch(reorderTabs({ fromIndex: index, toIndex: next }))
   }, [dispatch, tabsState.tabs])
 
-  const getSessionInfo = useCallback((sessionId: string) => {
+  const getSessionInfo = useCallback((sessionId: string, provider?: string) => {
     for (const project of sessions) {
-      const session = project.sessions.find((s) => s.sessionId === sessionId)
+      const session = project.sessions.find((s) =>
+        s.sessionId === sessionId && (!provider || s.provider === provider)
+      )
       if (session) return { session, project }
     }
     return null
   }, [sessions])
 
-  const openSessionInNewTab = useCallback((sessionId: string) => {
-    const info = getSessionInfo(sessionId)
+  const openSessionInNewTab = useCallback((sessionId: string, provider?: string) => {
+    const info = getSessionInfo(sessionId, provider)
     if (!info) return
     const { session } = info
+    const mode = (provider || session.provider || 'claude') as CodingCliProviderName
     const runningTerminalId =
       menuState?.target.kind === 'sidebar-session' && menuState?.target.sessionId === sessionId
         ? menuState?.target.runningTerminalId
@@ -240,7 +244,8 @@ export function ContextMenuProvider({
         title: session.title || session.sessionId.slice(0, 8),
         terminalId: runningTerminalId,
         status: 'running',
-        mode: 'claude',
+        mode,
+        codingCliProvider: mode,
         resumeSessionId: session.sessionId,
         forceNew: true,
       }))
@@ -248,22 +253,24 @@ export function ContextMenuProvider({
     }
     dispatch(addTab({
       title: session.title || session.sessionId.slice(0, 8),
-      mode: 'claude',
+      mode,
+      codingCliProvider: mode,
       initialCwd: session.cwd,
       resumeSessionId: session.sessionId,
       forceNew: true,
     }))
   }, [dispatch, getSessionInfo, menuState?.target])
 
-  const openSessionInThisTab = useCallback((sessionId: string) => {
+  const openSessionInThisTab = useCallback((sessionId: string, provider?: string) => {
     const activeTabId = tabsState.activeTabId
     if (!activeTabId) {
-      openSessionInNewTab(sessionId)
+      openSessionInNewTab(sessionId, provider)
       return
     }
-    const info = getSessionInfo(sessionId)
+    const info = getSessionInfo(sessionId, provider)
     if (!info) return
     const { session } = info
+    const mode = (provider || session.provider || 'claude') as CodingCliProviderName
     const runningTerminalId =
       menuState?.target.kind === 'sidebar-session' && menuState?.target.sessionId === sessionId
         ? menuState?.target.runningTerminalId
@@ -277,7 +284,10 @@ export function ContextMenuProvider({
       id: activeTabId,
       updates: {
         title: session.title || session.sessionId.slice(0, 8),
-        mode: 'claude',
+        mode,
+        codingCliProvider: mode,
+        codingCliSessionId: undefined,
+        claudeSessionId: undefined,
         resumeSessionId: session.sessionId,
         terminalId: runningTerminalId,
         status: runningTerminalId ? 'running' : 'creating',
@@ -287,7 +297,7 @@ export function ContextMenuProvider({
       tabId: activeTabId,
       content: {
         kind: 'terminal',
-        mode: 'claude',
+        mode,
         resumeSessionId: session.sessionId,
         initialCwd: session.cwd,
         terminalId: runningTerminalId || undefined,
@@ -296,8 +306,8 @@ export function ContextMenuProvider({
     }))
   }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, ws])
 
-  const renameSession = useCallback(async (sessionId: string, withSummary?: boolean) => {
-    const info = getSessionInfo(sessionId)
+  const renameSession = useCallback(async (sessionId: string, provider?: string, withSummary?: boolean) => {
+    const info = getSessionInfo(sessionId, provider)
     if (!info) return
     const title = window.prompt('Rename session', info.session.title || '')
     if (title === null) return
@@ -308,7 +318,8 @@ export function ContextMenuProvider({
       summary = nextSummary || undefined
     }
     try {
-      await api.patch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      const compositeKey = `${provider || info.session.provider || 'claude'}:${sessionId}`
+      await api.patch(`/api/sessions/${encodeURIComponent(compositeKey)}`, {
         titleOverride: title || undefined,
         summaryOverride: summary,
       })
@@ -319,9 +330,10 @@ export function ContextMenuProvider({
     }
   }, [dispatch, getSessionInfo])
 
-  const toggleArchiveSession = useCallback(async (sessionId: string, next: boolean) => {
+  const toggleArchiveSession = useCallback(async (sessionId: string, provider: string | undefined, next: boolean) => {
     try {
-      await api.patch(`/api/sessions/${encodeURIComponent(sessionId)}`, { archived: next })
+      const compositeKey = `${provider || 'claude'}:${sessionId}`
+      await api.patch(`/api/sessions/${encodeURIComponent(compositeKey)}`, { archived: next })
       const data = await api.get('/api/sessions')
       dispatch(setProjects(data))
     } catch {
@@ -329,8 +341,8 @@ export function ContextMenuProvider({
     }
   }, [dispatch])
 
-  const deleteSession = useCallback((sessionId: string) => {
-    const info = getSessionInfo(sessionId)
+  const deleteSession = useCallback((sessionId: string, provider?: string) => {
+    const info = getSessionInfo(sessionId, provider)
     if (!info) return
     const messageCount = info.session.messageCount
     const createdAt = info.session.createdAt
@@ -355,7 +367,8 @@ export function ContextMenuProvider({
       ),
       onConfirm: async () => {
         try {
-          await api.delete(`/api/sessions/${encodeURIComponent(sessionId)}`)
+          const compositeKey = `${provider || info.session.provider || 'claude'}:${sessionId}`
+          await api.delete(`/api/sessions/${encodeURIComponent(compositeKey)}`)
           const data = await api.get('/api/sessions')
           dispatch(setProjects(data))
         } catch {
@@ -371,25 +384,30 @@ export function ContextMenuProvider({
     await copyText(sessionId)
   }, [])
 
-  const copySessionCwd = useCallback(async (sessionId: string) => {
-    const info = getSessionInfo(sessionId)
+  const copySessionCwd = useCallback(async (sessionId: string, provider?: string) => {
+    const info = getSessionInfo(sessionId, provider)
     if (info?.session.cwd) {
       await copyText(info.session.cwd)
     }
   }, [getSessionInfo])
 
-  const copySessionSummary = useCallback(async (sessionId: string) => {
-    const info = getSessionInfo(sessionId)
+  const copySessionSummary = useCallback(async (sessionId: string, provider?: string) => {
+    const info = getSessionInfo(sessionId, provider)
     if (info?.session.summary) {
       await copyText(info.session.summary)
     }
   }, [getSessionInfo])
 
-  const copySessionMetadata = useCallback(async (sessionId: string) => {
-    const info = getSessionInfo(sessionId)
+  const copySessionMetadata = useCallback(async (sessionId: string, provider?: string) => {
+    const info = getSessionInfo(sessionId, provider)
     if (!info) return
     const { session, project } = info
-    const relatedTabs = tabsState.tabs.filter((t) => t.resumeSessionId === sessionId)
+    const keyProvider = (provider || session.provider || 'claude')
+    const relatedTabs = tabsState.tabs.filter(
+      (t) =>
+        t.resumeSessionId === sessionId &&
+        (t.codingCliProvider || t.mode || 'claude') === keyProvider
+    )
     const hasTab = relatedTabs.length > 0
     const tabLastInputAt = relatedTabs.reduce((max, tab) => Math.max(max, tab.lastInputAt ?? 0), 0) || undefined
     const runningTerminalId =
@@ -399,6 +417,8 @@ export function ContextMenuProvider({
     const metadata = {
       title: session.title,
       sessionId: session.sessionId,
+      provider: session.provider,
+      compositeKey: `${session.provider || 'claude'}:${session.sessionId}`,
       projectPath: project.projectPath,
       cwd: session.cwd,
       createdAt: session.createdAt,
@@ -408,6 +428,7 @@ export function ContextMenuProvider({
       messageCount: session.messageCount,
       summary: session.summary,
       archived: session.archived,
+      sourceFile: session.sourceFile,
       hasTab,
       tabLastInputAt,
       tabLastInputAtIso: tabLastInputAt ? new Date(tabLastInputAt).toISOString() : null,

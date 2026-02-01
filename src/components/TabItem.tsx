@@ -6,12 +6,9 @@ import type { MouseEvent, KeyboardEvent } from 'react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 function StatusIndicator({ status }: { status: string }) {
+  // Ready state (default): green dot for running terminals
   if (status === 'running') {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-success text-success" />
-      </div>
-    )
+    return <Circle className="h-2 w-2 fill-success text-success" />
   }
   if (status === 'exited') {
     return <Circle className="h-2 w-2 text-muted-foreground/40" />
@@ -19,6 +16,7 @@ function StatusIndicator({ status }: { status: string }) {
   if (status === 'error') {
     return <Circle className="h-2 w-2 fill-destructive text-destructive" />
   }
+  // Creating state
   return <Circle className="h-2 w-2 text-muted-foreground/20 animate-pulse" />
 }
 
@@ -27,6 +25,7 @@ export interface TabItemProps {
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
+  isFinished: boolean
   renameValue: string
   onRenameChange: (value: string) => void
   onRenameBlur: () => void
@@ -41,6 +40,7 @@ export default function TabItem({
   isActive,
   isDragging,
   isRenaming,
+  isFinished,
   renameValue,
   onRenameChange,
   onRenameBlur,
@@ -52,11 +52,13 @@ export default function TabItem({
   return (
     <div
       className={cn(
-        'group flex items-center gap-2 h-8 px-3 rounded-t-lg text-sm cursor-pointer transition-all border-x border-t',
+        'group flex items-center gap-2 h-8 px-3 rounded-t-md text-sm cursor-pointer transition-all',
         isActive
-          ? 'bg-background text-foreground border-border/30 relative z-10 -mb-px'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/30 border-transparent mt-1',
-        isDragging && 'opacity-50'
+          ? 'bg-background text-foreground shadow-sm'
+          : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-accent mt-1',
+        isDragging && 'opacity-50',
+        // Finished state: blue tint on background tabs
+        isFinished && !isActive && 'bg-blue-500/20'
       )}
       data-context={ContextIds.Tab}
       data-tab-id={tab.id}

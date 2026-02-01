@@ -1,6 +1,10 @@
 export type TerminalStatus = 'creating' | 'running' | 'exited' | 'error'
 
-export type TabMode = 'shell' | 'claude' | 'codex'
+export type CodingCliProviderName = 'claude' | 'codex' | 'opencode' | 'gemini' | 'kimi'
+
+// TabMode includes 'shell' for regular terminals, plus all coding CLI providers
+// This allows future providers (opencode, gemini, kimi) to work as tab modes
+export type TabMode = 'shell' | CodingCliProviderName
 
 /**
  * Shell type for terminal creation.
@@ -19,7 +23,9 @@ export interface Tab {
   title: string
   description?: string
   terminalId?: string          // For shell mode
-  claudeSessionId?: string     // For claude mode
+  codingCliSessionId?: string  // For coding CLI session view
+  codingCliProvider?: CodingCliProviderName
+  claudeSessionId?: string     // Legacy field (migrated to codingCliSessionId)
   status: TerminalStatus
   mode: TabMode
   shell?: ShellType
@@ -38,11 +44,12 @@ export interface BackgroundTerminal {
   cwd?: string
   status: 'running' | 'exited'
   hasClients: boolean
-  mode?: 'shell' | 'claude' | 'codex'
+  mode?: TabMode
   resumeSessionId?: string
 }
 
-export interface ClaudeSession {
+export interface CodingCliSession {
+  provider: CodingCliProviderName
   sessionId: string
   projectPath: string
   createdAt?: number
@@ -52,11 +59,12 @@ export interface ClaudeSession {
   summary?: string
   cwd?: string
   archived?: boolean
+  sourceFile?: string
 }
 
 export interface ProjectGroup {
   projectPath: string
-  sessions: ClaudeSession[]
+  sessions: CodingCliSession[]
   color?: string
 }
 
@@ -88,6 +96,20 @@ export type TerminalTheme =
   | 'solarized-light'
   | 'github-light'
 
+export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+export type ClaudePermissionMode = 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions'
+
+export interface CodingCliSettings {
+  enabledProviders: CodingCliProviderName[]
+  providers: Partial<Record<CodingCliProviderName, {
+    model?: string
+    sandbox?: CodexSandboxMode
+    permissionMode?: ClaudePermissionMode
+    maxTurns?: number
+  }>>
+}
+
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark'
   uiScale: number // 1 = 100%, 1.5 = 150%, 2 = 200%
@@ -110,7 +132,16 @@ export interface AppSettings {
     width: number // pixels, default 288 (equivalent to w-72)
     collapsed: boolean // for mobile/responsive use
   }
+  codingCli: CodingCliSettings
   panes: {
     defaultNewPane: DefaultNewPane
+  }
+  notifications: {
+    /** Show pulsing indicator on tab when terminal is actively streaming output */
+    visualWhenWorking: boolean
+    /** Show "ready" badge on tab when streaming finishes (clears when tab is selected) */
+    visualWhenFinished: boolean
+    /** Play sound when streaming finishes on a background tab */
+    soundWhenFinished: boolean
   }
 }
