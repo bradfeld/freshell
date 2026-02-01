@@ -138,10 +138,47 @@ async function ensureDir() {
   await fsp.mkdir(configDir(), { recursive: true })
 }
 
+const RENAME_RETRY_DELAYS_MS = [10, 25, 50, 100, 200]
+
+function isRetryableRenameError(err: unknown): err is NodeJS.ErrnoException {
+  if (!err || typeof err !== 'object') return false
+  const code = (err as NodeJS.ErrnoException).code
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
+}
+
+async function delay(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function renameWithRetry(tmpPath: string, filePath: string) {
+  for (let attempt = 0; attempt <= RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      await fsp.rename(tmpPath, filePath)
+      return
+    } catch (err) {
+      if (!isRetryableRenameError(err) || attempt === RENAME_RETRY_DELAYS_MS.length) {
+        throw err
+      }
+      await delay(RENAME_RETRY_DELAYS_MS[attempt])
+    }
+  }
+}
+
 async function atomicWriteFile(filePath: string, data: string) {
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
   await fsp.writeFile(tmp, data, 'utf-8')
-  await fsp.rename(tmp, filePath)
+  try {
+    await renameWithRetry(tmp, filePath)
+  } catch (err) {
+    if (isRetryableRenameError(err)) {
+      logger.warn({ err, filePath }, 'Atomic rename failed; falling back to direct write')
+      await fsp.writeFile(filePath, data, 'utf-8')
+      return
+    }
+    throw err
+  } finally {
+    await fsp.rm(tmp, { force: true })
+  }
 }
 
 async function readConfigFile(): Promise<UserConfig | null> {
