@@ -1,7 +1,6 @@
 import { useCallback, useRef } from 'react'
 import readySound from '@/assets/your-code-is-ready.mp3'
-
-const DEBOUNCE_MS = 2000
+import { SOUND_DEBOUNCE_MS } from '@/store/terminalActivitySlice'
 
 /**
  * Hook that provides a debounced notification sound player.
@@ -13,7 +12,7 @@ export function useNotificationSound() {
 
   const play = useCallback(() => {
     const now = Date.now()
-    if (now - lastPlayedRef.current < DEBOUNCE_MS) {
+    if (now - lastPlayedRef.current < SOUND_DEBOUNCE_MS) {
       return // Still within debounce window
     }
 
