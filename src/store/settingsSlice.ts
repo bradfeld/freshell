@@ -26,11 +26,6 @@ export const defaultSettings: AppSettings = {
   panes: {
     defaultNewPane: 'ask' as const,
   },
-  notifications: {
-    visualWhenWorking: true,
-    visualWhenFinished: true,
-    soundWhenFinished: true,
-  },
   codingCli: {
     enabledProviders: ['claude', 'codex'],
     providers: {
@@ -61,7 +56,6 @@ const initialState: SettingsState = {
 }
 
 export function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
-  const baseNotifications = base.notifications ?? defaultSettings.notifications
   const baseCodingCli = base.codingCli ?? defaultSettings.codingCli
   const merged = {
     ...base,
@@ -70,7 +64,6 @@ export function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): A
     safety: { ...base.safety, ...(patch.safety || {}) },
     sidebar: { ...base.sidebar, ...(patch.sidebar || {}) },
     panes: { ...base.panes, ...(patch.panes || {}) },
-    notifications: { ...baseNotifications, ...(patch.notifications || {}) },
     codingCli: {
       ...baseCodingCli,
       ...(patch.codingCli || {}),

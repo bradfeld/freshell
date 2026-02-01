@@ -9,7 +9,6 @@ import settingsReducer from './settingsSlice'
 import codingCliReducer from './codingCliSlice'
 import panesReducer from './panesSlice'
 import sessionActivityReducer from './sessionActivitySlice'
-import terminalActivityReducer from './terminalActivitySlice'
 import { persistMiddleware } from './persistMiddleware'
 import { sessionActivityPersistMiddleware } from './sessionActivityPersistence'
 
@@ -22,7 +21,6 @@ export const store = configureStore({
     codingCli: codingCliReducer,
     panes: panesReducer,
     sessionActivity: sessionActivityReducer,
-    terminalActivity: terminalActivityReducer,
   },
   middleware: (getDefault) =>
     getDefault({

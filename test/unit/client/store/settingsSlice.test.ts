@@ -42,11 +42,6 @@ describe('settingsSlice', () => {
         width: 288,
         collapsed: false,
       })
-      expect(state.settings.notifications).toEqual({
-        visualWhenWorking: true,
-        visualWhenFinished: true,
-        soundWhenFinished: true,
-      })
       expect(state.settings.codingCli).toEqual({
         enabledProviders: ['claude', 'codex'],
         providers: {
@@ -87,11 +82,6 @@ describe('settingsSlice', () => {
           showProjectBadges: false,
           width: 320,
           collapsed: false,
-        },
-        notifications: {
-          visualWhenWorking: false,
-          visualWhenFinished: true,
-          soundWhenFinished: false,
         },
         codingCli: {
           enabledProviders: ['codex'],

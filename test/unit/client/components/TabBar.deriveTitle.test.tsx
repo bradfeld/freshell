@@ -7,7 +7,6 @@ import tabsReducer from '../../../../src/store/tabsSlice'
 import panesReducer from '../../../../src/store/panesSlice'
 import connectionReducer from '../../../../src/store/connectionSlice'
 import settingsReducer, { defaultSettings } from '../../../../src/store/settingsSlice'
-import terminalActivityReducer from '../../../../src/store/terminalActivitySlice'
 
 // Mock ws-client
 vi.mock('@/lib/ws-client', () => ({
@@ -34,7 +33,6 @@ function createStore(tabsState: any, panesState: any) {
       panes: panesReducer,
       connection: connectionReducer,
       settings: settingsReducer,
-      terminalActivity: terminalActivityReducer,
     },
     preloadedState: {
       tabs: tabsState,
@@ -43,12 +41,6 @@ function createStore(tabsState: any, panesState: any) {
       settings: {
         settings: defaultSettings,
         loaded: true,
-      },
-      terminalActivity: {
-        lastOutputAt: {},
-        lastInputAt: {},
-        working: {},
-        finished: {},
       },
     },
   })

@@ -824,11 +824,6 @@ describe('State Edge Cases', () => {
           panes: {
             defaultNewPane: 'shell',
           },
-          notifications: {
-            visualWhenWorking: false,
-            visualWhenFinished: false,
-            soundWhenFinished: false,
-          },
           codingCli: {
             enabledProviders: ['claude', 'codex'],
             providers: {

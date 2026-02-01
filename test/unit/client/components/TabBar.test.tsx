@@ -7,7 +7,6 @@ import tabsReducer, { TabsState } from '@/store/tabsSlice'
 import codingCliReducer, { registerCodingCliRequest } from '@/store/codingCliSlice'
 import panesReducer from '@/store/panesSlice'
 import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
-import terminalActivityReducer from '@/store/terminalActivitySlice'
 import type { Tab } from '@/store/types'
 
 // Mock the ws-client module
@@ -60,7 +59,6 @@ function createStore(initialState: Partial<TabsState> = {}) {
       codingCli: codingCliReducer,
       panes: panesReducer,
       settings: settingsReducer,
-      terminalActivity: terminalActivityReducer,
     },
     preloadedState: {
       tabs: {
@@ -79,12 +77,6 @@ function createStore(initialState: Partial<TabsState> = {}) {
       settings: {
         settings: defaultSettings,
         loaded: true,
-      },
-      terminalActivity: {
-        lastOutputAt: {},
-        lastInputAt: {},
-        working: {},
-        finished: {},
       },
     },
   })

@@ -568,39 +568,6 @@ export default function SettingsView() {
             </SettingsRow>
           </SettingsSection>
 
-          {/* Notifications */}
-          <SettingsSection title="Notifications" description="Activity indicators and sounds">
-            <SettingsRow label="Show when working">
-              <Toggle
-                checked={settings.notifications?.visualWhenWorking ?? true}
-                onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ notifications: { visualWhenWorking: checked } } as any))
-                  scheduleSave({ notifications: { visualWhenWorking: checked } })
-                }}
-              />
-            </SettingsRow>
-
-            <SettingsRow label="Show when finished">
-              <Toggle
-                checked={settings.notifications?.visualWhenFinished ?? true}
-                onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ notifications: { visualWhenFinished: checked } } as any))
-                  scheduleSave({ notifications: { visualWhenFinished: checked } })
-                }}
-              />
-            </SettingsRow>
-
-            <SettingsRow label="Sound when finished">
-              <Toggle
-                checked={settings.notifications?.soundWhenFinished ?? true}
-                onChange={(checked) => {
-                  dispatch(updateSettingsLocal({ notifications: { soundWhenFinished: checked } } as any))
-                  scheduleSave({ notifications: { soundWhenFinished: checked } })
-                }}
-              />
-            </SettingsRow>
-          </SettingsSection>
-
           {/* Coding CLIs */}
           <SettingsSection title="Coding CLIs" description="Providers and defaults for coding sessions">
             {CODING_CLI_PROVIDER_CONFIGS.map((provider) => (
