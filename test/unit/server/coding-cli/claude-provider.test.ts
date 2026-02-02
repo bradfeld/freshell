@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
-import { defaultClaudeHome, parseSessionContent } from '../../../../server/coding-cli/providers/claude'
+import { claudeProvider, defaultClaudeHome, parseSessionContent } from '../../../../server/coding-cli/providers/claude'
 import { ClaudeSessionIndexer, applyOverride } from '../../../../server/claude-indexer'
 import { looksLikePath } from '../../../../server/coding-cli/utils'
 
@@ -51,6 +51,21 @@ describe('claude provider cross-platform tests', () => {
       // On Windows, absolute paths start with drive letter; on Unix, with /
       const isAbsolute = path.isAbsolute(result)
       expect(isAbsolute).toBe(true)
+    })
+  })
+
+  describe('claudeProvider.parseEvent()', () => {
+    it('does not include raw payload in normalized events', () => {
+      const line = JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+        session_id: 's1',
+      })
+
+      const events = claudeProvider.parseEvent(line)
+
+      expect(events).toHaveLength(1)
+      expect('raw' in events[0]).toBe(false)
     })
   })
 

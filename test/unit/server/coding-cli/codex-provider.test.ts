@@ -52,6 +52,19 @@ describe('codex-provider', () => {
     expect(meta.messageCount).toBe(2)
   })
 
+  it('does not include raw payload in normalized events', () => {
+    const line = JSON.stringify({
+      type: 'response_item',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi' }] },
+      session_id: 's1',
+    })
+
+    const events = codexProvider.parseEvent(line)
+
+    expect(events).toHaveLength(1)
+    expect('raw' in events[0]).toBe(false)
+  })
+
   it('normalizes codex events into tool call/result', () => {
     const toolCallLine = JSON.stringify({
       type: 'response_item',
