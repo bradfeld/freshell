@@ -449,7 +449,7 @@ function SidebarItem({
       </TooltipTrigger>
       <TooltipContent>
         <div>{getProviderLabel(item.provider)}: {item.title}</div>
-        {item.subtitle && <div className="text-muted-foreground">{item.subtitle}</div>}
+        <div className="text-muted-foreground">{item.subtitle || item.projectPath || getProviderLabel(item.provider)}</div>
       </TooltipContent>
     </Tooltip>
   )
