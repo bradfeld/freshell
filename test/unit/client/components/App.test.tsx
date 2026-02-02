@@ -700,55 +700,6 @@ describe('Tab Switching Keyboard Shortcuts', () => {
     })
   })
 
-  describe('Ctrl+PageDown / Ctrl+PageUp (next/prev tab)', () => {
-    it('Ctrl+PageDown switches to next tab', async () => {
-      const store = createStoreWithTabs(3, 0) // 3 tabs, first active
-      renderApp(store)
-
-      fireEvent.keyDown(window, { key: 'PageDown', ctrlKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-2')
-    })
-
-    it('Ctrl+PageUp switches to previous tab', async () => {
-      const store = createStoreWithTabs(3, 1) // 3 tabs, second active
-      renderApp(store)
-
-      fireEvent.keyDown(window, { key: 'PageUp', ctrlKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
-
-    it('Ctrl+PageDown wraps to first tab when on last tab', async () => {
-      const store = createStoreWithTabs(3, 2) // 3 tabs, last active
-      renderApp(store)
-
-      fireEvent.keyDown(window, { key: 'PageDown', ctrlKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
-
-    it('Ctrl+PageUp wraps to last tab when on first tab', async () => {
-      const store = createStoreWithTabs(3, 0) // 3 tabs, first active
-      renderApp(store)
-
-      fireEvent.keyDown(window, { key: 'PageUp', ctrlKey: true })
-
-      expect(store.getState().tabs.activeTabId).toBe('tab-3')
-    })
-
-    it('does nothing with single tab', async () => {
-      const store = createStoreWithTabs(1, 0)
-      renderApp(store)
-
-      fireEvent.keyDown(window, { key: 'PageDown', ctrlKey: true })
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-
-      fireEvent.keyDown(window, { key: 'PageUp', ctrlKey: true })
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
-  })
-
   describe('Cmd+Option+Arrow (Mac equivalents)', () => {
     it('Cmd+Option+Right switches to next tab', async () => {
       const store = createStoreWithTabs(3, 0)

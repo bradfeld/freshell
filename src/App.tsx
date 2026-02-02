@@ -283,21 +283,8 @@ export default function App() {
     function onKeyDown(e: KeyboardEvent) {
       if (isTextInput(e.target)) return
 
-      // Ctrl+PageDown / Ctrl+PageUp for tab switching (VS Code / Chrome style)
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-        if (e.key === 'PageDown') {
-          e.preventDefault()
-          switchToNextTab()
-          return
-        }
-        if (e.key === 'PageUp') {
-          e.preventDefault()
-          switchToPrevTab()
-          return
-        }
-      }
-
       // Cmd+Option+Arrow for Mac (metaKey + altKey)
+      // Note: Ctrl+PageUp/Down are intercepted by browsers for their own tab switching
       if (e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey) {
         if (e.key === 'ArrowRight') {
           e.preventDefault()

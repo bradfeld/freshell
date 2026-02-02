@@ -671,12 +671,9 @@ export default function SettingsView() {
               <ShortcutRow keys={['Ctrl', 'B', 'O']} description="Overview" />
               <ShortcutRow keys={['Ctrl', 'B', ',']} description="Settings" />
               <div className="border-t border-border/30 my-3" />
-              <ShortcutRow keys={['Ctrl', 'PageDown']} description="Next tab" />
-              <ShortcutRow keys={['Ctrl', 'PageUp']} description="Previous tab" />
-              <ShortcutRow keys={['Ctrl', 'B', 'N']} description="Next tab (alt)" />
-              <ShortcutRow keys={['Ctrl', 'B', 'P']} description="Previous tab (alt)" />
+              <ShortcutRow keys={['Ctrl', 'B', 'N']} description="Next tab" />
+              <ShortcutRow keys={['Ctrl', 'B', 'P']} description="Previous tab" />
               <ShortcutRow keys={['Ctrl', 'B', '1-9']} description="Go to tab 1-9" />
-              <div className="border-t border-border/30 my-3" />
               <ShortcutRow keys={['⌘', '⌥', '→']} description="Next tab (Mac)" />
               <ShortcutRow keys={['⌘', '⌥', '←']} description="Previous tab (Mac)" />
             </div>
