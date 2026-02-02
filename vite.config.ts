@@ -9,7 +9,8 @@ const __dirname = path.dirname(__filename)
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '')
   const backendPort = env.PORT || '3001'
-  const backendUrl = `http://localhost:${backendPort}`
+  const backendHost = env.VITE_BACKEND_HOST || env.BACKEND_HOST || '127.0.0.1'
+  const backendUrl = `http://${backendHost}:${backendPort}`
   const vitePort = parseInt(env.VITE_PORT || '5173', 10)
 
   return {

@@ -166,7 +166,9 @@ describe("logger", () => {
   })
 
   describe("debug log file stream", () => {
-    it("writes log entries to the debug file", async () => {
+    it(
+      "writes log entries to the debug file",
+      async () => {
       const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "freshell-logs-"))
       const filePath = path.join(tempDir, "server-debug.jsonl")
       const { createDebugFileStream } = await import("../../../server/logger")
@@ -179,6 +181,8 @@ describe("logger", () => {
       expect(content).toContain("\"event\":\"test\"")
 
       await fsp.rm(tempDir, { recursive: true, force: true })
-    })
+      },
+      TEST_TIMEOUT_MS,
+    )
   })
 })
