@@ -442,6 +442,67 @@ describe('claude provider cross-platform tests', () => {
     })
   })
 
+  describe('parseSessionContent() - title extraction skips system context', () => {
+    it('skips subagent mode instructions like [SUGGESTION MODE: ...]', () => {
+      const content = [
+        '{"cwd": "/project"}',
+        '{"type": "user", "message": {"role": "user", "content": "[SUGGESTION MODE: Suggest what the user might naturally type next...] FIRST: Look at the user\'s recent messages."}}',
+        '{"type": "user", "message": {"role": "user", "content": "Fix the login bug"}}',
+      ].join('\n')
+
+      const meta = parseSessionContent(content)
+
+      expect(meta.title).toBe('Fix the login bug')
+    })
+
+    it('skips messages starting with bracketed uppercase mode tags', () => {
+      const content = [
+        '{"cwd": "/project"}',
+        '{"role": "user", "content": "[REVIEW MODE: You are reviewing code...] Check for bugs."}',
+        '{"role": "user", "content": "Review the auth module"}',
+      ].join('\n')
+
+      const meta = parseSessionContent(content)
+
+      expect(meta.title).toBe('Review the auth module')
+    })
+
+    it('skips AGENTS.md instruction messages', () => {
+      const content = [
+        '{"cwd": "/project"}',
+        '{"role": "user", "content": "# AGENTS.md instructions\\n\\nFollow these rules..."}',
+        '{"role": "user", "content": "Build the feature"}',
+      ].join('\n')
+
+      const meta = parseSessionContent(content)
+
+      expect(meta.title).toBe('Build the feature')
+    })
+
+    it('skips XML-wrapped system context', () => {
+      const content = [
+        '{"cwd": "/project"}',
+        '{"role": "user", "content": "<system_context>\\nYou are an assistant...\\n</system_context>"}',
+        '{"role": "user", "content": "Help me debug this"}',
+      ].join('\n')
+
+      const meta = parseSessionContent(content)
+
+      expect(meta.title).toBe('Help me debug this')
+    })
+
+    it('uses first user message if none are system context', () => {
+      const content = [
+        '{"cwd": "/project"}',
+        '{"role": "user", "content": "Hello, I need help"}',
+      ].join('\n')
+
+      const meta = parseSessionContent(content)
+
+      expect(meta.title).toBe('Hello, I need help')
+    })
+  })
+
   describe('parseSessionContent() - orphaned sessions (snapshot-only)', () => {
     it('should return undefined cwd for sessions with only file-history-snapshot events', () => {
       const orphanedContent = `{"type":"file-history-snapshot","messageId":"abc123","snapshot":{"messageId":"abc123","trackedFileBackups":{},"timestamp":"2026-01-29T04:37:54.888Z"},"isSnapshotUpdate":false}`
