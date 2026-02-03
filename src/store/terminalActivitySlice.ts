@@ -53,4 +53,7 @@ const terminalActivitySlice = createSlice({
 
 export const { recordOutput, recordInput, clearFinished, resetPane } = terminalActivitySlice.actions
 
+// Alias for backwards compatibility
+export const removePaneActivity = resetPane
+
 export default terminalActivitySlice.reducer

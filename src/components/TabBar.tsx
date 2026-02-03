@@ -106,6 +106,7 @@ const EMPTY_PANE_TITLES: Record<string, Record<string, string>> = {}
 const EMPTY_ACTIVE_PANES: Record<string, string> = {}
 
 export default function TabBar() {
+  useTerminalActivityMonitor()
   const dispatch = useAppDispatch()
   const tabsState = useAppSelector((s) => s.tabs)
   const tabs = tabsState?.tabs ?? []

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
-import { recordInput } from '@/store/terminalActivitySlice'
+import { recordInput, recordOutput } from '@/store/terminalActivitySlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
@@ -312,6 +312,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'terminal.output' && msg.terminalId === tid) {
           term.write(msg.data || '')
+          dispatch(recordOutput({ paneId }))
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {
