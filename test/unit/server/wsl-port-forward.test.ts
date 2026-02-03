@@ -27,7 +27,7 @@ describe('wsl-port-forward', () => {
 
   describe('getWslIp', () => {
     it('returns first IPv4 address from hostname -I', () => {
-      vi.mocked(execSync).mockReturnValue('172.30.149.249 172.17.0.1 \n')
+      vi.mocked(execSync).mockReturnValue('172.30.149.249 10.0.0.5 \n')
 
       const ip = getWslIp()
 
@@ -36,6 +36,15 @@ describe('wsl-port-forward', () => {
 
     it('skips IPv6 addresses and returns first IPv4', () => {
       vi.mocked(execSync).mockReturnValue('fe80::1 2001:db8::1 172.30.149.249 10.0.0.5\n')
+
+      const ip = getWslIp()
+
+      expect(ip).toBe('172.30.149.249')
+    })
+
+    it('skips Docker bridge IP (172.17.x.x) and returns WSL IP', () => {
+      // Docker bridge often appears before WSL IP on some systems
+      vi.mocked(execSync).mockReturnValue('172.17.0.1 172.30.149.249\n')
 
       const ip = getWslIp()
 
@@ -54,6 +63,14 @@ describe('wsl-port-forward', () => {
 
     it('returns null when no IPv4 addresses found', () => {
       vi.mocked(execSync).mockReturnValue('fe80::1 2001:db8::1\n')
+
+      const ip = getWslIp()
+
+      expect(ip).toBeNull()
+    })
+
+    it('returns null when only Docker bridge IP found', () => {
+      vi.mocked(execSync).mockReturnValue('172.17.0.1\n')
 
       const ip = getWslIp()
 
@@ -281,9 +298,9 @@ Address         Port        Address         Port
     it('generates PowerShell script with delete and add commands', () => {
       const script = buildPortForwardingScript('172.30.149.249', [3001, 5173])
 
-      // Delete commands (without listenaddress to catch all variants)
-      expect(script).toContain('netsh interface portproxy delete v4tov4 listenport=3001')
-      expect(script).toContain('netsh interface portproxy delete v4tov4 listenport=5173')
+      // Delete commands with explicit listenaddress=0.0.0.0 to match rules we create
+      expect(script).toContain('netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=3001')
+      expect(script).toContain('netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=5173')
 
       // Add commands
       expect(script).toContain('netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=3001 connectaddress=172.30.149.249 connectport=3001')

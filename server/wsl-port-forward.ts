@@ -36,18 +36,23 @@ export function parsePortProxyRules(output: string): Map<number, PortProxyRule> 
   return rules
 }
 
+// Docker bridge network range - should be skipped when selecting WSL IP
+const DOCKER_BRIDGE_PREFIX = '172.17.'
+
 /**
  * Get the current WSL2 IPv4 address.
- * Returns the first IPv4 address from `hostname -I`, skipping any IPv6 addresses.
+ * Returns the first IPv4 address from `hostname -I`, skipping:
+ * - IPv6 addresses
+ * - Docker bridge IPs (172.17.x.x)
  */
 export function getWslIp(): string | null {
   try {
     const output = execSync('hostname -I', { encoding: 'utf-8', timeout: 5000 })
     const addresses = output.trim().split(/\s+/).filter(Boolean)
 
-    // Find first IPv4 address (skip IPv6)
+    // Find first IPv4 address (skip IPv6 and Docker bridge)
     for (const addr of addresses) {
-      if (IPV4_REGEX.test(addr)) {
+      if (IPV4_REGEX.test(addr) && !addr.startsWith(DOCKER_BRIDGE_PREFIX)) {
         return addr
       }
     }
@@ -127,11 +132,11 @@ export function needsPortForwardingUpdate(
 export function buildPortForwardingScript(wslIp: string, ports: number[]): string {
   const commands: string[] = []
 
-  // Delete existing rules (without listenaddress to catch all variants)
+  // Delete existing rules for 0.0.0.0 (the address we use for listening)
   // Use \$null to prevent sh from expanding $null
   for (const port of ports) {
     commands.push(
-      `netsh interface portproxy delete v4tov4 listenport=${port} 2>\\$null`
+      `netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=${port} 2>\\$null`
     )
   }
 
