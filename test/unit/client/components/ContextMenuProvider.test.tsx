@@ -341,6 +341,7 @@ describe('ContextMenuProvider', () => {
         (child) => child.type === 'leaf' && child.id === 'pane-1'
       )
       expect(originalPane).toBeDefined()
+
       // New pane should have the session info
       const newPane = newLayout.children.find(
         (child) => child.type === 'leaf' && child.id !== 'pane-1'

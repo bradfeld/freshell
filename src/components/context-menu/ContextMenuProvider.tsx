@@ -350,7 +350,7 @@ export function ContextMenuProvider({
     }))
     dispatch(resetLayout({
       tabId: activeTabId,
-      newContent: {
+      content: {
         kind: 'terminal',
         mode,
         resumeSessionId: session.sessionId,

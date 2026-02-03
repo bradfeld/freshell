@@ -634,6 +634,9 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         connection: connectionReducer,
         sessions: sessionsReducer,
         panes: panesReducer,
+        terminalActivity: terminalActivityReducer,
+        codingCli: codingCliReducer,
+        sessionActivity: sessionActivityReducer,
       },
       middleware: (getDefault) =>
         getDefault({
@@ -664,6 +667,21 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         panes: {
           layouts: {},
           activePane: {},
+          paneTitles: {},
+          paneTitleSetByUser: {},
+        },
+        terminalActivity: {
+          lastOutputAt: {},
+          lastInputAt: {},
+          working: {},
+          finished: {},
+        },
+        codingCli: {
+          sessions: {},
+          pendingRequests: {},
+        },
+        sessionActivity: {
+          sessions: {},
         },
       },
     })
