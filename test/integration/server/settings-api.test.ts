@@ -68,13 +68,25 @@ describe('Settings API Integration', () => {
       res.json(s)
     })
 
+    const normalizeSettingsPatch = (patch: Record<string, any>) => {
+      if (Object.prototype.hasOwnProperty.call(patch, 'defaultCwd')) {
+        const raw = patch.defaultCwd
+        if (raw === null) {
+          patch.defaultCwd = undefined
+        } else if (typeof raw === 'string' && raw.trim() === '') {
+          patch.defaultCwd = undefined
+        }
+      }
+      return patch
+    }
+
     app.patch('/api/settings', async (req, res) => {
-      const updated = await configStore.patchSettings(req.body || {})
+      const updated = await configStore.patchSettings(normalizeSettingsPatch(req.body || {}))
       res.json(updated)
     })
 
     app.put('/api/settings', async (req, res) => {
-      const updated = await configStore.patchSettings(req.body || {})
+      const updated = await configStore.patchSettings(normalizeSettingsPatch(req.body || {}))
       res.json(updated)
     })
   })
@@ -536,8 +548,8 @@ describe('Settings API Integration', () => {
         .send({ defaultCwd: null })
 
       expect(res.status).toBe(200)
-      // null overwrites the previous value
-      expect(res.body.defaultCwd).toBeNull()
+      // null clears the previous value
+      expect(res.body.defaultCwd).toBeUndefined()
     })
 
     it('handles deeply nested objects', async () => {
@@ -564,6 +576,20 @@ describe('Settings API Integration', () => {
         scrollback: 3000,
         theme: 'light',
       })
+    })
+  })
+
+  describe('PATCH /api/settings', () => {
+    it('clears defaultCwd when null is provided', async () => {
+      await configStore.patchSettings({ defaultCwd: '/tmp' })
+
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ defaultCwd: null })
+
+      expect(res.status).toBe(200)
+      expect(res.body.defaultCwd).toBeUndefined()
     })
   })
 })

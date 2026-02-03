@@ -203,7 +203,7 @@ export default function SettingsView() {
   const commitDefaultCwd = useCallback((nextValue: string | undefined) => {
     if (nextValue === settings.defaultCwd) return
     dispatch(updateSettingsLocal({ defaultCwd: nextValue } as any))
-    patch({ defaultCwd: nextValue }).catch((err) => console.warn('Failed to save settings', err))
+    patch({ defaultCwd: nextValue ?? null } as any).catch((err) => console.warn('Failed to save settings', err))
   }, [dispatch, patch, settings.defaultCwd])
 
   const scheduleDefaultCwdValidation = useCallback((value: string) => {

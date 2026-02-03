@@ -204,8 +204,20 @@ async function main() {
     res.json({ platform })
   })
 
+  const normalizeSettingsPatch = (patch: Record<string, any>) => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'defaultCwd')) {
+      const raw = patch.defaultCwd
+      if (raw === null) {
+        patch.defaultCwd = undefined
+      } else if (typeof raw === 'string' && raw.trim() === '') {
+        patch.defaultCwd = undefined
+      }
+    }
+    return patch
+  }
+
   app.patch('/api/settings', async (req, res) => {
-    const patch = migrateSettingsSortMode(req.body || {}) as any
+    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
     const updated = await configStore.patchSettings(patch)
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)
@@ -229,7 +241,7 @@ async function main() {
 
   // Alias (matches implementation plan)
   app.put('/api/settings', async (req, res) => {
-    const patch = migrateSettingsSortMode(req.body || {}) as any
+    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
     const updated = await configStore.patchSettings(patch)
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)

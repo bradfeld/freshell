@@ -970,7 +970,7 @@ describe('SettingsView Component', () => {
         path: '/missing/path',
       })
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-        defaultCwd: undefined,
+        defaultCwd: null,
       })
       expect(store.getState().settings.settings.defaultCwd).toBeUndefined()
       expect(screen.getByText('directory not found')).toBeInTheDocument()
@@ -994,7 +994,7 @@ describe('SettingsView Component', () => {
 
       expect(api.post).not.toHaveBeenCalled()
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-        defaultCwd: undefined,
+        defaultCwd: null,
       })
       expect(store.getState().settings.settings.defaultCwd).toBeUndefined()
     })
