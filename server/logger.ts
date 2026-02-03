@@ -10,7 +10,7 @@ import { createStream, type RotatingFileStream } from 'rotating-file-stream'
 const env = process.env.NODE_ENV || 'development'
 const level = process.env.LOG_LEVEL || 'debug'
 const DEFAULT_DEBUG_LOG_FILE = 'server-debug.jsonl'
-const DEFAULT_DEBUG_LOG_SIZE = '10M'
+const DEFAULT_DEBUG_LOG_SIZE: SizeString = '10M'
 const DEFAULT_DEBUG_LOG_MAX_FILES = 5
 
 type LogContext = {
@@ -26,8 +26,10 @@ const logContext = new AsyncLocalStorage<LogContext>()
 const EMPTY_CONTEXT: LogContext = {}
 const require = createRequire(import.meta.url)
 
+type SizeString = `${number}B` | `${number}K` | `${number}M` | `${number}G`
+
 type DebugFileStreamOptions = {
-  size?: string
+  size?: SizeString
   maxFiles?: number
 }
 
