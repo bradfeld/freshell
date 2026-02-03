@@ -6,6 +6,7 @@ import { getTabDisplayTitle } from '@/lib/tab-title'
 import { collectTerminalPanes, collectSessionPanes, deriveTabStatus } from '@/lib/pane-utils'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import TabItem from './TabItem'
+import { useTerminalActivityMonitor } from '@/hooks/useTerminalActivityMonitor'
 import {
   DndContext,
   closestCenter,

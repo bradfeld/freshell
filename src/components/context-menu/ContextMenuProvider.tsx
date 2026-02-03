@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { reorderTabs, updateTab, setActiveTab, requestTabRename } from '@/store/tabsSlice'
 import { createTabWithPane, closeTabWithCleanup } from '@/store/tabThunks'
-import { addPane, closePane, initLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
+import { closePane, resetLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import { getWsClient } from '@/lib/ws-client'
@@ -10,7 +10,7 @@ import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { collectTerminalPanes, findPaneContent, findPaneByTerminalId } from '@/lib/pane-utils'
+import { collectTerminalPanes, collectSessionPanes, findPaneContent, findPaneByTerminalId } from '@/lib/pane-utils'
 import { getTabDisplayTitle } from '@/lib/tab-title'
 import { getBrowserActions, getEditorActions, getTerminalActions } from '@/lib/pane-action-registry'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
@@ -79,8 +79,8 @@ export function ContextMenuProvider({
   const sessionActivity = useAppSelector((s) => s.sessionActivity.sessions)
   const sessions = useAppSelector((s) => s.sessions.projects)
   const expandedProjects = useAppSelector((s) => s.sessions.expandedProjects)
-  const settings = useAppSelector((s) => s.settings.settings)
   const platform = useAppSelector((s) => s.connection?.platform ?? null)
+  const settings = useAppSelector((s) => s.settings.settings)
 
   const [menuState, setMenuState] = useState<MenuState | null>(null)
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
@@ -323,7 +323,24 @@ export function ContextMenuProvider({
       menuState?.target.kind === 'sidebar-session' && menuState?.target.sessionId === sessionId
         ? menuState?.target.runningTerminalId
         : undefined
-
+    const layout = panes[activeTabId]
+    if (layout) {
+      const terminalPanes = collectTerminalPanes(layout)
+      terminalPanes.forEach((terminal) => {
+        if (terminal.content.terminalId) {
+          ws.send({ type: 'terminal.detach', terminalId: terminal.content.terminalId })
+        }
+      })
+      const sessionPanes = collectSessionPanes(layout)
+      sessionPanes.forEach((sessionPane) => {
+        const sessionId = sessionPane.content.sessionId
+        if (pendingRequests[sessionId]) {
+          dispatch(cancelCodingCliRequest({ requestId: sessionId }))
+        } else {
+          ws.send({ type: 'codingcli.kill', sessionId })
+        }
+      })
+    }
     dispatch(updateTab({
       id: activeTabId,
       updates: {
@@ -331,23 +348,18 @@ export function ContextMenuProvider({
         titleSetByUser: false,
       },
     }))
-
-    const newContent = {
-      kind: 'terminal' as const,
-      mode,
-      resumeSessionId: session.sessionId,
-      initialCwd: session.cwd,
-      terminalId: runningTerminalId || undefined,
-      status: runningTerminalId ? ('running' as const) : ('creating' as const),
-    }
-
-    // Split into a new pane when a layout exists; fall back to init for safety.
-    if (panes[activeTabId]) {
-      dispatch(addPane({ tabId: activeTabId, newContent }))
-    } else {
-      dispatch(initLayout({ tabId: activeTabId, content: newContent }))
-    }
-  }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, menuState?.target])
+    dispatch(resetLayout({
+      tabId: activeTabId,
+      newContent: {
+        kind: 'terminal',
+        mode,
+        resumeSessionId: session.sessionId,
+        initialCwd: session.cwd,
+        terminalId: runningTerminalId || undefined,
+        status: runningTerminalId ? 'running' : 'creating',
+      },
+    }))
+  }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, ws, pendingRequests, menuState?.target])
 
   const renameSession = useCallback(async (sessionId: string, provider?: string, withSummary?: boolean) => {
     const info = getSessionInfo(sessionId, provider)
