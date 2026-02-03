@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import http from 'http'
 import WebSocket from 'ws'
 import { EventEmitter } from 'events'
+
+const TEST_TIMEOUT_MS = 30_000
+const HOOK_TIMEOUT_MS = 30_000
+
+vi.setConfig({
+  testTimeout: TEST_TIMEOUT_MS,
+  hookTimeout: HOOK_TIMEOUT_MS,
+})
 
 class FakeRegistry {
   list() {
@@ -12,8 +20,6 @@ class FakeRegistry {
 class FakeSessionRepairService extends EventEmitter {
   prioritizeSessions() {}
 }
-
-const HOOK_TIMEOUT_MS = 30000
 
 function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ port: number }> {
   return new Promise((resolve, reject) => {

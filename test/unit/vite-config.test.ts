@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { loadEnv } from 'vite'
 
-const TEST_TIMEOUT_MS = 20000
+const TEST_TIMEOUT_MS = 20_000
 
 describe('vite config', () => {
   it('uses ipv4 loopback for backend proxy by default', async () => {

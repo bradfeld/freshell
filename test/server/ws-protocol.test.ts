@@ -2,8 +2,9 @@ import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vites
 import http from 'http'
 import WebSocket from 'ws'
 
-const HOOK_TIMEOUT_MS = 30000
-vi.setConfig({ testTimeout: 30000, hookTimeout: HOOK_TIMEOUT_MS })
+const TEST_TIMEOUT_MS = 30_000
+const HOOK_TIMEOUT_MS = 30_000
+vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: HOOK_TIMEOUT_MS })
 
 // Mock the config-store module before importing ws-handler
 vi.mock('../../server/config-store', () => ({

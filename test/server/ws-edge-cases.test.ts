@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } 
 import http from 'http'
 import WebSocket from 'ws'
 
-const HOOK_TIMEOUT_MS = 30000
-const TEST_TIMEOUT_MS = 30000
+const TEST_TIMEOUT_MS = 30_000
+const HOOK_TIMEOUT_MS = 30_000
 
 // Increase test timeout for network tests
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: HOOK_TIMEOUT_MS })

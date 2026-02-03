@@ -2,14 +2,15 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import http from 'http'
 import WebSocket from 'ws'
 
-vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 })
+const TEST_TIMEOUT_MS = 30_000
+const HOOK_TIMEOUT_MS = 30_000
+
+vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: HOOK_TIMEOUT_MS })
 
 type Snapshot = {
   settings: any
   projects: any[]
 }
-
-const HOOK_TIMEOUT_MS = 30000
 
 function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ port: number }> {
   return new Promise((resolve, reject) => {
