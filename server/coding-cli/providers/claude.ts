@@ -1,5 +1,6 @@
 import path from 'path'
 import os from 'os'
+import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import type { CodingCliProvider } from '../provider.js'
 import type { NormalizedEvent, ParsedSessionMeta } from '../types.js'
