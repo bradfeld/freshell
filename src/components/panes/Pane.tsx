@@ -35,7 +35,7 @@ export default function Pane({
         'relative h-full w-full overflow-hidden flex flex-col',
         !isActive && 'opacity-70'
       )}
-      onClick={onFocus}
+      onMouseDown={onFocus}
     >
       {/* Pane header - shown when multiple panes and title available */}
       {showHeader && (
@@ -52,6 +52,7 @@ export default function Pane({
       {/* Fallback close button - shown when no header but multiple panes */}
       {!isOnlyPane && !showHeader && (
         <button
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
             onClose()

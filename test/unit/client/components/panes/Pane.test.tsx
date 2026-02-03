@@ -134,7 +134,7 @@ describe('Pane', () => {
       )
 
       const paneDiv = container.firstChild as HTMLElement
-      fireEvent.click(paneDiv)
+      fireEvent.mouseDown(paneDiv)
 
       expect(onFocus).toHaveBeenCalledTimes(1)
     })
@@ -202,9 +202,9 @@ describe('Pane', () => {
       )
 
       const paneDiv = container.firstChild as HTMLElement
-      fireEvent.click(paneDiv)
-      fireEvent.click(paneDiv)
-      fireEvent.click(paneDiv)
+      fireEvent.mouseDown(paneDiv)
+      fireEvent.mouseDown(paneDiv)
+      fireEvent.mouseDown(paneDiv)
 
       expect(onFocus).toHaveBeenCalledTimes(3)
     })

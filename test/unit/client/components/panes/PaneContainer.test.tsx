@@ -610,9 +610,10 @@ describe('PaneContainer', () => {
       // Initially pane1 is active
       expect(store.getState().panes.activePane['tab-1']).toBe(pane1Id)
 
-      // Click on the second pane's terminal
+      // MouseDown on the second pane's terminal (we use mouseDown not click because
+      // xterm.js may capture click events and prevent them from bubbling)
       const secondTerminal = screen.getByTestId(`terminal-${pane2Id}`)
-      fireEvent.click(secondTerminal)
+      fireEvent.mouseDown(secondTerminal)
 
       // Now pane2 should be active
       expect(store.getState().panes.activePane['tab-1']).toBe(pane2Id)

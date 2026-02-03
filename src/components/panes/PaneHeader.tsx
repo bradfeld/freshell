@@ -46,6 +46,7 @@ export default function PaneHeader({
       </span>
 
       <button
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
           onClose()
