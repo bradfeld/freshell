@@ -10,51 +10,56 @@ On server startup, automatically configure Windows port forwarding using `netsh`
 
 ## Flow
 
-1. **Detect WSL2** - Check `/proc/version` for "microsoft" (existing `isWSL2()`)
-2. **Get WSL2 IP** - Parse `hostname -I` to get the `172.x.x.x` address
+1. **Detect WSL2** - Check `/proc/version` for "wsl2" or "microsoft-standard" patterns
+2. **Get WSL2 IP** - Try eth0 interface first, fall back to `hostname -I` (skipping Docker bridge)
 3. **Check existing rules** - Run `netsh interface portproxy show v4tov4`
-4. **Compare** - Check if rules exist for ports 3001/5173 pointing to current WSL2 IP
+4. **Compare** - Check if rules exist for required ports pointing to current WSL2 IP
 5. **If missing/stale** - Launch elevated PowerShell to configure (triggers UAC)
-6. **Log result** - Success, skipped, or failed
+6. **Verify** - Re-check rules after elevation to detect UAC cancellation
+7. **Log result** - Success, skipped, or failed
 
 ## Commands
 
 When rules need updating:
 
 ```powershell
-# Remove stale rules
-netsh interface portproxy delete v4tov4 listenport=3001 listenaddress=0.0.0.0
-netsh interface portproxy delete v4tov4 listenport=5173 listenaddress=0.0.0.0
+# Remove stale rules (listenaddress=0.0.0.0 to match what we create)
+netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=3001
+netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=5173
 
 # Add current rules
 netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=3001 connectaddress=<WSL_IP> connectport=3001
 netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=5173 connectaddress=<WSL_IP> connectport=5173
 
-# Firewall rule
-netsh advfirewall firewall delete rule name="Freshell LAN Access"
-netsh advfirewall firewall add rule name="Freshell LAN Access" dir=in action=allow protocol=tcp localport=3001,5173
+# Firewall rule (profile=private for security, no spaces in name for escaping)
+netsh advfirewall firewall delete rule name=FreshellLANAccess
+netsh advfirewall firewall add rule name=FreshellLANAccess dir=in action=allow protocol=tcp localport=3001,5173 profile=private
 ```
 
 ## Elevation
 
-From WSL2, use PowerShell's `-Verb RunAs`:
+From WSL2, use PowerShell's `-Verb RunAs` with absolute paths:
 
 ```typescript
-execSync(`powershell.exe -Command "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-Command', '${script}'"`)
+const POWERSHELL_PATH = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'
+execSync(`${POWERSHELL_PATH} -Command "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-Command', '${script}'"`)
 ```
 
-The `-Wait` flag blocks until the elevated process completes.
+The `-Wait` flag blocks until the elevated process completes. Absolute path avoids PATH issues.
 
 ## File Structure
 
 New file: `server/wsl-port-forward.ts`
 
-- `getWslIp(): string | null`
-- `getExistingPortProxyRules(): Map<number, string>`
-- `needsPortForwardingUpdate(wslIp: string): boolean`
-- `setupPortForwarding(): 'success' | 'skipped' | 'failed' | 'not-wsl2'`
+- `getWslIp(): string | null` - Get WSL2 IP (eth0 first, then hostname -I)
+- `parsePortProxyRules(output: string): Map<number, PortProxyRule>`
+- `getExistingPortProxyRules(): Map<number, PortProxyRule>`
+- `getRequiredPorts(): number[]` - From PORT env and NODE_ENV
+- `needsPortForwardingUpdate(wslIp, ports, rules): boolean`
+- `buildPortForwardingScript(wslIp, ports): string`
+- `setupWslPortForwarding(): SetupResult`
 
-Called from `server/bootstrap.ts` after `ensureEnvFile()`.
+Called from `server/index.ts` inside `main()` after `validateStartupSecurity()`.
 
 ## Error Handling
 
