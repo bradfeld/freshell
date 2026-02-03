@@ -663,19 +663,10 @@ export default function SettingsView() {
           </SettingsSection>
 
           {/* Keyboard shortcuts */}
-          <SettingsSection title="Keyboard shortcuts" description="Quick navigation">
+          <SettingsSection title="Keyboard shortcuts" description="Tab navigation">
             <div className="space-y-2 text-sm">
-              <ShortcutRow keys={['Ctrl', 'B', 'T']} description="New terminal" />
-              <ShortcutRow keys={['Ctrl', 'B', 'W']} description="Close tab" />
-              <ShortcutRow keys={['Ctrl', 'B', 'S']} description="Sessions view" />
-              <ShortcutRow keys={['Ctrl', 'B', 'O']} description="Overview" />
-              <ShortcutRow keys={['Ctrl', 'B', ',']} description="Settings" />
-              <div className="border-t border-border/30 my-3" />
-              <ShortcutRow keys={['Ctrl', 'B', 'N']} description="Next tab" />
-              <ShortcutRow keys={['Ctrl', 'B', 'P']} description="Previous tab" />
-              <ShortcutRow keys={['Ctrl', 'B', '1-9']} description="Go to tab 1-9" />
-              <ShortcutRow keys={['⌘', '⌥', '→']} description="Next tab (Mac)" />
-              <ShortcutRow keys={['⌘', '⌥', '←']} description="Previous tab (Mac)" />
+              <ShortcutRow keys={['Ctrl', 'Shift', '[']} description="Previous tab" />
+              <ShortcutRow keys={['Ctrl', 'Shift', ']']} description="Next tab" />
             </div>
           </SettingsSection>
 

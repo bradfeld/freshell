@@ -120,7 +120,7 @@ describe('SettingsView Component', () => {
       expect(screen.getByText('Providers and defaults for coding sessions')).toBeInTheDocument()
 
       expect(screen.getByText('Keyboard shortcuts')).toBeInTheDocument()
-      expect(screen.getByText('Quick navigation')).toBeInTheDocument()
+      expect(screen.getByText('Tab navigation')).toBeInTheDocument()
     })
 
     it('renders a terminal preview above Appearance', () => {
@@ -938,36 +938,24 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      expect(screen.getByText('New terminal')).toBeInTheDocument()
-      expect(screen.getByText('Close tab')).toBeInTheDocument()
-      expect(screen.getByText('Sessions view')).toBeInTheDocument()
-      expect(screen.getByText('Overview')).toBeInTheDocument()
+      expect(screen.getByText('Previous tab')).toBeInTheDocument()
+      expect(screen.getByText('Next tab')).toBeInTheDocument()
     })
 
     it('displays keyboard shortcut keys', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      // Look for keyboard keys - use getAllByText for keys that appear multiple times
+      // Look for keyboard keys - Ctrl+Shift+[ and Ctrl+Shift+]
       const ctrlKeys = screen.getAllByText('Ctrl')
       expect(ctrlKeys.length).toBeGreaterThan(0)
 
-      // 'B' appears in multiple shortcuts, so use getAllByText
-      const bKeys = screen.getAllByText('B')
-      expect(bKeys.length).toBeGreaterThan(0)
+      const shiftKeys = screen.getAllByText('Shift')
+      expect(shiftKeys.length).toBeGreaterThan(0)
 
-      // These keys may appear multiple times too, use getAllByText
-      const tKeys = screen.getAllByText('T')
-      expect(tKeys.length).toBeGreaterThan(0)
-
-      const wKeys = screen.getAllByText('W')
-      expect(wKeys.length).toBeGreaterThan(0)
-
-      const oKeys = screen.getAllByText('O')
-      expect(oKeys.length).toBeGreaterThan(0)
-
-      const commaKeys = screen.getAllByText(',')
-      expect(commaKeys.length).toBeGreaterThan(0)
+      // Bracket keys
+      expect(screen.getByText('[')).toBeInTheDocument()
+      expect(screen.getByText(']')).toBeInTheDocument()
     })
   })
 
