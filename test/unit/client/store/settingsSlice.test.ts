@@ -26,7 +26,7 @@ describe('settingsSlice', () => {
       expect(state.settings.uiScale).toBe(1.0)
       expect(state.settings.terminal).toEqual({
         fontSize: 16,
-        fontFamily: 'Consolas',
+        fontFamily: 'monospace',
         lineHeight: 1,
         cursorBlink: true,
         scrollback: 5000,
@@ -80,7 +80,7 @@ describe('settingsSlice', () => {
         },
         terminal: {
           fontSize: 16,
-          fontFamily: 'Consolas',
+          fontFamily: 'monospace',
           lineHeight: 1.4,
           cursorBlink: false,
           scrollback: 10000,

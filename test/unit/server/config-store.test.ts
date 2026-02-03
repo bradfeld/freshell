@@ -384,7 +384,6 @@ describe('ConfigStore', () => {
 
       expect(updated.terminal.fontSize).toBe(18)
       // Other terminal settings should remain default
-      expect(updated.terminal.fontFamily).toBe(defaultSettings.terminal.fontFamily)
       expect(updated.terminal.cursorBlink).toBe(defaultSettings.terminal.cursorBlink)
     })
 

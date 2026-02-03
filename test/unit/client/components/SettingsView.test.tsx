@@ -7,6 +7,7 @@ import settingsReducer, { defaultSettings, SettingsState } from '@/store/setting
 import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
+import { LOCAL_TERMINAL_FONT_KEY } from '@/lib/terminal-fonts'
 
 // Mock the api module
 vi.mock('@/lib/api', () => ({
@@ -67,6 +68,7 @@ describe('SettingsView Component', () => {
       },
       configurable: true,
     })
+    localStorage.clear()
     vi.useFakeTimers()
     vi.clearAllMocks()
   })
@@ -332,6 +334,7 @@ describe('SettingsView Component', () => {
       })
 
       expect(store.getState().settings.settings.terminal.fontFamily).toBe('monospace')
+      expect(localStorage.getItem(LOCAL_TERMINAL_FONT_KEY)).toBe('monospace')
     })
 
     it('displays sidebar sort mode value', () => {
@@ -865,14 +868,13 @@ describe('SettingsView Component', () => {
       fireEvent.change(fontFamilySelect, { target: { value: 'Cascadia Code' } })
 
       expect(store.getState().settings.settings.terminal.fontFamily).toBe('Cascadia Code')
+      expect(localStorage.getItem(LOCAL_TERMINAL_FONT_KEY)).toBe('Cascadia Code')
 
       await act(async () => {
         vi.advanceTimersByTime(500)
       })
 
-      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-        terminal: { fontFamily: 'Cascadia Code' },
-      })
+      expect(api.patch).not.toHaveBeenCalled()
     })
 
     it('displays current font family in dropdown', () => {

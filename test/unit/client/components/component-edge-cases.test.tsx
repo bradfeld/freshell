@@ -222,6 +222,7 @@ describe('Component Edge Cases', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    localStorage.clear()
     mockWsOnMessage.mockReturnValue(() => {})
     mockWsOnReconnect.mockReturnValue(() => {})
     mockWsConnect.mockResolvedValue(undefined)

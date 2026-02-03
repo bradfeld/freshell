@@ -178,7 +178,6 @@ describe('Settings API Integration', () => {
       expect(res.body).toHaveProperty('sidebar')
       expect(res.body).toHaveProperty('codingCli')
       expect(res.body.terminal).toHaveProperty('fontSize')
-      expect(res.body.terminal).toHaveProperty('fontFamily')
       expect(res.body.terminal).toHaveProperty('lineHeight')
       expect(res.body.terminal).toHaveProperty('cursorBlink')
       expect(res.body.terminal).toHaveProperty('scrollback')
@@ -270,7 +269,7 @@ describe('Settings API Integration', () => {
       expect(res.body.terminal.fontSize).toBe(16)
       expect(res.body.terminal.cursorBlink).toBe(false)
       // Other terminal settings preserved
-      expect(res.body.terminal.fontFamily).toBe(defaultSettings.terminal.fontFamily)
+      expect(res.body.terminal.lineHeight).toBe(defaultSettings.terminal.lineHeight)
     })
 
     it('handles nested safety settings', async () => {
@@ -570,12 +569,12 @@ describe('Settings API Integration', () => {
       expect(res.status).toBe(200)
       expect(res.body.terminal).toEqual({
         fontSize: 14,
-        fontFamily: 'monospace',
         lineHeight: 1.5,
         cursorBlink: false,
         scrollback: 3000,
         theme: 'light',
       })
+      expect(res.body.terminal).not.toHaveProperty('fontFamily')
     })
   })
 

@@ -9,6 +9,7 @@ import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
 import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
+import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
@@ -101,7 +102,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       convertEol: true,
       cursorBlink: settings.terminal.cursorBlink,
       fontSize: settings.terminal.fontSize,
-      fontFamily: settings.terminal.fontFamily,
+      fontFamily: resolveTerminalFontFamily(settings.terminal.fontFamily),
       lineHeight: settings.terminal.lineHeight,
       scrollback: settings.terminal.scrollback,
       theme: getTerminalTheme(settings.terminal.theme, settings.theme),
@@ -282,7 +283,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (!term) return
     term.options.cursorBlink = settings.terminal.cursorBlink
     term.options.fontSize = settings.terminal.fontSize
-    term.options.fontFamily = settings.terminal.fontFamily
+    term.options.fontFamily = resolveTerminalFontFamily(settings.terminal.fontFamily)
     term.options.lineHeight = settings.terminal.lineHeight
     term.options.scrollback = settings.terminal.scrollback
     term.options.theme = getTerminalTheme(settings.terminal.theme, settings.theme)

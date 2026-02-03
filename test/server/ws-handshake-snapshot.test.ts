@@ -77,7 +77,6 @@ describe('ws handshake snapshot', () => {
         uiScale: 1,
         terminal: {
           fontSize: 14,
-          fontFamily: 'Consolas',
           lineHeight: 1,
           cursorBlink: true,
           scrollback: 5000,

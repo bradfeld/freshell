@@ -9,6 +9,7 @@ import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { getSessionsForHello } from '@/lib/session-utils'
 import { setClientPerfEnabled } from '@/lib/perf-logger'
+import { applyLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
 import Sidebar, { AppView } from '@/components/Sidebar'
@@ -162,7 +163,7 @@ export default function App() {
     async function bootstrap() {
       try {
         const settings = await api.get('/api/settings')
-        if (!cancelled) dispatch(setSettings(settings))
+        if (!cancelled) dispatch(setSettings(applyLocalTerminalFontFamily(settings)))
       } catch (err: any) {
         console.warn('Failed to load settings', err)
       }
@@ -207,7 +208,7 @@ export default function App() {
           dispatch(setProjects(msg.projects || []))
         }
         if (msg.type === 'settings.updated') {
-          dispatch(setSettings(msg.settings))
+          dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
         }
         if (msg.type === 'terminal.exit') {
           const terminalId = msg.terminalId

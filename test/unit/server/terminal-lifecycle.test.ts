@@ -80,7 +80,6 @@ function createTestSettings(overrides?: Partial<AppSettings>): AppSettings {
       debug: false,
     },
     terminal: {
-      fontFamily: 'monospace',
       fontSize: 14,
       lineHeight: 1,
       cursorBlink: true,

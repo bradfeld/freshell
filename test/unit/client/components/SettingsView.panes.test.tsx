@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
@@ -52,6 +52,10 @@ function createTestStore(defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor' 
 }
 
 describe('SettingsView Panes section', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   afterEach(() => {
     cleanup()
   })

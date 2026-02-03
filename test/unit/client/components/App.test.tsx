@@ -123,6 +123,7 @@ describe('App Component - Share Button', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     // Reset sessionStorage mock - key must be 'auth-token' to match ws-client.ts
     const sessionStorageMock: Record<string, string> = {
       'auth-token': 'test-token-abc123',
@@ -562,6 +563,7 @@ describe('App Bootstrap', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     const sessionStorageMock: Record<string, string> = {
       'auth-token': 'test-token-abc123',
     }
@@ -677,6 +679,7 @@ describe('Tab Switching Keyboard Shortcuts', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     const sessionStorageMock: Record<string, string> = {
       'auth-token': 'test-token',
     }

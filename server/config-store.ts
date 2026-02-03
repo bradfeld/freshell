@@ -29,7 +29,6 @@ export type AppSettings = {
   uiScale: number
   terminal: {
     fontSize: number
-    fontFamily: string
     lineHeight: number
     cursorBlink: boolean
     scrollback: number
@@ -102,7 +101,6 @@ export const defaultSettings: AppSettings = {
   uiScale: 1.0,
   terminal: {
     fontSize: 16,
-    fontFamily: 'Consolas',
     lineHeight: 1,
     cursorBlink: true,
     scrollback: 5000,
@@ -276,10 +274,23 @@ async function readConfigFile(): Promise<UserConfig | null> {
 
 function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
   const baseLogging = base.logging ?? defaultSettings.logging
+  const terminalPatch: Partial<AppSettings['terminal']> = patch.terminal ?? {}
+  const terminalUpdates = {
+    fontSize: terminalPatch.fontSize,
+    lineHeight: terminalPatch.lineHeight,
+    cursorBlink: terminalPatch.cursorBlink,
+    scrollback: terminalPatch.scrollback,
+    theme: terminalPatch.theme,
+  }
   return {
     ...base,
     ...patch,
-    terminal: { ...base.terminal, ...(patch.terminal || {}) },
+    terminal: {
+      ...base.terminal,
+      ...Object.fromEntries(
+        Object.entries(terminalUpdates).filter(([, value]) => value !== undefined)
+      ),
+    },
     logging: { ...baseLogging, ...(patch.logging || {}) },
     safety: { ...base.safety, ...(patch.safety || {}) },
     panes: { ...base.panes, ...(patch.panes || {}) },

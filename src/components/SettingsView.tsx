@@ -4,6 +4,7 @@ import { updateSettingsLocal, markSaved, defaultSettings, mergeSettings } from '
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { terminalThemes, darkThemes, lightThemes, getTerminalTheme } from '@/lib/terminal-themes'
+import { resolveTerminalFontFamily, saveLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import type { SidebarSortMode, TerminalTheme, CodexSandboxMode, ClaudePermissionMode, CodingCliProviderName } from '@/store/types'
 import { CODING_CLI_PROVIDER_CONFIGS } from '@/lib/coding-cli-utils'
 
@@ -332,13 +333,12 @@ export default function SettingsView() {
     if (fallbackFontFamily === settings.terminal.fontFamily) return
 
     dispatch(updateSettingsLocal({ terminal: { fontFamily: fallbackFontFamily } } as any))
-    scheduleSave({ terminal: { fontFamily: fallbackFontFamily } })
+    saveLocalTerminalFontFamily(fallbackFontFamily)
   }, [
     dispatch,
     fallbackFontFamily,
     fontsReady,
     isSelectedFontAvailable,
-    scheduleSave,
     settings.terminal.fontFamily,
   ])
 
@@ -372,7 +372,7 @@ export default function SettingsView() {
               style={{
                 width: '40ch',
                 height: `${terminalPreviewHeight * settings.terminal.lineHeight}em`,
-                fontFamily: settings.terminal.fontFamily,
+                fontFamily: resolveTerminalFontFamily(settings.terminal.fontFamily),
                 fontSize: `${settings.terminal.fontSize}px`,
                 lineHeight: settings.terminal.lineHeight,
                 backgroundColor: previewTheme.background,
@@ -567,7 +567,7 @@ export default function SettingsView() {
                 value={isSelectedFontAvailable ? settings.terminal.fontFamily : fallbackFontFamily}
                 onChange={(e) => {
                   dispatch(updateSettingsLocal({ terminal: { fontFamily: e.target.value } } as any))
-                  scheduleSave({ terminal: { fontFamily: e.target.value } })
+                  saveLocalTerminalFontFamily(e.target.value)
                 }}
                 className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
               >

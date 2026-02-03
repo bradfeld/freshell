@@ -131,6 +131,7 @@ function renderApp(store = createTestStore()) {
 describe('App Component - Sidebar Resize', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     // Mock window.innerWidth for desktop
     Object.defineProperty(window, 'innerWidth', { value: 1024, writable: true })
   })
