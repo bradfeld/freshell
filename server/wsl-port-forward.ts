@@ -108,3 +108,36 @@ export function needsPortForwardingUpdate(
   }
   return false
 }
+
+/**
+ * Build PowerShell script to configure port forwarding and firewall.
+ * Uses \$null escaping to prevent shell variable expansion.
+ * Firewall rule restricted to private profile for security.
+ */
+export function buildPortForwardingScript(wslIp: string, ports: number[]): string {
+  const commands: string[] = []
+
+  // Delete existing rules (without listenaddress to catch all variants)
+  // Use \$null to prevent sh from expanding $null
+  for (const port of ports) {
+    commands.push(
+      `netsh interface portproxy delete v4tov4 listenport=${port} 2>\\$null`
+    )
+  }
+
+  // Add new rules
+  for (const port of ports) {
+    commands.push(
+      `netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=${port} connectaddress=${wslIp} connectport=${port}`
+    )
+  }
+
+  // Firewall rule (delete then add for idempotency)
+  // SECURITY: profile=private restricts to private networks only (not public Wi-Fi)
+  commands.push(`netsh advfirewall firewall delete rule name="Freshell LAN Access" 2>\\$null`)
+  commands.push(
+    `netsh advfirewall firewall add rule name="Freshell LAN Access" dir=in action=allow protocol=tcp localport=${ports.join(',')} profile=private`
+  )
+
+  return commands.join('; ')
+}

@@ -9,6 +9,7 @@ import {
   getExistingPortProxyRules,
   getRequiredPorts,
   needsPortForwardingUpdate,
+  buildPortForwardingScript,
   type PortProxyRule
 } from '../../../server/wsl-port-forward.js'
 
@@ -242,6 +243,45 @@ Address         Port        Address         Port
       const needs = needsPortForwardingUpdate('172.30.149.249', [3001, 5173], rules)
 
       expect(needs).toBe(false)
+    })
+  })
+
+  describe('buildPortForwardingScript', () => {
+    it('generates PowerShell script with delete and add commands', () => {
+      const script = buildPortForwardingScript('172.30.149.249', [3001, 5173])
+
+      // Delete commands (without listenaddress to catch all variants)
+      expect(script).toContain('netsh interface portproxy delete v4tov4 listenport=3001')
+      expect(script).toContain('netsh interface portproxy delete v4tov4 listenport=5173')
+
+      // Add commands
+      expect(script).toContain('netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=3001 connectaddress=172.30.149.249 connectport=3001')
+      expect(script).toContain('netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=5173 connectaddress=172.30.149.249 connectport=5173')
+    })
+
+    it('includes firewall rule with private profile restriction', () => {
+      const script = buildPortForwardingScript('172.30.149.249', [3001, 5173])
+
+      expect(script).toContain('netsh advfirewall firewall delete rule name="Freshell LAN Access"')
+      expect(script).toContain('netsh advfirewall firewall add rule name="Freshell LAN Access"')
+      expect(script).toContain('profile=private')
+      expect(script).toContain('localport=3001,5173')
+    })
+
+    it('uses escaped $null for PowerShell error suppression', () => {
+      const script = buildPortForwardingScript('172.30.149.249', [3001])
+
+      // Must use \$null to prevent shell expansion
+      expect(script).toContain('2>\\$null')
+      expect(script).not.toContain('2>$null')
+    })
+
+    it('handles single port', () => {
+      const script = buildPortForwardingScript('172.30.149.249', [4000])
+
+      expect(script).toContain('listenport=4000')
+      expect(script).toContain('connectport=4000')
+      expect(script).toContain('localport=4000')
     })
   })
 })
