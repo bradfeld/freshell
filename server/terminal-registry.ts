@@ -186,6 +186,59 @@ function getWindowsExe(exe: 'cmd' | 'powershell'): string {
 }
 
 /**
+ * Get the WSL mount prefix for Windows drives.
+ * Derives from WSL_WINDOWS_SYS32 (e.g., /mnt/c/Windows/System32 → /mnt)
+ * or defaults to /mnt for standard WSL configurations.
+ *
+ * Handles various mount configurations:
+ * - /mnt/c/... → /mnt (standard)
+ * - /c/... → '' (drives at root)
+ * - /win/c/... → /win (custom prefix)
+ */
+function getWslMountPrefix(): string {
+  const sys32 = process.env.WSL_WINDOWS_SYS32
+  if (sys32) {
+    // Extract mount prefix from path like /mnt/c/Windows/System32
+    // The drive letter is a single char followed by /
+    const match = sys32.match(/^(.*)\/[a-zA-Z]\//)
+    if (match) {
+      return match[1]
+    }
+  }
+  return '/mnt'
+}
+
+/**
+ * Get a sensible default working directory for Windows shells.
+ * On native Windows: user's home directory (C:\Users\<username>)
+ * In WSL: Windows user profile converted to WSL path, falling back to C:\
+ *
+ * This avoids UNC paths (\\wsl.localhost\...) which cmd.exe doesn't support.
+ * Respects custom WSL mount configurations via WSL_WINDOWS_SYS32.
+ */
+function getWindowsDefaultCwd(): string {
+  if (isWindows()) {
+    return os.homedir()
+  }
+  // In WSL, we need a Windows-accessible path
+  const mountPrefix = getWslMountPrefix()
+
+  // Try USERPROFILE if it's shared via WSLENV, convert to WSL mount path
+  const userProfile = process.env.USERPROFILE
+  if (userProfile) {
+    // Convert Windows path (C:\Users\name) to WSL path (/mnt/c/Users/name)
+    const match = userProfile.match(/^([A-Za-z]):\\(.*)$/)
+    if (match) {
+      const drive = match[1].toLowerCase()
+      const rest = match[2].replace(/\\/g, '/')
+      return `${mountPrefix}/${drive}/${rest}`
+    }
+  }
+  // Fallback: use C:\ root
+  return `${mountPrefix}/c`
+}
+
+/**
  * Resolve the effective shell based on platform and requested shell type.
  * - Windows/WSL: 'system' → platform default, others pass through
  * - macOS/Linux (non-WSL): always normalize to 'system' (use $SHELL or fallback)
@@ -315,8 +368,8 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
 
     if (windowsMode === 'cmd') {
       const file = getWindowsExe('cmd')
-      // Don't use Linux paths as cwd on native Windows
-      const winCwd = isLinuxPath(cwd) ? undefined : cwd
+      // Use Windows-compatible cwd: original if valid, otherwise sensible default
+      const winCwd = isLinuxPath(cwd) ? getWindowsDefaultCwd() : cwd
       if (mode === 'shell') {
         return { file, args: ['/K'], cwd: winCwd, env }
       }
@@ -329,8 +382,8 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
 
     // default to PowerShell
     const file = getWindowsExe('powershell')
-    // Don't use Linux paths as cwd on native Windows
-    const winCwd = isLinuxPath(cwd) ? undefined : cwd
+    // Use Windows-compatible cwd: original if valid, otherwise sensible default
+    const winCwd = isLinuxPath(cwd) ? getWindowsDefaultCwd() : cwd
     if (mode === 'shell') {
       return { file, args: ['-NoLogo'], cwd: winCwd, env }
     }
