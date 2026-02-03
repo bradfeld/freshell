@@ -384,5 +384,30 @@ Address         Port        Address         Port
 
       expect(result).toBe('failed')
     })
+
+    it('returns failed when PowerShell execution throws an error', () => {
+      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.15.0-microsoft-standard-WSL2')
+
+      vi.mocked(execSync)
+        .mockReturnValueOnce('172.30.149.249\n') // hostname -I
+        .mockReturnValueOnce('') // netsh show - no existing rules
+        .mockImplementationOnce(() => {
+          // PowerShell throws (e.g., timeout, command not found)
+          throw new Error('Command timed out')
+        })
+
+      const result = setupWslPortForwarding()
+
+      expect(result).toBe('failed')
+    })
+
+    it('returns not-wsl2 for WSL1 (which has Microsoft but not WSL2 pattern)', () => {
+      // WSL1 has "Microsoft" in version but not "wsl2" or "microsoft-standard"
+      vi.mocked(fs.readFileSync).mockReturnValue('Linux version 4.4.0-18362-Microsoft')
+
+      const result = setupWslPortForwarding()
+
+      expect(result).toBe('not-wsl2')
+    })
   })
 })

@@ -149,8 +149,10 @@ export function buildPortForwardingScript(wslIp: string, ports: number[]): strin
  */
 function isWSL2(): boolean {
   try {
-    const version = fs.readFileSync('/proc/version', 'utf-8')
-    return version.toLowerCase().includes('microsoft')
+    const version = fs.readFileSync('/proc/version', 'utf-8').toLowerCase()
+    // WSL2 has "microsoft-standard" or "wsl2" in version string
+    // WSL1 has "Microsoft" but not these patterns
+    return version.includes('wsl2') || version.includes('microsoft-standard')
   } catch {
     return false
   }
