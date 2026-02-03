@@ -57,6 +57,7 @@ npm run dev:server          # Node with tsx watch for server auto-reload
 npm run build               # Full build (client + server)
 npm run build:client        # Vite build → dist/client
 npm run build:server        # TypeScript compile → dist/server
+npm run serve               # Build and run production server
 ```
 
 ### Testing
