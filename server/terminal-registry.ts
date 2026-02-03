@@ -322,6 +322,17 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
   // Resolve shell for the current platform
   const effectiveShell = resolveShell(shell)
 
+  // Debug logging for shell/cwd resolution
+  logger.debug({
+    mode,
+    requestedShell: shell,
+    effectiveShell,
+    cwd,
+    isLinuxPath: cwd ? isLinuxPath(cwd) : false,
+    isWsl: isWsl(),
+    isWindows: isWindows(),
+  }, 'buildSpawnSpec: resolving shell and cwd')
+
   // In WSL with 'system' shell (which 'wsl' resolves to), use Linux shell directly
   // For 'cmd' or 'powershell' in WSL, fall through to Windows shell handling
   const inWslWithLinuxShell = isWsl() && effectiveShell === 'system'
@@ -372,32 +383,62 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
 
     if (windowsMode === 'cmd') {
       const file = getWindowsExe('cmd')
-      // Use Windows-compatible cwd: original if valid, otherwise sensible default
-      const winCwd = isLinuxPath(cwd) ? getWindowsDefaultCwd() : cwd
+      // In WSL, we can't pass Linux paths as cwd to Windows executables (they become UNC paths)
+      // Instead, pass no cwd and use cd /d inside the command
+      const inWsl = isWsl()
+      const winCwd = inWsl ? getWindowsDefaultCwd() : (isLinuxPath(cwd) ? undefined : cwd)
+      // For WSL: don't pass cwd to node-pty, use cd /d in command instead
+      const procCwd = inWsl ? undefined : winCwd
+      logger.debug({
+        shell: 'cmd',
+        inWsl,
+        originalCwd: cwd,
+        winCwd,
+        procCwd,
+        file,
+      }, 'buildSpawnSpec: cmd.exe cwd resolution')
       if (mode === 'shell') {
-        return { file, args: ['/K'], cwd: winCwd, env }
+        if (inWsl && winCwd) {
+          // Use /K with cd command to change to Windows directory
+          return { file, args: ['/K', `cd /d "${winCwd}"`], cwd: procCwd, env }
+        }
+        return { file, args: ['/K'], cwd: procCwd, env }
       }
       const cli = resolveCodingCliCommand(mode, resumeSessionId)
       const cmd = cli?.command || mode
       const resume = cli?.args.length ? ` ${cli.args.join(' ')}` : ''
-      const cd = winCwd ? `cd /d ${winCwd} && ` : ''
-      return { file, args: ['/K', `${cd}${cmd}${resume}`], cwd: winCwd, env }
+      const cd = winCwd ? `cd /d "${winCwd}" && ` : ''
+      return { file, args: ['/K', `${cd}${cmd}${resume}`], cwd: procCwd, env }
     }
 
     // default to PowerShell
     const file = getWindowsExe('powershell')
-    // Use Windows-compatible cwd: original if valid, otherwise sensible default
-    const winCwd = isLinuxPath(cwd) ? getWindowsDefaultCwd() : cwd
+    // In WSL, we can't pass Linux paths as cwd to Windows executables (they become UNC paths)
+    const inWsl = isWsl()
+    const winCwd = inWsl ? getWindowsDefaultCwd() : (isLinuxPath(cwd) ? undefined : cwd)
+    const procCwd = inWsl ? undefined : winCwd
+    logger.debug({
+      shell: 'powershell',
+      inWsl,
+      originalCwd: cwd,
+      winCwd,
+      procCwd,
+      file,
+    }, 'buildSpawnSpec: powershell.exe cwd resolution')
     if (mode === 'shell') {
-      return { file, args: ['-NoLogo'], cwd: winCwd, env }
+      if (inWsl && winCwd) {
+        // Use Set-Location to change to Windows directory
+        return { file, args: ['-NoLogo', '-NoExit', '-Command', `Set-Location -LiteralPath "${winCwd}"`], cwd: procCwd, env }
+      }
+      return { file, args: ['-NoLogo'], cwd: procCwd, env }
     }
 
     const cli = resolveCodingCliCommand(mode, resumeSessionId)
     const cmd = cli?.command || mode
     const resumeArgs = cli?.args.length ? ` ${cli.args.join(' ')}` : ''
-    const cd = winCwd ? `Set-Location -LiteralPath ${quote(winCwd)}; ` : ''
+    const cd = winCwd ? `Set-Location -LiteralPath "${winCwd}"; ` : ''
     const command = `${cd}${cmd}${resumeArgs}`
-    return { file, args: ['-NoLogo', '-NoExit', '-Command', command], cwd: winCwd, env }
+    return { file, args: ['-NoLogo', '-NoExit', '-Command', command], cwd: procCwd, env }
   }
 // Non-Windows: native spawn using system shell
   const systemShell = getSystemShell()

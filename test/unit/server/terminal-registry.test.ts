@@ -1172,39 +1172,48 @@ describe('buildSpawnSpec WSL paths', () => {
   })
 
   describe('cwd handling for Windows shells in WSL', () => {
-    it('uses Windows default cwd for cmd.exe with Linux path in WSL', () => {
+    // In WSL, we can't pass Linux paths to node-pty for Windows executables
+    // (they become UNC paths which cmd.exe rejects). Instead, we pass cwd: undefined
+    // to node-pty and use cd /d or Set-Location commands in the args.
+
+    it('uses cd command for cmd.exe with Linux path in WSL', () => {
       mockWsl()
 
       const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
 
-      // Linux paths can't be used with cmd.exe, so use a sensible Windows default
-      // Without USERPROFILE set, falls back to /mnt/c
-      expect(spec.cwd).toBe('/mnt/c')
+      // cwd should be undefined to avoid UNC path translation
+      expect(spec.cwd).toBeUndefined()
+      // Directory change should be in the command args
+      expect(spec.args).toContain('/K')
+      expect(spec.args.some(arg => arg.includes('cd /d "/mnt/c"'))).toBe(true)
     })
 
-    it('uses Windows default cwd for powershell.exe with Linux path in WSL', () => {
+    it('uses Set-Location for powershell.exe with Linux path in WSL', () => {
       mockWsl()
 
       const spec = buildSpawnSpec('shell', '/home/user/project', 'powershell')
 
-      // Linux paths can't be used with powershell.exe, so use a sensible Windows default
-      // Without USERPROFILE set, falls back to /mnt/c
-      expect(spec.cwd).toBe('/mnt/c')
+      // cwd should be undefined to avoid UNC path translation
+      expect(spec.cwd).toBeUndefined()
+      // Directory change should be in the command args
+      expect(spec.args).toContain('-NoLogo')
+      expect(spec.args.some(arg => arg.includes('Set-Location') && arg.includes('/mnt/c'))).toBe(true)
     })
 
-    it('uses USERPROFILE for Windows default cwd when available in WSL', () => {
+    it('uses USERPROFILE for Windows default cwd in cmd args when available in WSL', () => {
       mockWsl()
       process.env.USERPROFILE = 'C:\\Users\\testuser'
 
       const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
 
-      // Should convert USERPROFILE to WSL mount path
-      expect(spec.cwd).toBe('/mnt/c/Users/testuser')
+      // cwd undefined, path in args
+      expect(spec.cwd).toBeUndefined()
+      expect(spec.args.some(arg => arg.includes('cd /d "/mnt/c/Users/testuser"'))).toBe(true)
 
       delete process.env.USERPROFILE
     })
 
-    it('respects custom WSL mount prefix from WSL_WINDOWS_SYS32', () => {
+    it('respects custom WSL mount prefix from WSL_WINDOWS_SYS32 in cmd args', () => {
       mockWsl()
       // Custom mount root (drives at root: /c instead of /mnt/c)
       process.env.WSL_WINDOWS_SYS32 = '/c/Windows/System32'
@@ -1212,20 +1221,22 @@ describe('buildSpawnSpec WSL paths', () => {
       const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
 
       // With drives at root, mount prefix is empty, so C:\ is /c
-      expect(spec.cwd).toBe('/c')
+      expect(spec.cwd).toBeUndefined()
+      expect(spec.args.some(arg => arg.includes('cd /d "/c"'))).toBe(true)
 
       delete process.env.WSL_WINDOWS_SYS32
     })
 
-    it('respects custom WSL mount prefix when converting USERPROFILE', () => {
+    it('respects custom WSL mount prefix when converting USERPROFILE in powershell args', () => {
       mockWsl()
       process.env.WSL_WINDOWS_SYS32 = '/win/c/Windows/System32'
       process.env.USERPROFILE = 'D:\\Users\\testuser'
 
       const spec = buildSpawnSpec('shell', '/home/user/project', 'powershell')
 
-      // Should use custom mount prefix for USERPROFILE conversion
-      expect(spec.cwd).toBe('/win/d/Users/testuser')
+      // Should use custom mount prefix for USERPROFILE conversion in args
+      expect(spec.cwd).toBeUndefined()
+      expect(spec.args.some(arg => arg.includes('Set-Location') && arg.includes('/win/d/Users/testuser'))).toBe(true)
 
       delete process.env.WSL_WINDOWS_SYS32
       delete process.env.USERPROFILE
