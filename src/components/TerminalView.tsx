@@ -366,12 +366,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
-          updateContent({ status: 'exited' })
+          // Clear terminalIdRef AND the stored terminalId to prevent any subsequent
+          // operations (resize, input) from sending commands to the dead terminal,
+          // which would trigger INVALID_TERMINAL_ID and cause a reconnection loop.
+          // We must clear both the ref AND the Redux state because the ref sync effect
+          // would otherwise reset the ref from the Redux state on re-render.
+          terminalIdRef.current = undefined
+          updateContent({ terminalId: undefined, status: 'exited' })
           const exitTab = tabRef.current
           if (exitTab) {
             const code = typeof msg.exitCode === 'number' ? msg.exitCode : undefined
             // Only modify title if user hasn't manually set it
-            const updates: { status: 'exited'; title?: string } = { status: 'exited' }
+            const updates: { terminalId: undefined; status: 'exited'; title?: string } = { terminalId: undefined, status: 'exited' }
             if (!exitTab.titleSetByUser) {
               updates.title = exitTab.title + (code !== undefined ? ` (exit ${code})` : '')
             }
