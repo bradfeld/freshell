@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vites
 import http from 'http'
 import WebSocket from 'ws'
 
-vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 })
+const HOOK_TIMEOUT_MS = 30000
+vi.setConfig({ testTimeout: 30000, hookTimeout: HOOK_TIMEOUT_MS })
 
 // Mock the config-store module before importing ws-handler
 vi.mock('../../server/config-store', () => ({
@@ -17,9 +18,22 @@ vi.mock('../../server/config-store', () => ({
   },
 }))
 
-function listen(server: http.Server): Promise<{ port: number }> {
-  return new Promise((resolve) => {
+function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ port: number }> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      server.off('error', onError)
+      reject(new Error('Timed out waiting for server to listen'))
+    }, timeoutMs)
+
+    const onError = (err: Error) => {
+      clearTimeout(timeout)
+      reject(err)
+    }
+
+    server.once('error', onError)
     server.listen(0, '127.0.0.1', () => {
+      clearTimeout(timeout)
+      server.off('error', onError)
       const addr = server.address()
       if (typeof addr === 'object' && addr) resolve({ port: addr.port })
     })
@@ -108,7 +122,7 @@ class FakeRegistry {
 }
 
 describe('ws protocol', () => {
-  let server: http.Server
+  let server: http.Server | undefined
   let port: number
   let WsHandler: any
   let registry: FakeRegistry
@@ -127,7 +141,7 @@ describe('ws protocol', () => {
     new WsHandler(server, registry as any)
     const info = await listen(server)
     port = info.port
-  })
+  }, HOOK_TIMEOUT_MS)
 
   beforeEach(() => {
     // Clear registry state between tests
@@ -138,8 +152,9 @@ describe('ws protocol', () => {
   })
 
   afterAll(async () => {
+    if (!server) return
     await new Promise<void>((resolve) => server.close(() => resolve()))
-  })
+  }, HOOK_TIMEOUT_MS)
 
   it('rejects invalid token', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)

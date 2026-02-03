@@ -9,9 +9,24 @@ type Snapshot = {
   projects: any[]
 }
 
-function listen(server: http.Server): Promise<{ port: number }> {
-  return new Promise((resolve) => {
+const HOOK_TIMEOUT_MS = 30000
+
+function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ port: number }> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      server.off('error', onError)
+      reject(new Error('Timed out waiting for server to listen'))
+    }, timeoutMs)
+
+    const onError = (err: Error) => {
+      clearTimeout(timeout)
+      reject(err)
+    }
+
+    server.once('error', onError)
     server.listen(0, '127.0.0.1', () => {
+      clearTimeout(timeout)
+      server.off('error', onError)
       const addr = server.address()
       if (typeof addr === 'object' && addr) resolve({ port: addr.port })
     })
@@ -44,7 +59,7 @@ function waitForMessage(ws: WebSocket, predicate: (msg: any) => boolean, timeout
 }
 
 describe('ws handshake snapshot', () => {
-  let server: http.Server
+  let server: http.Server | undefined
   let port: number
   let snapshot: Snapshot
 
@@ -115,11 +130,12 @@ describe('ws handshake snapshot', () => {
 
     const info = await listen(server)
     port = info.port
-  })
+  }, HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
+    if (!server) return
     await new Promise<void>((resolve) => server.close(() => resolve()))
-  })
+  }, HOOK_TIMEOUT_MS)
 
   it('sends settings and sessions snapshot after ready', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)

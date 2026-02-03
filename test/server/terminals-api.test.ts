@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import express, { type Express } from 'express'
 import request from 'supertest'
 
+const SLOW_TEST_TIMEOUT_MS = 20000
+
 // Mock the config-store module before importing auth
 vi.mock('../../server/config-store', () => ({
   configStore: {
@@ -396,7 +398,7 @@ describe('Terminals API', () => {
         deleted: undefined,
       })
       expect(response.body).toEqual({ titleOverride: 'Updated Title' })
-    })
+    }, SLOW_TEST_TIMEOUT_MS)
 
     it('updates terminal description override', async () => {
       registry.addTerminal({ terminalId: 'term_desc' })

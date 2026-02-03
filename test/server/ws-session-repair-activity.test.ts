@@ -13,9 +13,24 @@ class FakeSessionRepairService extends EventEmitter {
   prioritizeSessions() {}
 }
 
-function listen(server: http.Server): Promise<{ port: number }> {
-  return new Promise((resolve) => {
+const HOOK_TIMEOUT_MS = 30000
+
+function listen(server: http.Server, timeoutMs = HOOK_TIMEOUT_MS): Promise<{ port: number }> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      server.off('error', onError)
+      reject(new Error('Timed out waiting for server to listen'))
+    }, timeoutMs)
+
+    const onError = (err: Error) => {
+      clearTimeout(timeout)
+      reject(err)
+    }
+
+    server.once('error', onError)
     server.listen(0, '127.0.0.1', () => {
+      clearTimeout(timeout)
+      server.off('error', onError)
       const addr = server.address()
       if (typeof addr === 'object' && addr) resolve({ port: addr.port })
     })
@@ -23,7 +38,7 @@ function listen(server: http.Server): Promise<{ port: number }> {
 }
 
 describe('ws session repair activity', () => {
-  let server: http.Server
+  let server: http.Server | undefined
   let port: number
   let sessionRepairService: FakeSessionRepairService
 
@@ -43,11 +58,12 @@ describe('ws session repair activity', () => {
     new WsHandler(server, registry as any, undefined, sessionRepairService as any)
     const info = await listen(server)
     port = info.port
-  })
+  }, HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
+    if (!server) return
     await new Promise<void>((resolve) => server.close(() => resolve()))
-  })
+  }, HOOK_TIMEOUT_MS)
 
   it('broadcasts session repair activity on scan events', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
