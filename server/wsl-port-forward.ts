@@ -136,9 +136,10 @@ export function buildPortForwardingScript(wslIp: string, ports: number[]): strin
 
   // Firewall rule (delete then add for idempotency)
   // SECURITY: profile=private restricts to private networks only (not public Wi-Fi)
-  commands.push(`netsh advfirewall firewall delete rule name="Freshell LAN Access" 2>\\$null`)
+  // Note: Using name without spaces to avoid quote escaping issues in nested PowerShell
+  commands.push(`netsh advfirewall firewall delete rule name=FreshellLANAccess 2>\\$null`)
   commands.push(
-    `netsh advfirewall firewall add rule name="Freshell LAN Access" dir=in action=allow protocol=tcp localport=${ports.join(',')} profile=private`
+    `netsh advfirewall firewall add rule name=FreshellLANAccess dir=in action=allow protocol=tcp localport=${ports.join(',')} profile=private`
   )
 
   return commands.join('; ')

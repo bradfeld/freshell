@@ -265,8 +265,8 @@ Address         Port        Address         Port
     it('includes firewall rule with private profile restriction', () => {
       const script = buildPortForwardingScript('172.30.149.249', [3001, 5173])
 
-      expect(script).toContain('netsh advfirewall firewall delete rule name="Freshell LAN Access"')
-      expect(script).toContain('netsh advfirewall firewall add rule name="Freshell LAN Access"')
+      expect(script).toContain('netsh advfirewall firewall delete rule name=FreshellLANAccess')
+      expect(script).toContain('netsh advfirewall firewall add rule name=FreshellLANAccess')
       expect(script).toContain('profile=private')
       expect(script).toContain('localport=3001,5173')
     })
