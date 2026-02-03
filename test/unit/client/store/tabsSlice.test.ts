@@ -36,11 +36,7 @@ describe('tabsSlice', () => {
       expect(state.tabs).toHaveLength(1)
       const tab = state.tabs[0]
       expect(tab.title).toBe('Tab 1')
-      expect(tab.status).toBe('creating')
-      expect(tab.mode).toBe('shell')
-      expect(tab.shell).toBe('system')
       expect(tab.id).toBeDefined()
-      expect(tab.createRequestId).toBe(tab.id)
       expect(tab.createdAt).toBeDefined()
       expect(state.activeTabId).toBe(tab.id)
     })
@@ -51,9 +47,6 @@ describe('tabsSlice', () => {
       expect(state.tabs).toHaveLength(1)
       const tab = state.tabs[0]
       expect(tab.title).toBe('Tab 1')
-      expect(tab.status).toBe('creating')
-      expect(tab.mode).toBe('shell')
-      expect(tab.shell).toBe('system')
     })
 
     it('accepts custom title', () => {
@@ -62,40 +55,10 @@ describe('tabsSlice', () => {
       expect(state.tabs[0].title).toBe('My Custom Terminal')
     })
 
-    it('accepts custom mode', () => {
-      const state = tabsReducer(initialState, addTab({ mode: 'claude' }))
-
-      expect(state.tabs[0].mode).toBe('claude')
-    })
-
-    it('accepts custom shell', () => {
-      const state = tabsReducer(initialState, addTab({ shell: 'powershell' }))
-
-      expect(state.tabs[0].shell).toBe('powershell')
-    })
-
-    it('accepts all custom options', () => {
-      const state = tabsReducer(
-        initialState,
-        addTab({
-          title: 'Custom Tab',
-          description: 'A test description',
-          mode: 'codex',
-          shell: 'wsl',
-          status: 'running',
-          initialCwd: '/home/user',
-          resumeSessionId: 'session-123',
-        })
-      )
-
-      const tab = state.tabs[0]
-      expect(tab.title).toBe('Custom Tab')
-      expect(tab.description).toBe('A test description')
-      expect(tab.mode).toBe('codex')
-      expect(tab.shell).toBe('wsl')
-      expect(tab.status).toBe('running')
-      expect(tab.initialCwd).toBe('/home/user')
-      expect(tab.resumeSessionId).toBe('session-123')
+    it('accepts titleSetByUser', () => {
+      const state = tabsReducer(initialState, addTab({ title: 'Custom', titleSetByUser: true }))
+      expect(state.tabs[0].title).toBe('Custom')
+      expect(state.tabs[0].titleSetByUser).toBe(true)
     })
 
     it('increments tab number in default title', () => {
@@ -151,28 +114,13 @@ describe('tabsSlice', () => {
         state,
         updateTab({
           id: tabId,
-          updates: { title: 'Updated Title', status: 'running' },
+          updates: { title: 'Updated Title', titleSetByUser: true },
         })
       )
 
       const tab = state.tabs[0]
       expect(tab.title).toBe('Updated Title')
-      expect(tab.status).toBe('running')
-    })
-
-    it('updates terminalId', () => {
-      let state = tabsReducer(initialState, addTab())
-      const tabId = state.tabs[0].id
-
-      state = tabsReducer(
-        state,
-        updateTab({
-          id: tabId,
-          updates: { terminalId: 'terminal-456' },
-        })
-      )
-
-      expect(state.tabs[0].terminalId).toBe('terminal-456')
+      expect(tab.titleSetByUser).toBe(true)
     })
 
     it('does not modify other tabs', () => {
@@ -278,20 +226,12 @@ describe('tabsSlice', () => {
       const savedTabs: Tab[] = [
         {
           id: 'saved-1',
-          createRequestId: 'saved-1',
           title: 'Saved Terminal',
-          status: 'running',
-          mode: 'shell',
-          shell: 'system',
           createdAt: 1000000,
         },
         {
           id: 'saved-2',
-          createRequestId: 'saved-2',
           title: 'Another Terminal',
-          status: 'exited',
-          mode: 'claude',
-          shell: 'powershell',
           createdAt: 2000000,
         },
       ]
@@ -326,21 +266,14 @@ describe('tabsSlice', () => {
       )
 
       const tab = state.tabs[0]
-      expect(tab.status).toBe('creating')
-      expect(tab.mode).toBe('shell')
-      expect(tab.shell).toBe('system')
       expect(tab.createdAt).toBeDefined()
-      expect(tab.createRequestId).toBe('incomplete')
     })
 
     it('uses first tab id as activeTabId when activeTabId not provided', () => {
       const savedTabs: Tab[] = [
         {
           id: 'first-tab',
-          createRequestId: 'first-tab',
           title: 'First',
-          status: 'running',
-          mode: 'shell',
           createdAt: 1000000,
         },
       ]
@@ -385,16 +318,9 @@ describe('tabsSlice', () => {
     it('preserves all tab properties during hydration', () => {
       const fullTab: Tab = {
         id: 'full-tab',
-        createRequestId: 'full-tab',
         title: 'Full Tab',
-        description: 'A description',
-        terminalId: 'terminal-789',
-        status: 'running',
-        mode: 'codex',
-        shell: 'wsl',
-        initialCwd: '/custom/path',
-        resumeSessionId: 'session-abc',
         createdAt: 5000000,
+        titleSetByUser: true,
       }
 
       const state = tabsReducer(
@@ -408,14 +334,8 @@ describe('tabsSlice', () => {
       const tab = state.tabs[0]
       expect(tab.id).toBe('full-tab')
       expect(tab.title).toBe('Full Tab')
-      expect(tab.description).toBe('A description')
-      expect(tab.terminalId).toBe('terminal-789')
-      expect(tab.status).toBe('running')
-      expect(tab.mode).toBe('codex')
-      expect(tab.shell).toBe('wsl')
-      expect(tab.initialCwd).toBe('/custom/path')
-      expect(tab.resumeSessionId).toBe('session-abc')
       expect(tab.createdAt).toBe(5000000)
+      expect(tab.titleSetByUser).toBe(true)
     })
   })
 
@@ -429,7 +349,7 @@ describe('tabsSlice', () => {
       })
 
       // Create tab
-      store.dispatch(addTab({ mode: 'shell' }))
+      store.dispatch(addTab())
       const tabId = store.getState().tabs.tabs[0].id
 
       // Initialize pane
@@ -511,38 +431,4 @@ describe('tabsSlice', () => {
     })
   })
 
-  describe('lastInputAt tracking', () => {
-    it('initializes lastInputAt to undefined on new tab', () => {
-      const state = tabsReducer(initialState, addTab({ title: 'Test Tab' }))
-
-      const tab = state.tabs[0]
-      expect(Object.prototype.hasOwnProperty.call(tab, 'lastInputAt')).toBe(true)
-      expect(tab.lastInputAt).toBeUndefined()
-    })
-
-    it('can update lastInputAt via updateTab', () => {
-      let state = tabsReducer(initialState, addTab({ title: 'Test Tab' }))
-      const tabId = state.tabs[0].id
-      const timestamp = Date.now()
-
-      state = tabsReducer(
-        state,
-        updateTab({
-          id: tabId,
-          updates: { lastInputAt: timestamp },
-        })
-      )
-
-      const tab = state.tabs[0]
-      expect(tab.lastInputAt).toBe(timestamp)
-    })
-
-    it('preserves lastInputAt when loading tabs from localStorage without the field', () => {
-      const state = tabsReducer(initialState, addTab({ title: 'Test Tab' }))
-
-      const tab = state.tabs[0]
-      expect(Object.prototype.hasOwnProperty.call(tab, 'lastInputAt')).toBe(true)
-      expect(tab.lastInputAt).toBeUndefined()
-    })
-  })
 })

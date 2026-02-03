@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit'
-import type { Tab, TerminalStatus, TabMode, ShellType, CodingCliProviderName } from './types'
+import type { Tab } from './types'
 import { nanoid } from 'nanoid'
 import { removeLayout } from './panesSlice'
 
@@ -7,8 +7,6 @@ export interface TabsState {
   tabs: Tab[]
   activeTabId: string | null
 }
-
-const DEFAULT_CWD = import.meta.env.VITE_DEFAULT_CWD || undefined
 
 // Load persisted tabs state directly at module initialization time
 // This ensures the initial state includes persisted data BEFORE the store is created
@@ -31,17 +29,9 @@ function loadInitialTabsState(): TabsState {
     // Apply same transformations as hydrateTabs to ensure consistency
     return {
       tabs: tabsState.tabs.map((t: Tab) => {
-        const legacyClaudeSessionId = (t as any).claudeSessionId as string | undefined
         return {
           ...t,
-          codingCliSessionId: t.codingCliSessionId || legacyClaudeSessionId,
-          codingCliProvider: t.codingCliProvider || (legacyClaudeSessionId ? 'claude' : undefined),
           createdAt: t.createdAt || Date.now(),
-          createRequestId: (t as any).createRequestId || t.id,
-          status: t.status || 'creating',
-          mode: t.mode || 'shell',
-          shell: t.shell || 'system',
-          lastInputAt: t.lastInputAt,
         }
       }),
       activeTabId: tabsState.activeTabId || (tabsState.tabs[0]?.id ?? null),
@@ -57,18 +47,7 @@ const initialState: TabsState = loadInitialTabsState()
 type AddTabPayload = {
   id?: string
   title?: string
-  description?: string
-  terminalId?: string
-  codingCliSessionId?: string
-  codingCliProvider?: CodingCliProviderName
-  claudeSessionId?: string
-  status?: TerminalStatus
-  mode?: TabMode
-  shell?: ShellType
-  initialCwd?: string
-  resumeSessionId?: string
-  forceNew?: boolean
-  createRequestId?: string
+  titleSetByUser?: boolean
 }
 
 export const tabsSlice = createSlice({
@@ -78,41 +57,12 @@ export const tabsSlice = createSlice({
     addTab: (state, action: PayloadAction<AddTabPayload | undefined>) => {
       const payload = action.payload || {}
 
-      // Deduplicate: if resuming a session that already has a tab, switch to it instead
-      // Use provider + sessionId to prevent collisions across different CLIs
-      if (payload.resumeSessionId && !payload.forceNew) {
-        const provider = payload.codingCliProvider || payload.mode || 'claude'
-        const existingTab = state.tabs.find((t) =>
-          t.resumeSessionId === payload.resumeSessionId &&
-          (t.codingCliProvider || t.mode || 'claude') === provider
-        )
-        if (existingTab) {
-          state.activeTabId = existingTab.id
-          return
-        }
-      }
-
       const id = payload.id || nanoid()
-      const legacyClaudeSessionId = payload.claudeSessionId
-      const codingCliSessionId = payload.codingCliSessionId || legacyClaudeSessionId
-      const codingCliProvider =
-        payload.codingCliProvider || (legacyClaudeSessionId ? 'claude' : undefined)
       const tab: Tab = {
         id,
-        createRequestId: payload.createRequestId || id,
         title: payload.title || `Tab ${state.tabs.length + 1}`,
-        description: payload.description,
-        terminalId: payload.terminalId,
-        codingCliSessionId,
-        codingCliProvider,
-        claudeSessionId: payload.claudeSessionId,
-        status: payload.status || 'creating',
-        mode: payload.mode || 'shell',
-        shell: payload.shell || 'system',
-        initialCwd: payload.initialCwd ?? DEFAULT_CWD,
-        resumeSessionId: payload.resumeSessionId,
         createdAt: Date.now(),
-        lastInputAt: undefined,
+        titleSetByUser: payload.titleSetByUser,
       }
       state.tabs.push(tab)
       state.activeTabId = id
@@ -131,18 +81,11 @@ export const tabsSlice = createSlice({
       }
     },
     hydrateTabs: (state, action: PayloadAction<TabsState>) => {
-      // Basic sanity: ensure dates exist, status defaults.
+      // Basic sanity: ensure dates exist.
       state.tabs = (action.payload.tabs || []).map((t) => {
-        const legacyClaudeSessionId = (t as any).claudeSessionId as string | undefined
         return {
           ...t,
-          codingCliSessionId: t.codingCliSessionId || legacyClaudeSessionId,
-          codingCliProvider: t.codingCliProvider || (legacyClaudeSessionId ? 'claude' : undefined),
           createdAt: t.createdAt || Date.now(),
-          createRequestId: (t as any).createRequestId || t.id,
-          status: t.status || 'creating',
-          mode: t.mode || 'shell',
-          shell: t.shell || 'system',
         }
       })
       state.activeTabId = action.payload.activeTabId || (state.tabs[0]?.id ?? null)

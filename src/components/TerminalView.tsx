@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { updateTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { recordOutput, recordInput } from '@/store/terminalActivitySlice'
@@ -12,6 +11,7 @@ import { registerTerminalActions } from '@/lib/pane-action-registry'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
+import { isCodingCliMode } from '@/lib/coding-cli-utils'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { Loader2 } from 'lucide-react'
@@ -29,7 +29,6 @@ interface TerminalViewProps {
 
 export default function TerminalView({ tabId, paneId, paneContent, hidden }: TerminalViewProps) {
   const dispatch = useAppDispatch()
-  const tab = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId))
   const settings = useAppSelector((s) => s.settings.settings)
 
   // All hooks MUST be called before any conditional returns
@@ -68,7 +67,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
   useEffect(() => {
     lastSessionActivityAtRef.current = 0
-  }, [tab?.resumeSessionId])
+  }, [terminalContent?.resumeSessionId])
 
   // Helper to update pane content - uses ref to avoid recreation on content changes
   // This is CRITICAL: if updateContent depended on terminalContent directly,
@@ -149,19 +148,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       // Track input for activity monitoring (to filter out echo)
       dispatch(recordInput({ paneId }))
 
-      const currentTab = tabRef.current
-      if (currentTab) {
-        const now = Date.now()
-        dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: now } }))
-        if (currentTab.resumeSessionId) {
-          if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
-            lastSessionActivityAtRef.current = now
-            const provider =
-              currentTab.codingCliProvider ||
-              (currentTab.mode !== 'shell' ? currentTab.mode : undefined) ||
-              'claude'
-            dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, provider, lastInputAt: now }))
-          }
+      const now = Date.now()
+      const sessionId = contentRef.current?.resumeSessionId
+      const mode = contentRef.current?.mode
+      if (sessionId && mode && isCodingCliMode(mode)) {
+        if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+          lastSessionActivityAtRef.current = now
+          dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
         }
       }
     })
@@ -204,12 +197,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTerminal])
 
-  // Ref for tab to avoid re-running effects when tab changes
-  const tabRef = useRef(tab)
-  useEffect(() => {
-    tabRef.current = tab
-  }, [tab])
-
   // Ref for paneId to avoid stale closures in title handlers
   const paneIdRef = useRef(paneId)
   useEffect(() => {
@@ -228,9 +215,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (!term) return
 
     const disposable = term.onTitleChange((rawTitle: string) => {
-      const currentTab = tabRef.current
-      if (!currentTab || currentTab.titleSetByUser) return
-
       // Strip prefix noise (spinners, status chars) - everything before first letter
       const match = rawTitle.match(/[a-zA-Z]/)
       if (!match) return // No letters = all noise, ignore
@@ -247,7 +231,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       lastTitleRef.current = cleanTitle
       lastTitleUpdateRef.current = now
 
-      dispatch(updateTab({ id: currentTab.id, updates: { title: cleanTitle } }))
       dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: cleanTitle }))
     })
 
@@ -327,11 +310,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           const newId = msg.terminalId as string
           terminalIdRef.current = newId
           updateContent({ terminalId: newId, status: 'running' })
-          // Also update tab for title purposes
-          const currentTab = tabRef.current
-          if (currentTab) {
-            dispatch(updateTab({ id: currentTab.id, updates: { terminalId: newId, status: 'running' } }))
-          }
           if (msg.snapshot) {
             try { term.clear(); term.write(msg.snapshot) } catch {}
           }
@@ -348,23 +326,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
           updateContent({ status: 'exited' })
-          const exitTab = tabRef.current
-          if (exitTab) {
-            const code = typeof msg.exitCode === 'number' ? msg.exitCode : undefined
-            // Only modify title if user hasn't manually set it
-            const updates: { status: 'exited'; title?: string } = { status: 'exited' }
-            if (!exitTab.titleSetByUser) {
-              updates.title = exitTab.title + (code !== undefined ? ` (exit ${code})` : '')
-            }
-            dispatch(updateTab({ id: exitTab.id, updates }))
-          }
         }
 
         // Auto-update title from Claude session (only if user hasn't manually set it)
         if (msg.type === 'terminal.title.updated' && msg.terminalId === tid) {
-          const titleTab = tabRef.current
-          if (titleTab && !titleTab.titleSetByUser && msg.title) {
-            dispatch(updateTab({ id: titleTab.id, updates: { title: msg.title } }))
+          if (msg.title) {
             dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: msg.title }))
           }
         }
@@ -374,11 +340,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.session.associated' && msg.terminalId === tid) {
           const sessionId = msg.sessionId as string
           updateContent({ resumeSessionId: sessionId })
-          // Also update the tab for sidebar session matching
-          const currentTab = tabRef.current
-          if (currentTab) {
-            dispatch(updateTab({ id: currentTab.id, updates: { resumeSessionId: sessionId } }))
-          }
         }
 
         if (msg.type === 'error' && msg.requestId === reqId) {
@@ -455,10 +416,20 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // - On reconnect: createRequestId changes, effect re-runs, terminalId is undefined, we create
   // We read terminalId from terminalIdRef.current to get the current value without triggering re-runs
   //
-  // NOTE: tab is intentionally NOT in dependencies - we use tabRef to avoid re-attaching
+  // NOTE: No tab dependency - terminal lifecycle is pane-owned
   // when tab properties (like title) change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTerminal, paneId, terminalContent?.createRequestId, updateContent, ws, dispatch])
+
+  // Detach when this terminal pane unmounts (tab close or pane swap)
+  useEffect(() => {
+    return () => {
+      const tid = terminalIdRef.current
+      if (tid) {
+        ws.send({ type: 'terminal.detach', terminalId: tid })
+      }
+    }
+  }, [ws])
 
   // NOW we can do the conditional return - after all hooks
   if (!isTerminal || !terminalContent) {

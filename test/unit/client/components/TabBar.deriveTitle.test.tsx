@@ -8,6 +8,7 @@ import panesReducer from '../../../../src/store/panesSlice'
 import connectionReducer from '../../../../src/store/connectionSlice'
 import settingsReducer, { defaultSettings } from '../../../../src/store/settingsSlice'
 import terminalActivityReducer from '../../../../src/store/terminalActivitySlice'
+import codingCliReducer from '../../../../src/store/codingCliSlice'
 
 // Mock ws-client
 vi.mock('@/lib/ws-client', () => ({
@@ -35,10 +36,17 @@ function createStore(tabsState: any, panesState: any) {
       connection: connectionReducer,
       settings: settingsReducer,
       terminalActivity: terminalActivityReducer,
+      codingCli: codingCliReducer,
     },
     preloadedState: {
       tabs: tabsState,
-      panes: panesState,
+      panes: {
+        layouts: {},
+        activePane: {},
+        paneTitles: {},
+        paneTitleSetByUser: {},
+        ...panesState,
+      },
       connection: { status: 'connected', error: null, reconnectAttempts: 0 },
       settings: {
         settings: defaultSettings,
@@ -49,6 +57,10 @@ function createStore(tabsState: any, panesState: any) {
         lastInputAt: {},
         working: {},
         finished: {},
+      },
+      codingCli: {
+        sessions: {},
+        pendingRequests: {},
       },
     },
   })
@@ -71,12 +83,8 @@ describe('TabBar tab title derivation', () => {
         tabs: [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'My Custom Title',
             titleSetByUser: true,
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: Date.now(),
           },
         ],
@@ -96,6 +104,7 @@ describe('TabBar tab title derivation', () => {
           },
         },
         activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
       }
     )
 
@@ -116,12 +125,8 @@ describe('TabBar tab title derivation', () => {
         tabs: [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'Tab 1', // Default title
             titleSetByUser: false,
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: Date.now(),
           },
         ],
@@ -141,6 +146,7 @@ describe('TabBar tab title derivation', () => {
           },
         },
         activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
       }
     )
 
@@ -160,11 +166,7 @@ describe('TabBar tab title derivation', () => {
         tabs: [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'Tab 1',
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: Date.now(),
           },
         ],
@@ -183,6 +185,7 @@ describe('TabBar tab title derivation', () => {
           },
         },
         activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
       }
     )
 
@@ -201,11 +204,7 @@ describe('TabBar tab title derivation', () => {
         tabs: [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'Tab 1',
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: Date.now(),
           },
         ],
@@ -226,6 +225,7 @@ describe('TabBar tab title derivation', () => {
           },
         },
         activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
       }
     )
 
@@ -244,11 +244,7 @@ describe('TabBar tab title derivation', () => {
         tabs: [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'Tab 1',
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: Date.now(),
           },
         ],
@@ -285,6 +281,7 @@ describe('TabBar tab title derivation', () => {
           },
         },
         activePane: { 'tab-1': 'pane-2' },
+        paneTitles: {},
       }
     )
 
@@ -305,11 +302,7 @@ describe('TabBar tab title derivation', () => {
         tabs: [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'My Tab',
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: Date.now(),
           },
         ],
@@ -318,6 +311,7 @@ describe('TabBar tab title derivation', () => {
       {
         layouts: {},
         activePane: {},
+        paneTitles: {},
       }
     )
 

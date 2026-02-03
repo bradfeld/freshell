@@ -4,12 +4,15 @@ import { List, type RowComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, setActiveTab } from '@/store/tabsSlice'
+import { setActiveTab } from '@/store/tabsSlice'
+import { createTabWithPane } from '@/store/tabThunks'
 import { getWsClient } from '@/lib/ws-client'
 import { searchSessions, type SearchResult } from '@/lib/api'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
 import type { BackgroundTerminal, CodingCliProviderName } from '@/store/types'
+import type { PaneNode } from '@/store/paneTypes'
 import { makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
+import { collectTerminalPanes, findPaneByTerminalId } from '@/lib/pane-utils'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
@@ -18,6 +21,7 @@ type SessionItem = SidebarSessionItem
 
 const SESSION_ITEM_HEIGHT = 56
 const SESSION_LIST_MAX_HEIGHT = 600
+const EMPTY_LAYOUTS: Record<string, PaneNode> = {}
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now()
@@ -48,9 +52,9 @@ export default function Sidebar({
   width?: number
 }) {
   const dispatch = useAppDispatch()
-  const settings = useAppSelector((s) => s.settings.settings)
-  const tabs = useAppSelector((s) => s.tabs.tabs)
-  const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
+  const settings = useAppSelector((s) => s.settings?.settings)
+  const activeTabId = useAppSelector((s) => s.tabs?.activeTabId ?? null)
+  const panes = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
   const selectSortedItems = useMemo(() => makeSelectSortedSessionItems(), [])
 
   const ws = useMemo(() => getWsClient(), [])
@@ -193,35 +197,48 @@ export default function Sidebar({
     const provider = item.provider as CodingCliProviderName
     if (item.isRunning && item.runningTerminalId) {
       // Session is running - check if tab with this terminal already exists
-      const existingTab = tabs.find((t) => t.terminalId === item.runningTerminalId)
-      if (existingTab) {
-        dispatch(setActiveTab(existingTab.id))
+      const existing = findPaneByTerminalId(panes, item.runningTerminalId)
+      if (existing) {
+        dispatch(setActiveTab(existing.tabId))
       } else {
         // Create new tab to attach to the running terminal
-        dispatch(addTab({
+        dispatch(createTabWithPane({
           title: item.title,
-          terminalId: item.runningTerminalId,
-          status: 'running',
-          mode: provider,
-          codingCliProvider: provider,
-          resumeSessionId: item.sessionId,
+          content: {
+            kind: 'terminal',
+            mode: provider,
+            terminalId: item.runningTerminalId,
+            resumeSessionId: item.sessionId,
+            status: 'running',
+            initialCwd: item.cwd,
+          },
         }))
       }
     } else {
       // Session not running - check if tab with this session already exists
-      const existingTab = tabs.find((t) =>
-        t.resumeSessionId === item.sessionId && (t.codingCliProvider || t.mode) === provider
-      )
-      if (existingTab) {
-        dispatch(setActiveTab(existingTab.id))
+      let existingTabId: string | null = null
+      for (const [tabId, layout] of Object.entries(panes)) {
+        const terminalPanes = collectTerminalPanes(layout)
+        if (terminalPanes.some((pane) =>
+          pane.content.resumeSessionId === item.sessionId && pane.content.mode === provider
+        )) {
+          existingTabId = tabId
+          break
+        }
+      }
+      if (existingTabId) {
+        dispatch(setActiveTab(existingTabId))
       } else {
         // Create new tab to resume the session
-        dispatch(addTab({
+        dispatch(createTabWithPane({
           title: item.title,
-          mode: provider,
-          codingCliProvider: provider,
-          initialCwd: item.cwd,
-          resumeSessionId: item.sessionId
+          content: {
+            kind: 'terminal',
+            mode: provider,
+            resumeSessionId: item.sessionId,
+            status: 'creating',
+            initialCwd: item.cwd,
+          },
         }))
       }
     }
@@ -235,29 +252,37 @@ export default function Sidebar({
     { id: 'settings' as const, label: 'Settings', icon: Settings, shortcut: ',' },
   ]
 
-  const activeTab = tabs.find((t) => t.id === activeTabId)
-  const activeProvider = activeTab?.codingCliProvider || (activeTab?.mode !== 'shell' ? activeTab?.mode : undefined)
-  const activeSessionKey = activeTab?.resumeSessionId && activeProvider
-    ? `${activeProvider}:${activeTab.resumeSessionId}`
-    : null
-  const activeTerminalId = activeTab?.terminalId
+  const activeLayout = activeTabId ? panes[activeTabId] : undefined
+  const activeTerminalIds = new Set(
+    activeLayout ? collectTerminalPanes(activeLayout).map((pane) => pane.content.terminalId).filter(Boolean) as string[] : []
+  )
+  const activeSessionKeys = new Set(
+    activeLayout
+      ? collectTerminalPanes(activeLayout)
+          .map((pane) => {
+            if (!pane.content.resumeSessionId) return null
+            return `${pane.content.mode}:${pane.content.resumeSessionId}`
+          })
+          .filter(Boolean) as string[]
+      : []
+  )
   const effectiveListHeight = listHeight > 0
     ? listHeight
     : Math.min(sortedItems.length * SESSION_ITEM_HEIGHT, SESSION_LIST_MAX_HEIGHT)
 
   const rowProps = useMemo(() => ({
     items: sortedItems,
-    activeSessionKey,
-    activeTerminalId,
-    showProjectBadge: settings.sidebar?.showProjectBadges,
+    activeSessionKeys,
+    activeTerminalIds,
+    showProjectBadge: settings?.sidebar?.showProjectBadges,
     onItemClick: handleItemClick,
-  }), [sortedItems, activeSessionKey, activeTerminalId, settings.sidebar?.showProjectBadges, handleItemClick])
+  }), [sortedItems, activeSessionKeys, activeTerminalIds, settings?.sidebar?.showProjectBadges, handleItemClick])
 
   const Row = ({ index, style, ariaAttributes, ...data }: RowComponentProps<typeof rowProps>) => {
     const item = data.items[index]
     const isActive = item.isRunning
-      ? item.runningTerminalId === data.activeTerminalId
-      : `${item.provider}:${item.sessionId}` === data.activeSessionKey
+      ? (item.runningTerminalId ? data.activeTerminalIds.has(item.runningTerminalId) : false)
+      : data.activeSessionKeys.has(`${item.provider}:${item.sessionId}`)
     return (
       <div style={{ ...style, paddingBottom: 2 }} {...ariaAttributes}>
         <SidebarItem

@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import type { CodingCliProviderName } from '@/store/types'
 import { toggleProjectExpanded, setProjects } from '@/store/sessionsSlice'
 import { api } from '@/lib/api'
-import { addTab } from '@/store/tabsSlice'
+import { createTabWithPane } from '@/store/tabThunks'
 import { cn } from '@/lib/utils'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
 import { Search, ChevronRight, MoreHorizontal, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
@@ -91,7 +91,16 @@ export default function HistoryView({ onOpenSession }: { onOpenSession?: () => v
     const label = getProviderLabel(provider)
     // TabMode now includes all CodingCliProviderName values, so this is type-safe
     const mode = (provider || 'claude') as CodingCliProviderName
-    dispatch(addTab({ title: title || label, mode, initialCwd: cwd, resumeSessionId: sessionId }))
+    dispatch(createTabWithPane({
+      title: title || label,
+      content: {
+        kind: 'terminal',
+        mode,
+        resumeSessionId: sessionId,
+        status: 'creating',
+        initialCwd: cwd,
+      },
+    }))
     onOpenSession?.()
   }
 

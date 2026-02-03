@@ -163,9 +163,9 @@ describe('State Edge Cases', () => {
         const tabId = store.getState().tabs.tabs[0].id
 
         // Simulate concurrent operations on same tab
-        store.dispatch(updateTab({ id: tabId, updates: { status: 'running' } }))
+        store.dispatch(updateTab({ id: tabId, updates: { title: 'Running' } }))
         store.dispatch(removeTab(tabId))
-        store.dispatch(updateTab({ id: tabId, updates: { status: 'exited' } }))
+        store.dispatch(updateTab({ id: tabId, updates: { title: 'Exited' } }))
 
         // Tab should be removed; update on non-existent tab is no-op
         expect(store.getState().tabs.tabs).toHaveLength(0)
@@ -199,7 +199,7 @@ describe('State Edge Cases', () => {
 
       it('handles tabs with missing required fields', () => {
         const corruptedTabs = [
-          { id: 'tab-1' }, // Missing title, status, mode, etc.
+          { id: 'tab-1' }, // Missing title, etc.
           { id: 'tab-2', title: 'Valid Title' },
           {}, // Missing everything including id
         ] as Tab[]
@@ -210,20 +210,15 @@ describe('State Edge Cases', () => {
         )
 
         // Should apply defaults
-        expect(state.tabs[0].status).toBe('creating')
-        expect(state.tabs[0].mode).toBe('shell')
-        expect(state.tabs[0].shell).toBe('system')
         expect(state.tabs[0].createdAt).toBeDefined()
       })
 
-      it('handles tabs with invalid status values', () => {
-        const tabsWithInvalidStatus = [
+      it('handles tabs with extra fields', () => {
+        const tabsWithExtraFields = [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'Test',
             status: 'invalid-status' as any,
-            mode: 'shell' as const,
             createdAt: Date.now(),
           },
         ]
@@ -232,7 +227,7 @@ describe('State Edge Cases', () => {
         // This tests that invalid values don't crash the reducer
         const state = tabsReducer(
           { tabs: [], activeTabId: null },
-          hydrateTabs({ tabs: tabsWithInvalidStatus, activeTabId: 'tab-1' })
+          hydrateTabs({ tabs: tabsWithExtraFields as Tab[], activeTabId: 'tab-1' })
         )
 
         expect(state.tabs).toHaveLength(1)
@@ -242,10 +237,7 @@ describe('State Edge Cases', () => {
         const validTabs: Tab[] = [
           {
             id: 'real-tab',
-            createRequestId: 'real-tab',
             title: 'Real Tab',
-            status: 'running',
-            mode: 'shell',
             createdAt: Date.now(),
           },
         ]
@@ -263,10 +255,7 @@ describe('State Edge Cases', () => {
       it('handles extremely large tab arrays', () => {
         const largeTabs: Tab[] = Array.from({ length: 10000 }, (_, i) => ({
           id: `tab-${i}`,
-          createRequestId: `tab-${i}`,
           title: `Tab ${i}`,
-          status: 'running' as const,
-          mode: 'shell' as const,
           createdAt: Date.now(),
         }))
 
@@ -303,10 +292,7 @@ describe('State Edge Cases', () => {
         const tabsWithBadNumbers: Tab[] = [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'Test',
-            status: 'running',
-            mode: 'shell',
             createdAt: NaN, // Invalid timestamp
           },
         ]
@@ -360,11 +346,11 @@ describe('State Edge Cases', () => {
         const store = createTestStore()
 
         const firstHydration: Tab[] = [
-          { id: 'first-1', createRequestId: 'first-1', title: 'First', status: 'running', mode: 'shell', createdAt: 1000 },
+          { id: 'first-1', title: 'First', createdAt: 1000 },
         ]
         const secondHydration: Tab[] = [
-          { id: 'second-1', createRequestId: 'second-1', title: 'Second', status: 'running', mode: 'shell', createdAt: 2000 },
-          { id: 'second-2', createRequestId: 'second-2', title: 'Second 2', status: 'running', mode: 'shell', createdAt: 3000 },
+          { id: 'second-1', title: 'Second', createdAt: 2000 },
+          { id: 'second-2', title: 'Second 2', createdAt: 3000 },
         ]
 
         store.dispatch(hydrateTabs({ tabs: firstHydration, activeTabId: 'first-1' }))
@@ -925,9 +911,9 @@ describe('State Edge Cases', () => {
 
         store.dispatch(updateTab({
           id: store.getState().tabs.tabs[0].id,
-          updates: { status: 'error' },
+          updates: { title: 'Offline Error Tab' },
         }))
-        expect(store.getState().tabs.tabs[0].status).toBe('error')
+        expect(store.getState().tabs.tabs[0].title).toBe('Offline Error Tab')
       })
 
       it('handles connection state changes during tab operations', () => {
@@ -947,12 +933,12 @@ describe('State Edge Cases', () => {
         // Continue tab operation
         store.dispatch(updateTab({
           id: tabId,
-          updates: { terminalId: 'terminal-123' },
+          updates: { title: 'Updated While Offline' },
         }))
 
         // Both states should be consistent
         expect(store.getState().connection.status).toBe('disconnected')
-        expect(store.getState().tabs.tabs[0].terminalId).toBe('terminal-123')
+        expect(store.getState().tabs.tabs[0].title).toBe('Updated While Offline')
       })
     })
 
@@ -1019,7 +1005,7 @@ describe('State Edge Cases', () => {
         if (state.tabs.tabs.length > 0) {
           state.tabs.tabs.forEach((tab) => {
             expect(tab.id).toBeDefined()
-            expect(tab.status).toBeDefined()
+            expect(tab.createdAt).toBeDefined()
           })
         }
 
@@ -1047,7 +1033,7 @@ describe('State Edge Cases', () => {
       const state = tabsReducer(
         { tabs: [], activeTabId: null },
         hydrateTabs({
-          tabs: [{ id: 'tab-1', createRequestId: 'tab-1', title: 'Tab', status: 'running', mode: 'shell', createdAt: 1000 }],
+          tabs: [{ id: 'tab-1', title: 'Tab', createdAt: 1000 }],
           activeTabId: 'non-existent',
         })
       )

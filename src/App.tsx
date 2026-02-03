@@ -3,13 +3,14 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
 import { setProjects } from '@/store/sessionsSlice'
-import { addTab, removeTab } from '@/store/tabsSlice'
+import { closeTabWithCleanup, createTabWithPane } from '@/store/tabThunks'
 import { api } from '@/lib/api'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { getSessionsForHello } from '@/lib/session-utils'
 import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
+import { buildDefaultPaneContent } from '@/lib/default-pane'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
 import TabContent from '@/components/TabContent'
@@ -287,11 +288,11 @@ export default function App() {
 
       if (key === 't') {
         e.preventDefault()
-        dispatch(addTab({ mode: 'shell' }))
+        dispatch(createTabWithPane({ content: buildDefaultPaneContent(settings) }))
         setView('terminal')
       } else if (key === 'w') {
         e.preventDefault()
-        if (activeTabId) dispatch(removeTab(activeTabId))
+        if (activeTabId) dispatch(closeTabWithCleanup({ tabId: activeTabId }))
       } else if (key === 's') {
         e.preventDefault()
         setView('sessions')
@@ -312,14 +313,14 @@ export default function App() {
       window.removeEventListener('keydown', onKeyDown)
       if (prefixTimeoutRef.current) window.clearTimeout(prefixTimeoutRef.current)
     }
-  }, [dispatch, activeTabId])
+  }, [dispatch, activeTabId, settings])
 
   // Ensure at least one tab exists for first-time users.
   useEffect(() => {
     if (tabs.length === 0) {
-      dispatch(addTab({ mode: 'shell' }))
+      dispatch(createTabWithPane({ content: buildDefaultPaneContent(settings) }))
     }
-  }, [tabs.length, dispatch])
+  }, [tabs.length, settings, dispatch])
 
   const content = (() => {
     if (view === 'sessions') return <HistoryView onOpenSession={() => setView('terminal')} />

@@ -19,21 +19,9 @@ export type ShellType = 'system' | 'cmd' | 'powershell' | 'wsl'
 
 export interface Tab {
   id: string
-  createRequestId: string
   title: string
-  description?: string
-  terminalId?: string          // For shell mode
-  codingCliSessionId?: string  // For coding CLI session view
-  codingCliProvider?: CodingCliProviderName
-  claudeSessionId?: string     // Legacy field (migrated to codingCliSessionId)
-  status: TerminalStatus
-  mode: TabMode
-  shell?: ShellType
-  initialCwd?: string
-  resumeSessionId?: string
   createdAt: number
   titleSetByUser?: boolean     // If true, don't auto-update title
-  lastInputAt?: number
 }
 
 export interface BackgroundTerminal {

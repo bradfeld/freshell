@@ -7,6 +7,9 @@ import { Provider } from 'react-redux'
 import tabsReducer from '@/store/tabsSlice'
 import panesReducer from '@/store/panesSlice'
 import sessionsReducer from '@/store/sessionsSlice'
+import codingCliReducer from '@/store/codingCliSlice'
+import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
+import sessionActivityReducer from '@/store/sessionActivitySlice'
 import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
@@ -36,6 +39,9 @@ function createTestStore() {
       tabs: tabsReducer,
       panes: panesReducer,
       sessions: sessionsReducer,
+      codingCli: codingCliReducer,
+      settings: settingsReducer,
+      sessionActivity: sessionActivityReducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({ serializableCheck: false }),
@@ -44,20 +50,12 @@ function createTestStore() {
         tabs: [
           {
             id: 'tab-1',
-            createRequestId: 'tab-1',
             title: 'Tab One',
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: 1,
           },
           {
             id: 'tab-2',
-            createRequestId: 'tab-2',
             title: 'Tab Two',
-            status: 'running',
-            mode: 'shell',
-            shell: 'system',
             createdAt: 2,
           },
         ],
@@ -67,10 +65,22 @@ function createTestStore() {
         layouts: {},
         activePane: {},
         paneTitles: {},
+        paneTitleSetByUser: {},
       },
       sessions: {
         projects: [],
         expandedProjects: new Set<string>(),
+      },
+      codingCli: {
+        sessions: {},
+        pendingRequests: {},
+      },
+      settings: {
+        settings: defaultSettings,
+        loaded: true,
+      },
+      sessionActivity: {
+        sessions: {},
       },
     },
   })

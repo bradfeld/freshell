@@ -1,6 +1,7 @@
 import { createSelector } from '@reduxjs/toolkit'
 import type { RootState } from '../store'
 import type { BackgroundTerminal, CodingCliProviderName } from '../types'
+import { collectTerminalPanes } from '@/lib/pane-utils'
 
 export interface SidebarSessionItem {
   id: string
@@ -21,12 +22,14 @@ export interface SidebarSessionItem {
 }
 
 const EMPTY_ACTIVITY: Record<string, number> = {}
+const EMPTY_PROJECTS: RootState['sessions']['projects'] = []
+const EMPTY_LAYOUTS: RootState['panes']['layouts'] = {}
 
-const selectProjects = (state: RootState) => state.sessions.projects
-const selectTabs = (state: RootState) => state.tabs.tabs
-const selectSortMode = (state: RootState) => state.settings.settings.sidebar?.sortMode || 'activity'
+const selectProjects = (state: RootState) => state.sessions?.projects ?? EMPTY_PROJECTS
+const selectLayouts = (state: RootState) => state.panes?.layouts ?? EMPTY_LAYOUTS
+const selectSortMode = (state: RootState) => state.settings?.settings?.sidebar?.sortMode || 'activity'
 const selectSessionActivityForSort = (state: RootState) => {
-  const sortMode = state.settings.settings.sidebar?.sortMode || 'activity'
+  const sortMode = state.settings?.settings?.sidebar?.sortMode || 'activity'
   if (sortMode !== 'activity') return EMPTY_ACTIVITY
   return state.sessionActivity?.sessions || EMPTY_ACTIVITY
 }
@@ -40,13 +43,13 @@ function getProjectName(projectPath: string): string {
 
 function buildSessionItems(
   projects: RootState['sessions']['projects'],
-  tabs: RootState['tabs']['tabs'],
+  layouts: RootState['panes']['layouts'],
   terminals: BackgroundTerminal[],
   sessionActivity: Record<string, number>
 ): SidebarSessionItem[] {
   const items: SidebarSessionItem[] = []
   const runningSessionMap = new Map<string, string>()
-  const tabSessionMap = new Map<string, { hasTab: boolean; lastInputAt?: number }>()
+  const tabSessionSet = new Set<string>()
 
   for (const terminal of terminals || []) {
     if (terminal.mode && terminal.mode !== 'shell' && terminal.status === 'running' && terminal.resumeSessionId) {
@@ -54,20 +57,13 @@ function buildSessionItems(
     }
   }
 
-  for (const tab of tabs || []) {
-    if (!tab.resumeSessionId) continue
-    const provider = tab.codingCliProvider || (tab.mode && tab.mode !== 'shell' ? tab.mode as CodingCliProviderName : undefined)
-    if (!provider) continue
-    const key = `${provider}:${tab.resumeSessionId}`
-    const existing = tabSessionMap.get(key)
-    if (!existing) {
-      tabSessionMap.set(key, { hasTab: true, lastInputAt: tab.lastInputAt })
-      continue
-    }
-    const existingTime = existing.lastInputAt ?? 0
-    const nextTime = tab.lastInputAt ?? 0
-    if (nextTime > existingTime) {
-      tabSessionMap.set(key, { hasTab: true, lastInputAt: tab.lastInputAt })
+  for (const layout of Object.values(layouts || {})) {
+    const terminals = collectTerminalPanes(layout)
+    for (const terminal of terminals) {
+      if (!terminal.content.resumeSessionId) continue
+      if (!terminal.content.mode || terminal.content.mode === 'shell') continue
+      const key = `${terminal.content.mode}:${terminal.content.resumeSessionId}`
+      tabSessionSet.add(key)
     }
   }
 
@@ -76,7 +72,7 @@ function buildSessionItems(
       const provider = session.provider || 'claude'
       const key = `${provider}:${session.sessionId}`
       const runningTerminalId = runningSessionMap.get(key)
-      const tabInfo = tabSessionMap.get(key)
+      const hasTab = tabSessionSet.has(key)
       const ratchetedActivity = sessionActivity[key]
       items.push({
         id: `session-${provider}-${session.sessionId}`,
@@ -89,8 +85,8 @@ function buildSessionItems(
         archived: session.archived,
         timestamp: session.updatedAt,
         cwd: session.cwd,
-        hasTab: tabInfo?.hasTab ?? false,
-        tabLastInputAt: tabInfo?.lastInputAt,
+        hasTab,
+        tabLastInputAt: hasTab ? sessionActivity[key] : undefined,
         ratchetedActivity,
         isRunning: !!runningTerminalId,
         runningTerminalId,
@@ -165,9 +161,9 @@ function sortSessionItems(items: SidebarSessionItem[], sortMode: string): Sideba
 
 export const makeSelectSortedSessionItems = () =>
   createSelector(
-    [selectProjects, selectTabs, selectSessionActivityForSort, selectSortMode, selectTerminals, selectFilter],
-    (projects, tabs, sessionActivity, sortMode, terminals, filter) => {
-      const items = buildSessionItems(projects, tabs, terminals, sessionActivity)
+    [selectProjects, selectLayouts, selectSessionActivityForSort, selectSortMode, selectTerminals, selectFilter],
+    (projects, layouts, sessionActivity, sortMode, terminals, filter) => {
+      const items = buildSessionItems(projects, layouts, terminals, sessionActivity)
       const filtered = filterSessionItems(items, filter)
       return sortSessionItems(filtered, sortMode)
     }

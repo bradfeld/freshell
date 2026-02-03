@@ -2,7 +2,7 @@ import type { MenuItem, ContextTarget } from './context-menu-types'
 import type { AppView } from '@/components/Sidebar'
 import type { Tab, ProjectGroup } from '@/store/types'
 import type { PaneNode } from '@/store/paneTypes'
-import { findPaneContent } from '@/lib/pane-utils'
+import { collectTerminalPanes, findPaneContent } from '@/lib/pane-utils'
 import type { TerminalActions, EditorActions, BrowserActions } from '@/lib/pane-action-registry'
 
 export type MenuActions = {
@@ -292,11 +292,15 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
   if (target.kind === 'history-session') {
     const sessionInfo = getSessionById(sessions, target.sessionId, target.provider)
     const hasSummary = !!sessionInfo?.session.summary
-    const isOpen = tabs.some(
-      (t) =>
-        t.resumeSessionId === target.sessionId &&
-        (t.codingCliProvider || t.mode || 'claude') === (target.provider || 'claude')
-    )
+    const provider = target.provider || 'claude'
+    const isOpen = Object.values(paneLayouts).some((layout) => {
+      const terminals = collectTerminalPanes(layout)
+      return terminals.some(
+        (terminal) =>
+          terminal.content.resumeSessionId === target.sessionId &&
+          terminal.content.mode === provider
+      )
+    })
     return [
       { type: 'item', id: 'history-session-open', label: 'Open session', onSelect: () => actions.openSessionInNewTab(target.sessionId, target.provider) },
       { type: 'item', id: 'history-session-rename', label: 'Rename', onSelect: () => actions.renameSession(target.sessionId, target.provider, true) },

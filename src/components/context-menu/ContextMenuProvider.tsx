@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, closeTab, reorderTabs, updateTab, setActiveTab } from '@/store/tabsSlice'
-import { closePane, initLayout, resetLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
+import { reorderTabs, updateTab, setActiveTab } from '@/store/tabsSlice'
+import { createTabWithPane, closeTabWithCleanup } from '@/store/tabThunks'
+import { closePane, resetLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
+import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { buildShareUrl } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { collectTerminalIds, findPaneContent } from '@/lib/pane-utils'
+import { collectTerminalPanes, collectSessionPanes, findPaneContent, findPaneByTerminalId } from '@/lib/pane-utils'
 import { getTabDisplayTitle } from '@/lib/tab-title'
 import { getBrowserActions, getEditorActions, getTerminalActions } from '@/lib/pane-action-registry'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
+import { buildDefaultPaneContent } from '@/lib/default-pane'
 import type { AppView } from '@/components/Sidebar'
 import type { CodingCliProviderName } from '@/store/types'
 import type { ContextTarget } from './context-menu-types'
@@ -18,7 +21,6 @@ import { ContextMenu } from './ContextMenu'
 import { ContextIds } from './context-menu-constants'
 import { buildMenuItems } from './menu-defs'
 import { copyDataset, isTextInputLike, parseContextTarget } from './context-menu-utils'
-import { nanoid } from 'nanoid'
 
 const CONTEXT_MENU_KEYS = ['ContextMenu']
 
@@ -70,8 +72,13 @@ export function ContextMenuProvider({
   const dispatch = useAppDispatch()
   const tabsState = useAppSelector((s) => s.tabs)
   const panes = useAppSelector((s) => s.panes.layouts)
+  const paneTitles = useAppSelector((s) => s.panes.paneTitles)
+  const activePanes = useAppSelector((s) => s.panes.activePane)
+  const pendingRequests = useAppSelector((s) => s.codingCli.pendingRequests)
+  const sessionActivity = useAppSelector((s) => s.sessionActivity.sessions)
   const sessions = useAppSelector((s) => s.sessions.projects)
   const expandedProjects = useAppSelector((s) => s.sessions.expandedProjects)
+  const settings = useAppSelector((s) => s.settings.settings)
 
   const [menuState, setMenuState] = useState<MenuState | null>(null)
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
@@ -118,33 +125,32 @@ export function ContextMenuProvider({
   }, [buildShareLink])
 
   const copyTabNames = useCallback(async () => {
-    const names = tabsState.tabs.map((tab) => getTabDisplayTitle(tab, panes[tab.id]))
+    const names = tabsState.tabs.map((tab) =>
+      getTabDisplayTitle(tab, panes[tab.id], paneTitles[tab.id], activePanes[tab.id])
+    )
     await copyText(names.join('\n'))
-  }, [tabsState.tabs, panes])
+  }, [tabsState.tabs, panes, paneTitles, activePanes])
 
   const copyTabName = useCallback(async (tabId: string) => {
     const tab = tabsState.tabs.find((t) => t.id === tabId)
     if (!tab) return
-    const name = getTabDisplayTitle(tab, panes[tab.id])
+    const name = getTabDisplayTitle(tab, panes[tab.id], paneTitles[tab.id], activePanes[tab.id])
     await copyText(name)
-  }, [tabsState.tabs, panes])
+  }, [tabsState.tabs, panes, paneTitles, activePanes])
 
   const newDefaultTab = useCallback(() => {
-    dispatch(addTab({ mode: 'shell' }))
-  }, [dispatch])
+    dispatch(createTabWithPane({ content: buildDefaultPaneContent(settings) }))
+  }, [dispatch, settings])
 
   const newTabWithPane = useCallback((type: 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' | 'editor') => {
     if (type === 'browser') {
-      const id = nanoid()
-      dispatch(addTab({ id, mode: 'shell' }))
-      dispatch(initLayout({ tabId: id, content: { kind: 'browser', url: '', devToolsOpen: false } }))
+      dispatch(createTabWithPane({
+        content: { kind: 'browser', url: '', devToolsOpen: false },
+      }))
       return
     }
     if (type === 'editor') {
-      const id = nanoid()
-      dispatch(addTab({ id, mode: 'shell' }))
-      dispatch(initLayout({
-        tabId: id,
+      dispatch(createTabWithPane({
         content: {
           kind: 'editor',
           filePath: null,
@@ -157,11 +163,27 @@ export function ContextMenuProvider({
       return
     }
     if (type === 'cmd' || type === 'powershell' || type === 'wsl') {
-      dispatch(addTab({ mode: 'shell', shell: type }))
+      dispatch(createTabWithPane({
+        content: {
+          kind: 'terminal',
+          mode: 'shell',
+          shell: type,
+          status: 'creating',
+          initialCwd: settings.defaultCwd,
+        },
+      }))
       return
     }
-    dispatch(addTab({ mode: 'shell', shell: 'system' }))
-  }, [dispatch])
+    dispatch(createTabWithPane({
+      content: {
+        kind: 'terminal',
+        mode: 'shell',
+        shell: 'system',
+        status: 'creating',
+        initialCwd: settings.defaultCwd,
+      },
+    }))
+  }, [dispatch, settings.defaultCwd])
 
   const renameTab = useCallback((tabId: string) => {
     const tab = tabsState.tabs.find((t) => t.id === tabId)
@@ -178,19 +200,12 @@ export function ContextMenuProvider({
     const title = current && current.kind === 'terminal' ? current.mode : 'Pane'
     const next = window.prompt('Rename pane', title)
     if (!next) return
-    dispatch(updatePaneTitle({ tabId, paneId, title: next }))
+    dispatch(updatePaneTitle({ tabId, paneId, title: next, setByUser: true }))
   }, [dispatch, panes])
 
   const closeTabById = useCallback((tabId: string) => {
-    const layout = panes[tabId]
-    if (layout) {
-      const terminalIds = collectTerminalIds(layout)
-      for (const terminalId of terminalIds) {
-        ws.send({ type: 'terminal.detach', terminalId })
-      }
-    }
-    dispatch(closeTab(tabId))
-  }, [dispatch, panes, ws])
+    dispatch(closeTabWithCleanup({ tabId }))
+  }, [dispatch])
 
   const closeOtherTabs = useCallback((tabId: string) => {
     setConfirmState({
@@ -211,6 +226,21 @@ export function ContextMenuProvider({
     const ids = tabsState.tabs.slice(index + 1).map((t) => t.id)
     ids.forEach(closeTabById)
   }, [tabsState.tabs, closeTabById])
+
+  const closePaneById = useCallback((tabId: string, paneId: string) => {
+    const layout = panes[tabId]
+    if (!layout) return
+    const content = findPaneContent(layout, paneId)
+    if (content?.kind === 'session') {
+      const sessionId = content.sessionId
+      if (pendingRequests[sessionId]) {
+        dispatch(cancelCodingCliRequest({ requestId: sessionId }))
+      } else {
+        ws.send({ type: 'codingcli.kill', sessionId })
+      }
+    }
+    dispatch(closePane({ tabId, paneId }))
+  }, [dispatch, panes, pendingRequests, ws])
 
   const moveTab = useCallback((tabId: string, dir: -1 | 1) => {
     const index = tabsState.tabs.findIndex((t) => t.id === tabId)
@@ -240,24 +270,28 @@ export function ContextMenuProvider({
         ? menuState?.target.runningTerminalId
         : undefined
     if (runningTerminalId) {
-      dispatch(addTab({
+      dispatch(createTabWithPane({
         title: session.title || session.sessionId.slice(0, 8),
-        terminalId: runningTerminalId,
-        status: 'running',
-        mode,
-        codingCliProvider: mode,
-        resumeSessionId: session.sessionId,
-        forceNew: true,
+        content: {
+          kind: 'terminal',
+          mode,
+          resumeSessionId: session.sessionId,
+          terminalId: runningTerminalId,
+          status: 'running',
+          initialCwd: session.cwd,
+        },
       }))
       return
     }
-    dispatch(addTab({
+    dispatch(createTabWithPane({
       title: session.title || session.sessionId.slice(0, 8),
-      mode,
-      codingCliProvider: mode,
-      initialCwd: session.cwd,
-      resumeSessionId: session.sessionId,
-      forceNew: true,
+      content: {
+        kind: 'terminal',
+        mode,
+        resumeSessionId: session.sessionId,
+        status: 'creating',
+        initialCwd: session.cwd,
+      },
     }))
   }, [dispatch, getSessionInfo, menuState?.target])
 
@@ -277,20 +311,27 @@ export function ContextMenuProvider({
         : undefined
     const layout = panes[activeTabId]
     if (layout) {
-      const terminalIds = collectTerminalIds(layout)
-      terminalIds.forEach((terminalId) => ws.send({ type: 'terminal.detach', terminalId }))
+      const terminalPanes = collectTerminalPanes(layout)
+      terminalPanes.forEach((terminal) => {
+        if (terminal.content.terminalId) {
+          ws.send({ type: 'terminal.detach', terminalId: terminal.content.terminalId })
+        }
+      })
+      const sessionPanes = collectSessionPanes(layout)
+      sessionPanes.forEach((sessionPane) => {
+        const sessionId = sessionPane.content.sessionId
+        if (pendingRequests[sessionId]) {
+          dispatch(cancelCodingCliRequest({ requestId: sessionId }))
+        } else {
+          ws.send({ type: 'codingcli.kill', sessionId })
+        }
+      })
     }
     dispatch(updateTab({
       id: activeTabId,
       updates: {
         title: session.title || session.sessionId.slice(0, 8),
-        mode,
-        codingCliProvider: mode,
-        codingCliSessionId: undefined,
-        claudeSessionId: undefined,
-        resumeSessionId: session.sessionId,
-        terminalId: runningTerminalId,
-        status: runningTerminalId ? 'running' : 'creating',
+        titleSetByUser: false,
       },
     }))
     dispatch(resetLayout({
@@ -304,7 +345,7 @@ export function ContextMenuProvider({
         status: runningTerminalId ? 'running' : 'creating',
       },
     }))
-  }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, ws])
+  }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, ws, pendingRequests])
 
   const renameSession = useCallback(async (sessionId: string, provider?: string, withSummary?: boolean) => {
     const info = getSessionInfo(sessionId, provider)
@@ -403,13 +444,21 @@ export function ContextMenuProvider({
     if (!info) return
     const { session, project } = info
     const keyProvider = (provider || session.provider || 'claude')
-    const relatedTabs = tabsState.tabs.filter(
-      (t) =>
-        t.resumeSessionId === sessionId &&
-        (t.codingCliProvider || t.mode || 'claude') === keyProvider
-    )
-    const hasTab = relatedTabs.length > 0
-    const tabLastInputAt = relatedTabs.reduce((max, tab) => Math.max(max, tab.lastInputAt ?? 0), 0) || undefined
+    const relatedPanes: Array<{ tabId: string; paneId: string }> = []
+    for (const [tabId, layout] of Object.entries(panes)) {
+      const terminalPanes = collectTerminalPanes(layout)
+      for (const terminal of terminalPanes) {
+        if (
+          terminal.content.resumeSessionId === sessionId &&
+          terminal.content.mode === keyProvider
+        ) {
+          relatedPanes.push({ tabId, paneId: terminal.paneId })
+        }
+      }
+    }
+    const hasTab = relatedPanes.length > 0
+    const activityKey = `${keyProvider}:${sessionId}`
+    const tabLastInputAt = sessionActivity?.[activityKey]
     const runningTerminalId =
       menuState?.target.kind === 'sidebar-session' && menuState?.target.sessionId === sessionId
         ? menuState?.target.runningTerminalId
@@ -437,7 +486,7 @@ export function ContextMenuProvider({
       projectColor: project.color,
     }
     await copyText(JSON.stringify(metadata, null, 2))
-  }, [getSessionInfo, tabsState.tabs, menuState?.target])
+  }, [getSessionInfo, panes, sessionActivity, menuState?.target])
 
   const setProjectColor = useCallback(async (projectPath: string) => {
     const next = window.prompt('Project color (hex)', '#6b7280')
@@ -464,12 +513,16 @@ export function ContextMenuProvider({
         const project = sessions.find((p) => p.projectPath === projectPath)
         if (project) {
           for (const session of project.sessions) {
-            dispatch(addTab({
+            const mode = (session.provider || 'claude') as CodingCliProviderName
+            dispatch(createTabWithPane({
               title: session.title || session.sessionId.slice(0, 8),
-              mode: 'claude',
-              initialCwd: session.cwd,
-              resumeSessionId: session.sessionId,
-              forceNew: true,
+              content: {
+                kind: 'terminal',
+                mode,
+                resumeSessionId: session.sessionId,
+                status: 'creating',
+                initialCwd: session.cwd,
+              },
             }))
           }
         }
@@ -483,13 +536,44 @@ export function ContextMenuProvider({
   }, [])
 
   const openTerminal = useCallback((terminalId: string) => {
-    const existing = tabsState.tabs.find((t) => t.terminalId === terminalId)
+    const existing = findPaneByTerminalId(panes, terminalId)
     if (existing) {
-      dispatch(setActiveTab(existing.id))
+      dispatch(setActiveTab(existing.tabId))
       return
     }
-    dispatch(addTab({ terminalId, status: 'running', mode: 'shell' }))
-  }, [dispatch, tabsState.tabs])
+    void (async () => {
+      let mode: 'shell' | CodingCliProviderName = 'shell'
+      let resumeSessionId: string | undefined
+      let status: 'running' | 'exited' = 'running'
+      let initialCwd: string | undefined
+      try {
+        const terminals = await api.get<Array<{ terminalId: string; mode?: string; resumeSessionId?: string; status?: 'running' | 'exited'; cwd?: string }>>('/api/terminals')
+        const term = terminals.find((t) => t.terminalId === terminalId)
+        if (term) {
+          if (term.mode === 'claude' || term.mode === 'codex' || term.mode === 'opencode' || term.mode === 'gemini' || term.mode === 'kimi') {
+            mode = term.mode
+          } else {
+            mode = 'shell'
+          }
+          resumeSessionId = term.resumeSessionId
+          status = term.status || 'running'
+          initialCwd = term.cwd
+        }
+      } catch {
+        // ignore, fall back to defaults
+      }
+      dispatch(createTabWithPane({
+        content: {
+          kind: 'terminal',
+          mode,
+          terminalId,
+          resumeSessionId,
+          status,
+          initialCwd,
+        },
+      }))
+    })()
+  }, [dispatch, panes])
 
   const renameTerminal = useCallback(async (terminalId: string) => {
     let currentTitle = ''
@@ -513,14 +597,20 @@ export function ContextMenuProvider({
         titleOverride: title || undefined,
         descriptionOverride: description || undefined,
       })
-      const existing = tabsState.tabs.find((t) => t.terminalId === terminalId)
-      if (existing && title) {
-        dispatch(updateTab({ id: existing.id, updates: { title } }))
+      if (title) {
+        for (const [tabId, layout] of Object.entries(panes)) {
+          const terminalPanes = collectTerminalPanes(layout)
+          for (const terminal of terminalPanes) {
+            if (terminal.content.terminalId === terminalId) {
+              dispatch(updatePaneTitle({ tabId, paneId: terminal.paneId, title, setByUser: true }))
+            }
+          }
+        }
       }
     } catch {
       // ignore
     }
-  }, [dispatch, tabsState.tabs])
+  }, [dispatch, panes])
 
   const generateTerminalSummary = useCallback(async (terminalId: string) => {
     try {
@@ -698,7 +788,7 @@ export function ContextMenuProvider({
         renamePane,
         resetSplit: (tabId, splitId) => dispatch(resetSplit({ tabId, splitId })),
         swapSplit: (tabId, splitId) => dispatch(swapSplit({ tabId, splitId })),
-        closePane: (tabId, paneId) => dispatch(closePane({ tabId, paneId })),
+        closePane: closePaneById,
         getTerminalActions: getTerminalActions,
         getEditorActions: getEditorActions,
         getBrowserActions: getBrowserActions,
@@ -745,6 +835,7 @@ export function ContextMenuProvider({
     closeTabsToRight,
     moveTab,
     renamePane,
+    closePaneById,
     dispatch,
     openSessionInNewTab,
     openSessionInThisTab,

@@ -11,6 +11,12 @@ export function derivePaneTitle(content: PaneContent): string {
     return 'New Tab'
   }
 
+  if (content.kind === 'session') {
+    if (content.title) return content.title
+    if (content.provider) return getProviderLabel(content.provider)
+    return 'Session'
+  }
+
   if (content.kind === 'browser') {
     if (!content.url) return 'Browser'
     try {
@@ -19,6 +25,13 @@ export function derivePaneTitle(content: PaneContent): string {
     } catch {
       return 'Browser'
     }
+  }
+
+  if (content.kind === 'editor') {
+    if (!content.filePath) return 'Editor'
+    const normalized = content.filePath.replace(/\\/g, '/')
+    const segments = normalized.split('/')
+    return segments[segments.length - 1] || 'Editor'
   }
 
   // Terminal content

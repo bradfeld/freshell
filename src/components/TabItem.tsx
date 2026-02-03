@@ -1,11 +1,11 @@
 import { X, Circle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import type { Tab } from '@/store/types'
+import type { Tab, TerminalStatus } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
-function StatusIndicator({ status, isWorking }: { status: string; isWorking: boolean }) {
+function StatusIndicator({ status, isWorking }: { status: TerminalStatus; isWorking: boolean }) {
   // Working state: pulsing grey (terminal is streaming)
   if (isWorking) {
     return <Circle className="h-2 w-2 fill-muted-foreground text-muted-foreground animate-pulse" />
@@ -26,6 +26,7 @@ function StatusIndicator({ status, isWorking }: { status: string; isWorking: boo
 
 export interface TabItemProps {
   tab: Tab
+  status: TerminalStatus
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
@@ -42,6 +43,7 @@ export interface TabItemProps {
 
 export default function TabItem({
   tab,
+  status,
   isActive,
   isDragging,
   isRenaming,
@@ -71,7 +73,7 @@ export default function TabItem({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <StatusIndicator status={tab.status} isWorking={isWorking} />
+      <StatusIndicator status={status} isWorking={isWorking} />
 
       {isRenaming ? (
         <input

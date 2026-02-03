@@ -4,6 +4,7 @@ import { initLayout, addPane } from '@/store/panesSlice'
 import type { PaneContentInput } from '@/store/paneTypes'
 import PaneContainer from './PaneContainer'
 import FloatingActionButton from './FloatingActionButton'
+import { buildDefaultPaneContent } from '@/lib/default-pane'
 
 interface PaneLayoutProps {
   tabId: string
@@ -14,17 +15,12 @@ interface PaneLayoutProps {
 export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayoutProps) {
   const dispatch = useAppDispatch()
   const layout = useAppSelector((s) => s.panes.layouts[tabId])
+  const settings = useAppSelector((s) => s.settings.settings)
   const containerRef = useRef<HTMLDivElement>(null)
-
-  // Debug: check what's in the store
-  const allLayouts = useAppSelector((s) => s.panes.layouts)
 
   // Initialize layout if not exists
   useEffect(() => {
     if (!layout) {
-      // Only log when actually creating a new layout
-      console.log('[PaneLayout] Creating new layout for tabId:', tabId)
-      console.log('[PaneLayout] Available layout keys:', Object.keys(allLayouts))
       dispatch(initLayout({ tabId, content: defaultContent }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -33,9 +29,9 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
   const handleAddPane = useCallback(() => {
     dispatch(addPane({
       tabId,
-      newContent: { kind: 'picker' },
+      newContent: buildDefaultPaneContent(settings),
     }))
-  }, [dispatch, tabId])
+  }, [dispatch, tabId, settings])
 
   if (!layout) {
     return <div className="h-full w-full" /> // Loading state

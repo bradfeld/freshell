@@ -106,17 +106,16 @@ describe('TerminalView resumeSessionId', () => {
         tabs: {
           tabs: [{
             id: tabId,
-            mode: 'claude',
-            status: 'running',
             title: 'Claude',
-            titleSetByUser: false,
-            createRequestId: 'req-1',
+            createdAt: Date.now(),
           }],
           activeTabId: tabId,
         },
         panes: {
           layouts: { [tabId]: root },
           activePane: { [tabId]: paneId },
+          paneTitles: {},
+          paneTitleSetByUser: {},
         },
         settings: { settings: defaultSettings, status: 'loaded' },
         connection: { status: 'connected', error: null },

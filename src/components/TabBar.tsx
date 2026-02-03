@@ -1,12 +1,12 @@
 import { Plus } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, closeTab, setActiveTab, updateTab, reorderTabs } from '@/store/tabsSlice'
-import { getWsClient } from '@/lib/ws-client'
+import { setActiveTab, updateTab, reorderTabs } from '@/store/tabsSlice'
+import { closeTabWithCleanup, createTabWithPane } from '@/store/tabThunks'
 import { getTabDisplayTitle } from '@/lib/tab-title'
+import { collectTerminalPanes, collectSessionPanes, deriveTabStatus } from '@/lib/pane-utils'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import TabItem from './TabItem'
 import { useTerminalActivityMonitor } from '@/hooks/useTerminalActivityMonitor'
-import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import {
   DndContext,
   closestCenter,
@@ -26,11 +26,13 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Tab } from '@/store/types'
+import type { Tab, TerminalStatus } from '@/store/types'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
+import { buildDefaultPaneContent } from '@/lib/default-pane'
 
 interface SortableTabProps {
   tab: Tab
+  status: TerminalStatus
   displayTitle: string
   isActive: boolean
   isDragging: boolean
@@ -48,6 +50,7 @@ interface SortableTabProps {
 
 function SortableTab({
   tab,
+  status,
   displayTitle,
   isActive,
   isDragging,
@@ -85,6 +88,7 @@ function SortableTab({
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       <TabItem
         tab={tabWithDisplayTitle}
+        status={status}
         isActive={isActive}
         isDragging={isDragging}
         isRenaming={isRenaming}
@@ -104,13 +108,18 @@ function SortableTab({
 
 // Stable empty object to avoid creating new references
 const EMPTY_LAYOUTS: Record<string, never> = {}
+const EMPTY_PANE_TITLES: Record<string, Record<string, string>> = {}
+const EMPTY_ACTIVE_PANES: Record<string, string> = {}
 
 export default function TabBar() {
   const dispatch = useAppDispatch()
   const { tabs, activeTabId } = useAppSelector((s) => s.tabs)
   const paneLayouts = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
-
-  const ws = useMemo(() => getWsClient(), [])
+  const paneTitles = useAppSelector((s) => s.panes?.paneTitles) ?? EMPTY_PANE_TITLES
+  const activePanes = useAppSelector((s) => s.panes?.activePane) ?? EMPTY_ACTIVE_PANES
+  const pendingRequests = useAppSelector((s) => s.codingCli.pendingRequests)
+  const codingCliSessions = useAppSelector((s) => s.codingCli.sessions)
+  const settings = useAppSelector((s) => s.settings.settings)
 
   // Monitor terminal activity for working/ready indicators
   const { tabActivityStates } = useTerminalActivityMonitor()
@@ -118,9 +127,46 @@ export default function TabBar() {
   // Compute display title for a single tab
   // Priority: user-set title > programmatically-set title (e.g., from Claude) > derived name
   const getDisplayTitle = useCallback(
-    (tab: Tab): string => getTabDisplayTitle(tab, paneLayouts[tab.id]),
-    [paneLayouts]
+    (tab: Tab): string =>
+      getTabDisplayTitle(tab, paneLayouts[tab.id], paneTitles[tab.id], activePanes[tab.id]),
+    [paneLayouts, paneTitles, activePanes]
   )
+
+  const getTabStatus = useCallback((tabId: string): TerminalStatus => {
+    const layout = paneLayouts[tabId]
+    if (!layout) return 'creating'
+
+    const terminalPanes = collectTerminalPanes(layout)
+    if (terminalPanes.length > 0) {
+      return deriveTabStatus(layout)
+    }
+
+    const sessionPanes = collectSessionPanes(layout)
+    if (sessionPanes.length === 0) return 'running'
+
+    let hasRunning = false
+    let hasCreating = false
+    let hasError = false
+    let hasExited = false
+
+    for (const session of sessionPanes) {
+      const sessionId = session.content.sessionId
+      if (pendingRequests[sessionId]) {
+        hasCreating = true
+        continue
+      }
+      const status = codingCliSessions[sessionId]?.status
+      if (status === 'running') hasRunning = true
+      else if (status === 'error') hasError = true
+      else if (status === 'completed') hasExited = true
+    }
+
+    if (hasRunning) return 'running'
+    if (hasCreating) return 'creating'
+    if (hasError) return 'error'
+    if (hasExited) return 'exited'
+    return 'running'
+  }, [paneLayouts, pendingRequests, codingCliSessions])
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -192,10 +238,12 @@ export default function TabBar() {
           <div className="flex items-end gap-0.5 overflow-x-auto flex-1">
             {tabs.map((tab: Tab) => {
               const activityState = tabActivityStates[tab.id] ?? { isFinished: false }
+              const status = getTabStatus(tab.id)
               return (
               <SortableTab
                 key={tab.id}
                 tab={tab}
+                status={status}
                 displayTitle={getDisplayTitle(tab)}
                 isActive={tab.id === activeTabId}
                 isDragging={activeId === tab.id}
@@ -220,22 +268,7 @@ export default function TabBar() {
                   }
                 }}
                 onClose={(e) => {
-                  if (tab.terminalId) {
-                    ws.send({
-                      type: e.shiftKey ? 'terminal.kill' : 'terminal.detach',
-                      terminalId: tab.terminalId,
-                    })
-                  } else if (tab.codingCliSessionId) {
-                    if (tab.status === 'creating') {
-                      dispatch(cancelCodingCliRequest({ requestId: tab.codingCliSessionId }))
-                    } else {
-                      ws.send({
-                        type: 'codingcli.kill',
-                        sessionId: tab.codingCliSessionId,
-                      })
-                    }
-                  }
-                  dispatch(closeTab(tab.id))
+                  dispatch(closeTabWithCleanup({ tabId: tab.id, killTerminals: e.shiftKey }))
                 }}
                 onClick={() => dispatch(setActiveTab(tab.id))}
                 onDoubleClick={() => {
@@ -247,8 +280,8 @@ export default function TabBar() {
             })}
             <button
               className="flex-shrink-0 ml-1 mb-1 p-1 rounded-md border border-dashed border-muted-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground/50 hover:bg-muted/30 transition-colors"
-              title="New shell tab"
-              onClick={() => dispatch(addTab({ mode: 'shell' }))}
+              title="New tab"
+              onClick={() => dispatch(createTabWithPane({ content: buildDefaultPaneContent(settings) }))}
               data-context={ContextIds.TabAdd}
             >
               <Plus className="h-3.5 w-3.5" />
@@ -268,6 +301,7 @@ export default function TabBar() {
             >
               <TabItem
                 tab={{ ...activeTab, title: getDisplayTitle(activeTab) }}
+                status={getTabStatus(activeTab.id)}
                 isActive={activeTab.id === activeTabId}
                 isDragging={false}
                 isRenaming={false}

@@ -8,6 +8,8 @@ import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import sessionActivityReducer from '@/store/sessionActivitySlice'
+import panesReducer from '@/store/panesSlice'
+import type { PanesState } from '@/store/panesSlice'
 import type { ProjectGroup, BackgroundTerminal } from '@/store/types'
 
 // Mock react-window's List component
@@ -63,11 +65,15 @@ function createTestStore(options?: {
   terminals?: BackgroundTerminal[]
   tabs?: Array<{
     id: string
+    title?: string
+    createdAt?: number
+    titleSetByUser?: boolean
     terminalId?: string
     resumeSessionId?: string
     mode?: string
     lastInputAt?: number
   }>
+  panes?: Partial<PanesState>
   activeTabId?: string
   sortMode?: 'recency' | 'activity' | 'project'
   showProjectBadges?: boolean
@@ -81,6 +87,62 @@ function createTestStore(options?: {
     })),
   }))
 
+  const tabsInput = options?.tabs ?? []
+  const tabs = tabsInput.map((tab) => ({
+    id: tab.id,
+    title: tab.title ?? 'Tab',
+    createdAt: tab.createdAt ?? Date.now(),
+    titleSetByUser: tab.titleSetByUser,
+  }))
+
+  const derivedLayouts: Record<string, any> = {}
+  const derivedActivePane: Record<string, string> = {}
+  const derivedSessionActivity: Record<string, number> = {}
+
+  for (const tab of tabsInput) {
+    if (!tab.resumeSessionId) continue
+    const mode = (tab.mode || 'claude') as 'claude' | 'codex'
+    const paneId = `pane-${tab.id}`
+    derivedLayouts[tab.id] = {
+      type: 'leaf',
+      id: paneId,
+      content: {
+        kind: 'terminal',
+        createRequestId: `req-${tab.id}`,
+        status: 'running',
+        mode,
+        terminalId: tab.terminalId,
+        resumeSessionId: tab.resumeSessionId,
+      },
+    }
+    derivedActivePane[tab.id] = paneId
+    if (typeof tab.lastInputAt === 'number') {
+      derivedSessionActivity[`${mode}:${tab.resumeSessionId}`] = tab.lastInputAt
+    }
+  }
+
+  const panesState = {
+    layouts: {
+      ...derivedLayouts,
+      ...(options?.panes?.layouts ?? {}),
+    },
+    activePane: {
+      ...derivedActivePane,
+      ...(options?.panes?.activePane ?? {}),
+    },
+    paneTitles: {
+      ...(options?.panes?.paneTitles ?? {}),
+    },
+    paneTitleSetByUser: {
+      ...(options?.panes?.paneTitleSetByUser ?? {}),
+    },
+  }
+
+  const sessionActivity = {
+    ...derivedSessionActivity,
+    ...(options?.sessionActivity ?? {}),
+  }
+
   return configureStore({
     reducer: {
       settings: settingsReducer,
@@ -88,6 +150,7 @@ function createTestStore(options?: {
       connection: connectionReducer,
       sessions: sessionsReducer,
       sessionActivity: sessionActivityReducer,
+      panes: panesReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -109,9 +172,10 @@ function createTestStore(options?: {
         lastSavedAt: undefined,
       },
       tabs: {
-        tabs: options?.tabs ?? [],
+        tabs,
         activeTabId: options?.activeTabId ?? null,
       },
+      panes: panesState,
       sessions: {
         projects,
         expandedProjects: new Set<string>(),
@@ -123,7 +187,7 @@ function createTestStore(options?: {
         error: null,
       },
       sessionActivity: {
-        sessions: options?.sessionActivity ?? {},
+        sessions: sessionActivity,
       },
     },
   })
@@ -415,13 +479,29 @@ describe('Sidebar Component - Session-Centric Display', () => {
       const tabs = [
         {
           id: 'tab-1',
-          resumeSessionId: 'session-with-tab',
-          mode: 'claude',
-          lastInputAt: now - 5000,
+          title: 'Tab 1',
+          createdAt: now,
         },
       ]
+      const panes = {
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: 'pane-1',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-1',
+              status: 'running',
+              mode: 'claude',
+              resumeSessionId: 'session-with-tab',
+            },
+          },
+        },
+        activePane: { 'tab-1': 'pane-1' },
+      }
+      const sessionActivity = { 'claude:session-with-tab': now - 5000 }
 
-      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      const store = createTestStore({ projects, tabs, panes, sortMode: 'activity', sessionActivity })
       renderSidebar(store, [])
 
       await act(async () => {
@@ -461,21 +541,42 @@ describe('Sidebar Component - Session-Centric Display', () => {
       ]
 
       const tabs = [
-        {
-          id: 'tab-1',
-          resumeSessionId: 'session-old-input',
-          mode: 'claude',
-          lastInputAt: now - 60000,
-        },
-        {
-          id: 'tab-2',
-          resumeSessionId: 'session-recent-input',
-          mode: 'claude',
-          lastInputAt: now - 1000,
-        },
+        { id: 'tab-1', title: 'Tab 1', createdAt: now },
+        { id: 'tab-2', title: 'Tab 2', createdAt: now },
       ]
+      const panes = {
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: 'pane-1',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-1',
+              status: 'running',
+              mode: 'claude',
+              resumeSessionId: 'session-old-input',
+            },
+          },
+          'tab-2': {
+            type: 'leaf',
+            id: 'pane-2',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-2',
+              status: 'running',
+              mode: 'claude',
+              resumeSessionId: 'session-recent-input',
+            },
+          },
+        },
+        activePane: { 'tab-1': 'pane-1', 'tab-2': 'pane-2' },
+      }
+      const sessionActivity = {
+        'claude:session-old-input': now - 60000,
+        'claude:session-recent-input': now - 1000,
+      }
 
-      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      const store = createTestStore({ projects, tabs, panes, sortMode: 'activity', sessionActivity })
       renderSidebar(store, [])
 
       await act(async () => {
@@ -515,20 +616,41 @@ describe('Sidebar Component - Session-Centric Display', () => {
       ]
 
       const tabs = [
-        {
-          id: 'tab-1',
-          resumeSessionId: 'session-with-input',
-          mode: 'claude',
-          lastInputAt: now - 30000,
-        },
-        {
-          id: 'tab-2',
-          resumeSessionId: 'session-no-input',
-          mode: 'claude',
-        },
+        { id: 'tab-1', title: 'Tab 1', createdAt: now },
+        { id: 'tab-2', title: 'Tab 2', createdAt: now },
       ]
+      const panes = {
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: 'pane-1',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-1',
+              status: 'running',
+              mode: 'claude',
+              resumeSessionId: 'session-with-input',
+            },
+          },
+          'tab-2': {
+            type: 'leaf',
+            id: 'pane-2',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-2',
+              status: 'running',
+              mode: 'claude',
+              resumeSessionId: 'session-no-input',
+            },
+          },
+        },
+        activePane: { 'tab-1': 'pane-1', 'tab-2': 'pane-2' },
+      }
+      const sessionActivity = {
+        'claude:session-with-input': now - 30000,
+      }
 
-      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      const store = createTestStore({ projects, tabs, panes, sortMode: 'activity', sessionActivity })
       renderSidebar(store, [])
 
       await act(async () => {
@@ -618,12 +740,29 @@ describe('Sidebar Component - Session-Centric Display', () => {
       const tabs = [
         {
           id: 'tab-1',
-          resumeSessionId: 'session-with-tab',
-          mode: 'claude',
+          title: 'Tab 1',
+          createdAt: now,
         },
       ]
 
-      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      const panes = {
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: 'pane-1',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-1',
+              status: 'running',
+              mode: 'claude',
+              resumeSessionId: 'session-with-tab',
+            },
+          },
+        },
+        activePane: { 'tab-1': 'pane-1' },
+      }
+
+      const store = createTestStore({ projects, tabs, panes, sortMode: 'activity' })
       renderSidebar(store, [])
 
       await act(async () => {
@@ -997,8 +1136,14 @@ describe('Sidebar Component - Session-Centric Display', () => {
       // Check store has new tab with resumeSessionId
       const state = store.getState()
       expect(state.tabs.tabs).toHaveLength(1)
-      expect(state.tabs.tabs[0].resumeSessionId).toBe('session-to-resume')
-      expect(state.tabs.tabs[0].mode).toBe('claude')
+      const newTabId = state.tabs.tabs[0].id
+      const layout = state.panes.layouts[newTabId]
+      expect(layout).toBeDefined()
+      expect(layout.type).toBe('leaf')
+      if (layout.type === 'leaf' && layout.content.kind === 'terminal') {
+        expect(layout.content.resumeSessionId).toBe('session-to-resume')
+        expect(layout.content.mode).toBe('claude')
+      }
     })
 
     it('switches to existing tab when clicking non-running session that is already open', async () => {
@@ -1160,9 +1305,15 @@ describe('Sidebar Component - Session-Centric Display', () => {
       // Should create a new tab with the terminalId to attach
       const state = store.getState()
       expect(state.tabs.tabs).toHaveLength(1)
-      expect(state.tabs.tabs[0].terminalId).toBe('orphan-terminal-id')
-      expect(state.tabs.tabs[0].resumeSessionId).toBe('session-running-no-tab')
-      expect(state.tabs.tabs[0].mode).toBe('claude')
+      const newTabId = state.tabs.tabs[0].id
+      const layout = state.panes.layouts[newTabId]
+      expect(layout).toBeDefined()
+      expect(layout.type).toBe('leaf')
+      if (layout.type === 'leaf' && layout.content.kind === 'terminal') {
+        expect(layout.content.terminalId).toBe('orphan-terminal-id')
+        expect(layout.content.resumeSessionId).toBe('session-running-no-tab')
+        expect(layout.content.mode).toBe('claude')
+      }
     })
   })
 
