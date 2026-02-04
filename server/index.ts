@@ -30,6 +30,7 @@ import { createStartupState } from './startup-state.js'
 import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, startPerfTimer, withPerfSpan } from './perf-logger.js'
 import { detectPlatform, detectAvailableClis } from './platform.js'
 import { resolveVisitPort } from './startup-url.js'
+import { PortForwardManager } from './port-forward.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -478,6 +479,35 @@ async function main() {
   // --- API: files (for editor pane) ---
   app.use('/api/files', filesRouter)
 
+  // --- API: port forwarding (for browser pane remote access) ---
+  const portForwardManager = new PortForwardManager()
+
+  app.post('/api/proxy/forward', async (req, res) => {
+    const { port: targetPort } = req.body || {}
+
+    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+      return res.status(400).json({ error: 'Invalid port number' })
+    }
+
+    try {
+      const result = await portForwardManager.forward(targetPort)
+      res.json({ forwardedPort: result.port })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error({ err, targetPort }, 'Port forward failed')
+      res.status(500).json({ error: `Failed to create port forward: ${msg}` })
+    }
+  })
+
+  app.delete('/api/proxy/forward/:port', (req, res) => {
+    const targetPort = parseInt(req.params.port, 10)
+    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+      return res.status(400).json({ error: 'Invalid port number' })
+    }
+    portForwardManager.close(targetPort)
+    res.json({ ok: true })
+  })
+
   // --- Static client in production ---
   const distRoot = path.resolve(__dirname, '..')
   const clientDir = path.join(distRoot, 'client')
@@ -642,14 +672,17 @@ async function main() {
     // 4. Close WebSocket connections gracefully
     wsHandler.close()
 
-    // 5. Stop session indexers
+    // 5. Close port forwards
+    portForwardManager.closeAll()
+
+    // 6. Stop session indexers
     codingCliIndexer.stop()
     claudeIndexer.stop()
 
-    // 6. Stop session repair service
+    // 7. Stop session repair service
     await sessionRepairService.stop()
 
-    // 7. Exit cleanly
+    // 8. Exit cleanly
     log.info('Shutdown complete')
     process.exit(0)
   }
