@@ -4,9 +4,59 @@ import { nanoid } from 'nanoid'
 
 const STORAGE_KEY = 'freshell.tabs.v1'
 const PANES_STORAGE_KEY = 'freshell.panes.v1'
+export const PERSIST_DEBOUNCE_MS = 500
 
 // Current panes schema version
-const PANES_SCHEMA_VERSION = 2
+const PANES_SCHEMA_VERSION = 3
+
+const flushCallbacks = new Set<() => void>()
+let flushListenersAttached = false
+
+function notifyFlushCallbacks() {
+  for (const cb of flushCallbacks) {
+    try {
+      cb()
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function attachFlushListeners() {
+  if (flushListenersAttached) return
+  if (typeof document === 'undefined' || typeof window === 'undefined') return
+
+  const handleVisibility = () => {
+    if (document.visibilityState === 'hidden') {
+      notifyFlushCallbacks()
+    }
+  }
+  const handlePageHide = () => {
+    notifyFlushCallbacks()
+  }
+
+  document.addEventListener('visibilitychange', handleVisibility)
+  window.addEventListener('pagehide', handlePageHide)
+  window.addEventListener('beforeunload', handlePageHide)
+
+  flushListenersAttached = true
+}
+
+function registerFlushCallback(cb: () => void) {
+  flushCallbacks.add(cb)
+  attachFlushListeners()
+}
+
+function stripTabVolatileFields(tab: RootState['tabs']['tabs'][number]) {
+  return {
+    ...tab,
+    lastInputAt: undefined,
+  }
+}
+
+export function resetPersistFlushListenersForTests() {
+  flushCallbacks.clear()
+}
 
 export function loadPersistedTabs(): any | null {
   try {
@@ -24,6 +74,9 @@ export function loadPersistedTabs(): any | null {
  * Only runs if content is missing required fields.
  */
 function migratePaneContent(content: any): any {
+  if (!content || typeof content !== 'object') {
+    return content
+  }
   if (content.kind !== 'terminal') {
     return content
   }
@@ -42,6 +95,43 @@ function migratePaneContent(content: any): any {
   }
 }
 
+function stripEditorContent(content: any): any {
+  if (content?.kind !== 'editor') return content
+  if (content.content === '') return content
+  return {
+    ...content,
+    content: '',
+  }
+}
+
+function stripEditorContentFromNode(node: any): any {
+  if (!node) return node
+
+  if (node.type === 'leaf') {
+    const nextContent = stripEditorContent(node.content)
+    if (nextContent === node.content) return node
+    return {
+      ...node,
+      content: nextContent,
+    }
+  }
+
+  if (node.type === 'split') {
+    if (!Array.isArray(node.children) || node.children.length < 2) {
+      return node
+    }
+    const left = stripEditorContentFromNode(node.children[0])
+    const right = stripEditorContentFromNode(node.children[1])
+    if (left === node.children[0] && right === node.children[1]) return node
+    return {
+      ...node,
+      children: [left, right],
+    }
+  }
+
+  return node
+}
+
 /**
  * Recursively migrate all pane nodes in a tree.
  */
@@ -56,6 +146,9 @@ function migrateNode(node: any): any {
   }
 
   if (node.type === 'split') {
+    if (!Array.isArray(node.children) || node.children.length < 2) {
+      return node
+    }
     return {
       ...node,
       children: [
@@ -77,19 +170,43 @@ export function loadPersistedPanes(): any | null {
     // Check if migration needed
     const currentVersion = parsed.version || 1
     if (currentVersion >= PANES_SCHEMA_VERSION) {
-      // Already up to date
-      return parsed
+      const sanitizedLayouts: Record<string, any> = {}
+      for (const [tabId, node] of Object.entries(parsed.layouts || {})) {
+        sanitizedLayouts[tabId] = stripEditorContentFromNode(node)
+      }
+      // Already up to date, but ensure paneTitles exists
+      return {
+        ...parsed,
+        layouts: sanitizedLayouts,
+        paneTitles: parsed.paneTitles || {},
+      }
     }
 
     // Run migrations
-    const migratedLayouts: Record<string, any> = {}
-    for (const [tabId, node] of Object.entries(parsed.layouts || {})) {
-      migratedLayouts[tabId] = migrateNode(node)
+    let layouts = parsed.layouts || {}
+    let paneTitles = parsed.paneTitles || {}
+
+    // Version 1 -> 2: migrate pane content to include lifecycle fields
+    if (currentVersion < 2) {
+      const migratedLayouts: Record<string, any> = {}
+      for (const [tabId, node] of Object.entries(layouts)) {
+        migratedLayouts[tabId] = migrateNode(node)
+      }
+      layouts = migratedLayouts
+    }
+
+    // Version 2 -> 3: add paneTitles (already defaulted to {} above)
+    // No additional migration needed, just ensure the field exists
+
+    const sanitizedLayouts: Record<string, any> = {}
+    for (const [tabId, node] of Object.entries(layouts)) {
+      sanitizedLayouts[tabId] = stripEditorContentFromNode(node)
     }
 
     return {
-      ...parsed,
-      layouts: migratedLayouts,
+      layouts: sanitizedLayouts,
+      activePane: parsed.activePane || {},
+      paneTitles,
       version: PANES_SCHEMA_VERSION,
     }
   } catch {
@@ -97,37 +214,90 @@ export function loadPersistedPanes(): any | null {
   }
 }
 
-export const persistMiddleware: Middleware<{}, RootState> = (store) => (next) => (action) => {
-  const result = next(action)
-  const state = store.getState()
+export const persistMiddleware: Middleware<{}, RootState> = (store) => {
+  let tabsDirty = false
+  let panesDirty = false
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Persist tabs slice
-  const tabsPayload = {
-    tabs: state.tabs,
-  }
+  const canUseStorage = () => typeof localStorage !== 'undefined'
 
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabsPayload))
-  } catch {
-    // ignore quota
-  }
+  const flush = () => {
+    flushTimer = null
+    if (!canUseStorage()) return
+    if (!tabsDirty && !panesDirty) return
 
-  // Persist panes slice with version
-  try {
-    const panesPayload = {
-      ...state.panes,
-      version: PANES_SCHEMA_VERSION,
+    const state = store.getState()
+
+    if (tabsDirty) {
+      const tabsPayload = {
+        tabs: {
+          ...state.tabs,
+          tabs: state.tabs.tabs.map(stripTabVolatileFields),
+        },
+      }
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(tabsPayload))
+      } catch {
+        // ignore quota
+      }
     }
-    const panesJson = JSON.stringify(panesPayload)
-    localStorage.setItem(PANES_STORAGE_KEY, panesJson)
-    // Debug: log when we persist a split pane
-    if (panesJson.includes('"type":"split"')) {
-      console.log('[Panes Persist] Saved split pane to localStorage')
-      console.log('[Panes Persist] Layout keys being saved:', Object.keys(state.panes.layouts))
+
+    if (panesDirty) {
+      try {
+        const sanitizedLayouts: Record<string, any> = {}
+        for (const [tabId, node] of Object.entries(state.panes.layouts)) {
+          sanitizedLayouts[tabId] = stripEditorContentFromNode(node)
+        }
+        const panesPayload = {
+          ...state.panes,
+          layouts: sanitizedLayouts,
+          version: PANES_SCHEMA_VERSION,
+        }
+        const panesJson = JSON.stringify(panesPayload)
+        localStorage.setItem(PANES_STORAGE_KEY, panesJson)
+      } catch (err) {
+        console.error('[Panes Persist] Failed to save to localStorage:', err)
+      }
     }
-  } catch (err) {
-    console.error('[Panes Persist] Failed to save to localStorage:', err)
+
+    tabsDirty = false
+    panesDirty = false
   }
 
-  return result
+  const scheduleFlush = () => {
+    if (flushTimer) return
+    flushTimer = setTimeout(flush, PERSIST_DEBOUNCE_MS)
+  }
+
+  const flushNow = () => {
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    flush()
+  }
+
+  registerFlushCallback(flushNow)
+
+  return (next) => (action) => {
+    const result = next(action)
+
+    if (action?.meta?.skipPersist) {
+      return result
+    }
+
+    if (typeof action?.type === 'string') {
+      if (action.type.startsWith('tabs/')) {
+        tabsDirty = true
+        scheduleFlush()
+      }
+      if (action.type.startsWith('panes/')) {
+        panesDirty = true
+        scheduleFlush()
+      }
+    }
+
+    return result
+  }
 }

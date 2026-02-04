@@ -1,6 +1,10 @@
 export type TerminalStatus = 'creating' | 'running' | 'exited' | 'error'
 
-export type TabMode = 'shell' | 'claude' | 'codex'
+export type CodingCliProviderName = 'claude' | 'codex' | 'opencode' | 'gemini' | 'kimi'
+
+// TabMode includes 'shell' for regular terminals, plus all coding CLI providers
+// This allows future providers (opencode, gemini, kimi) to work as tab modes
+export type TabMode = 'shell' | CodingCliProviderName
 
 /**
  * Shell type for terminal creation.
@@ -19,7 +23,9 @@ export interface Tab {
   title: string
   description?: string
   terminalId?: string          // For shell mode
-  claudeSessionId?: string     // For claude mode
+  codingCliSessionId?: string  // For coding CLI session view
+  codingCliProvider?: CodingCliProviderName
+  claudeSessionId?: string     // Legacy field (migrated to codingCliSessionId)
   status: TerminalStatus
   mode: TabMode
   shell?: ShellType
@@ -27,6 +33,7 @@ export interface Tab {
   resumeSessionId?: string
   createdAt: number
   titleSetByUser?: boolean     // If true, don't auto-update title
+  lastInputAt?: number
 }
 
 export interface BackgroundTerminal {
@@ -37,23 +44,27 @@ export interface BackgroundTerminal {
   cwd?: string
   status: 'running' | 'exited'
   hasClients: boolean
-  mode?: 'shell' | 'claude' | 'codex'
+  mode?: TabMode
   resumeSessionId?: string
 }
 
-export interface ClaudeSession {
+export interface CodingCliSession {
+  provider: CodingCliProviderName
   sessionId: string
   projectPath: string
+  createdAt?: number
   updatedAt: number
   messageCount?: number
   title?: string
   summary?: string
   cwd?: string
+  archived?: boolean
+  sourceFile?: string
 }
 
 export interface ProjectGroup {
   projectPath: string
-  sessions: ClaudeSession[]
+  sessions: CodingCliSession[]
   color?: string
 }
 
@@ -61,6 +72,8 @@ export interface SessionOverride {
   titleOverride?: string
   summaryOverride?: string
   deleted?: boolean
+  archived?: boolean
+  createdAtOverride?: number
 }
 
 export interface TerminalOverride {
@@ -69,7 +82,9 @@ export interface TerminalOverride {
   deleted?: boolean
 }
 
-export type SidebarSortMode = 'recency' | 'activity' | 'project' | 'hybrid'
+export type SidebarSortMode = 'recency' | 'recency-pinned' | 'activity' | 'project'
+
+export type DefaultNewPane = 'ask' | 'shell' | 'browser' | 'editor'
 
 export type TerminalTheme =
   | 'auto'           // Follow app theme (dark/light)
@@ -80,6 +95,20 @@ export type TerminalTheme =
   | 'one-light'
   | 'solarized-light'
   | 'github-light'
+
+export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+export type ClaudePermissionMode = 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions'
+
+export interface CodingCliSettings {
+  enabledProviders: CodingCliProviderName[]
+  providers: Partial<Record<CodingCliProviderName, {
+    model?: string
+    sandbox?: CodexSandboxMode
+    permissionMode?: ClaudePermissionMode
+    maxTurns?: number
+  }>>
+}
 
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark'
@@ -93,6 +122,9 @@ export interface AppSettings {
     theme: TerminalTheme
   }
   defaultCwd?: string
+  logging: {
+    debug: boolean
+  }
   safety: {
     autoKillIdleMinutes: number
     warnBeforeKillMinutes: number
@@ -102,5 +134,9 @@ export interface AppSettings {
     showProjectBadges: boolean
     width: number // pixels, default 288 (equivalent to w-72)
     collapsed: boolean // for mobile/responsive use
+  }
+  codingCli: CodingCliSettings
+  panes: {
+    defaultNewPane: DefaultNewPane
   }
 }

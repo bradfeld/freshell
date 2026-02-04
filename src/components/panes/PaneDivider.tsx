@@ -5,9 +5,19 @@ interface PaneDividerProps {
   direction: 'horizontal' | 'vertical'
   onResize: (delta: number) => void
   onResizeEnd: () => void
+  dataContext?: string
+  dataTabId?: string
+  dataSplitId?: string
 }
 
-export default function PaneDivider({ direction, onResize, onResizeEnd }: PaneDividerProps) {
+export default function PaneDivider({
+  direction,
+  onResize,
+  onResizeEnd,
+  dataContext,
+  dataTabId,
+  dataSplitId,
+}: PaneDividerProps) {
   const [isDragging, setIsDragging] = useState(false)
   const startPosRef = useRef(0)
 
@@ -72,6 +82,9 @@ export default function PaneDivider({ direction, onResize, onResizeEnd }: PaneDi
     <div
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
+      data-context={dataContext}
+      data-tab-id={dataTabId}
+      data-split-id={dataSplitId}
       className={cn(
         'flex-shrink-0 bg-border hover:bg-muted-foreground transition-colors touch-none',
         direction === 'horizontal'

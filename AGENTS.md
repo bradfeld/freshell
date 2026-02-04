@@ -13,6 +13,35 @@ Freshell is a self-hosted, browser-accessible terminal multiplexer and session o
 ## Repo Rules
 - Always check for an use applicable skills
 - Always work in a worktree (in \.worktrees\)
+- Specific user instructions override ALL other instructions, including the above, and including superpowers or skills
+- Server uses NodeNext/ESM; relative imports must include `.js` extensions
+- Always consider checking logs for debugging; server logs (including client console logs) are in the server process stdout/stderr (e.g., `npm run dev`/`npm start`).
+- Debug logging toggle (UI Settings → Debugging → Debug logging) enables debug-level logs and perf logging; keep OFF outside perf investigations.
+
+## Merging to Main (CRITICAL - Read This)
+
+**You are running inside Freshell right now. This session, the terminal you're typing in, is served by the main branch. If you break main, you kill yourself mid-operation and the user has to clean up your mess with a separate agent.**
+
+- Never run `git merge` directly on main - merge conflicts write `<<<<<<< HEAD` markers into source files, which crashes the server instantly
+- Always merge main INTO the feature branch in the worktree first, resolve any conflicts there
+- Then fast-forward main: `git merge --ff-only feature/branch` - this is atomic (pointer move, no intermediate states)
+- If `--ff-only` fails, go back to the worktree and rebase/merge until it can fast-forward
+
+## Releasing (Only When Explicitly Requested)
+
+**Never release without explicit user request.** Main can contain work-in-progress; users clone a specific release tag.
+
+**Sanity check first:** If something seems off (discontinuous version like 0.25→2.6, failing tests, broken code), confirm with the user before proceeding.
+
+Steps: ensure tests pass → bump `package.json` version → push main → tag and push (`git tag -a vX.Y.Z`) → create GitHub release (`gh release create`) → update README's `--branch` to new tag → commit and push.
+
+## Codex Agent in CMD Instructions (Codex agents only; only when running in CMD on windows; all other agents must ignore)
+- Prefer bash/WSL over PowerShell; Windows paths map like `D:\...` -> `/mnt/d/...`.
+- Use `bash -lc "<cmd>"` for non-interactive commands; avoid interactive shells so commands return control.
+- Apply_patch expects Windows-style paths.
+- If a bash command produces no visible output, rerun with `tty: true` to force output.
+- PowerShell may hang for dozens of seconds before starting in this tool; stick to bash unless explicitly required.
+- Don't make silly mistakes like installing Linux binaries in node_modules when we're on windows
 
 ## Commands
 
@@ -28,6 +57,7 @@ npm run dev:server          # Node with tsx watch for server auto-reload
 npm run build               # Full build (client + server)
 npm run build:client        # Vite build → dist/client
 npm run build:server        # TypeScript compile → dist/server
+npm run serve               # Build and run production server
 ```
 
 ### Testing

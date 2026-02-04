@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { configureStore } from '@reduxjs/toolkit'
 
 // Mock localStorage BEFORE importing slices
@@ -19,12 +19,23 @@ Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, wri
 // Now import slices - they'll see our mocked localStorage
 import tabsReducer, { hydrateTabs, addTab } from '../../../../src/store/tabsSlice'
 import panesReducer, { hydratePanes, initLayout, splitPane } from '../../../../src/store/panesSlice'
-import { loadPersistedPanes, loadPersistedTabs, persistMiddleware } from '../../../../src/store/persistMiddleware'
+import {
+  loadPersistedPanes,
+  loadPersistedTabs,
+  persistMiddleware,
+  resetPersistFlushListenersForTests,
+} from '../../../../src/store/persistMiddleware'
 
 describe('Panes Persistence Integration', () => {
   beforeEach(() => {
     localStorageMock.clear()
     vi.clearAllMocks()
+    vi.useFakeTimers()
+    resetPersistFlushListenersForTests()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('persists and restores panes across page refresh', () => {
@@ -59,6 +70,7 @@ describe('Panes Persistence Integration', () => {
     expect((layout1 as any).children).toHaveLength(2)
 
     // 6. Check localStorage was updated
+    vi.runAllTimers()
     const savedPanes = localStorage.getItem('freshell.panes.v1')
     expect(savedPanes).not.toBeNull()
     const parsedPanes = JSON.parse(savedPanes!)
@@ -66,6 +78,7 @@ describe('Panes Persistence Integration', () => {
 
     // 7. Simulate page refresh - create new store and hydrate
     // (Using explicit hydration to test that path still works)
+    vi.runAllTimers()
     const persistedTabs = loadPersistedTabs()
     const persistedPanes = loadPersistedPanes()
 
@@ -118,6 +131,7 @@ describe('Panes Persistence Integration', () => {
     }))
 
     // 2. Simulate refresh
+    vi.runAllTimers()
     const persistedTabs = loadPersistedTabs()
     const persistedPanes = loadPersistedPanes()
 
@@ -173,6 +187,7 @@ describe('Panes Persistence Integration', () => {
     }))
 
     // Verify state was persisted
+    vi.runAllTimers()
     const savedPanes = localStorage.getItem('freshell.panes.v1')
     expect(savedPanes).not.toBeNull()
     expect(JSON.parse(savedPanes!).layouts[tabId].type).toBe('split')
@@ -182,6 +197,61 @@ describe('Panes Persistence Integration', () => {
     expect(loaded).not.toBeNull()
     expect(loaded!.layouts[tabId]).toBeDefined()
     expect(loaded!.layouts[tabId].type).toBe('split')
+  })
+
+  it('strips editor content when persisting panes', () => {
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+      },
+      middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
+    })
+
+    store.dispatch(addTab({ mode: 'shell' }))
+    const tabId = store.getState().tabs.tabs[0].id
+
+    store.dispatch(initLayout({
+      tabId,
+      content: {
+        kind: 'editor',
+        filePath: null,
+        language: 'markdown',
+        readOnly: false,
+        content: 'Large editor buffer that should not be persisted',
+        viewMode: 'source',
+      },
+    }))
+
+    vi.runAllTimers()
+
+    const savedPanes = localStorage.getItem('freshell.panes.v1')
+    expect(savedPanes).not.toBeNull()
+    const parsedPanes = JSON.parse(savedPanes!)
+    const layout = parsedPanes.layouts[tabId]
+    expect(layout.content.kind).toBe('editor')
+    expect(layout.content.content).toBe('')
+  })
+
+  it('flushes pending writes on visibility change', () => {
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+      },
+      middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
+    })
+
+    store.dispatch(addTab({ mode: 'shell' }))
+    const tabId = store.getState().tabs.tabs[0].id
+    store.dispatch(initLayout({ tabId, content: { kind: 'terminal', mode: 'shell' } }))
+
+    expect(localStorage.getItem('freshell.panes.v1')).toBeNull()
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    expect(localStorage.getItem('freshell.panes.v1')).not.toBeNull()
   })
 })
 
@@ -212,7 +282,7 @@ describe('PaneContent migration', () => {
     expect(layout.content.createRequestId).toBeDefined()
     expect(layout.content.status).toBe('creating')
     expect(layout.content.shell).toBe('system')
-    expect(loaded.version).toBe(2) // Migrated version
+    expect(loaded.version).toBe(3) // Migrated version
   })
 
   it('migrates nested split panes recursively', () => {
@@ -285,5 +355,68 @@ describe('PaneContent migration', () => {
     expect(layout.content.kind).toBe('browser')
     expect(layout.content.url).toBe('https://example.com')
     expect(layout.content.devToolsOpen).toBe(true)
+  })
+
+  it('handles malformed pane content without crashing', () => {
+    const corruptedState = {
+      layouts: {
+        'tab-null': {
+          type: 'leaf',
+          id: 'pane-null',
+          content: null,
+        },
+        'tab-bad-split': {
+          type: 'split',
+          id: 'split1',
+          direction: 'horizontal',
+          sizes: [50, 50],
+          children: [],
+        },
+      },
+      activePane: { 'tab-null': 'pane-null' },
+    }
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify(corruptedState))
+
+    const loaded = loadPersistedPanes()
+
+    expect(loaded).not.toBeNull()
+    expect(loaded.layouts['tab-null']).toBeDefined()
+    expect(loaded.layouts['tab-bad-split']).toBeDefined()
+  })
+})
+
+describe('version 3 migration', () => {
+  beforeEach(() => {
+    localStorageMock.clear()
+  })
+
+  it('adds empty paneTitles when migrating from version 2', () => {
+    const v2State = {
+      version: 2,
+      layouts: { 'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } } },
+      activePane: { 'tab-1': 'pane-1' },
+      // No paneTitles field
+    }
+    localStorage.setItem('freshell.panes.v1', JSON.stringify(v2State))
+
+    const result = loadPersistedPanes()
+
+    expect(result.version).toBe(3)
+    expect(result.paneTitles).toEqual({})
+  })
+
+  it('preserves existing paneTitles when loading version 3', () => {
+    const v3State = {
+      version: 3,
+      layouts: {},
+      activePane: {},
+      paneTitles: { 'tab-1': { 'pane-1': 'My Title' } },
+    }
+    localStorage.setItem('freshell.panes.v1', JSON.stringify(v3State))
+
+    const result = loadPersistedPanes()
+
+    expect(result.paneTitles).toEqual({ 'tab-1': { 'pane-1': 'My Title' } })
   })
 })

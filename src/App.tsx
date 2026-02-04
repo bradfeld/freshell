@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { setStatus, setError } from '@/store/connectionSlice'
+import { setStatus, setError, setPlatform } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
-import { setProjects } from '@/store/sessionsSlice'
-import { addTab, removeTab } from '@/store/tabsSlice'
+import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
+import { addTab, removeTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
+import { getSessionsForHello } from '@/lib/session-utils'
+import { setClientPerfEnabled } from '@/lib/perf-logger'
+import { applyLocalTerminalFontFamily } from '@/lib/terminal-fonts'
+import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
@@ -15,6 +19,8 @@ import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
 import PaneDivider from '@/components/panes/PaneDivider'
+import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 
@@ -157,9 +163,16 @@ export default function App() {
     async function bootstrap() {
       try {
         const settings = await api.get('/api/settings')
-        if (!cancelled) dispatch(setSettings(settings))
+        if (!cancelled) dispatch(setSettings(applyLocalTerminalFontFamily(settings)))
       } catch (err: any) {
         console.warn('Failed to load settings', err)
+      }
+
+      try {
+        const platformInfo = await api.get<{ platform: string }>('/api/platform')
+        if (!cancelled) dispatch(setPlatform(platformInfo.platform))
+      } catch (err: any) {
+        console.warn('Failed to load platform info', err)
       }
 
       try {
@@ -170,6 +183,12 @@ export default function App() {
       }
 
       const ws = getWsClient()
+
+      // Set up hello extension to include session IDs for prioritized repair
+      ws.setHelloExtensionProvider(() => ({
+        sessions: getSessionsForHello(store.getState()),
+      }))
+
       dispatch(setError(undefined))
       dispatch(setStatus('connecting'))
       try {
@@ -186,32 +205,44 @@ export default function App() {
       const unsubscribe = ws.onMessage((msg) => {
         if (!msg?.type) return
         if (msg.type === 'sessions.updated') {
-          dispatch(setProjects(msg.projects || []))
+          // Support chunked sessions for mobile browsers with limited WebSocket buffers
+          if (msg.clear) {
+            // First chunk: clear existing, then merge
+            dispatch(clearProjects())
+            dispatch(mergeProjects(msg.projects || []))
+          } else if (msg.append) {
+            // Subsequent chunks: merge with existing
+            dispatch(mergeProjects(msg.projects || []))
+          } else {
+            // Full update (broadcasts, legacy): replace all
+            dispatch(setProjects(msg.projects || []))
+          }
         }
         if (msg.type === 'settings.updated') {
-          dispatch(setSettings(msg.settings))
+          dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
         }
         if (msg.type === 'terminal.exit') {
           const terminalId = msg.terminalId
           const code = msg.exitCode
           console.log('terminal exit', terminalId, code)
         }
-      })
-
-      const unsubReconnect = ws.onReconnect(async () => {
-        try {
-          const projects = await api.get('/api/sessions')
-          dispatch(setProjects(projects))
-        } catch {}
-        try {
-          const settings = await api.get('/api/settings')
-          dispatch(setSettings(settings))
-        } catch {}
+        if (msg.type === 'session.status') {
+          // Log session repair status (silent for healthy/repaired, visible for problems)
+          const { sessionId, status, orphansFixed } = msg
+          if (status === 'missing') {
+            console.warn(`Session ${sessionId.slice(0, 8)}... file is missing`)
+          } else if (status === 'repaired') {
+            console.log(`Session ${sessionId.slice(0, 8)}... repaired (${orphansFixed} orphans fixed)`)
+          }
+          // For 'healthy' status, no logging needed
+        }
+        if (msg.type === 'perf.logging') {
+          setClientPerfEnabled(!!msg.enabled, 'server')
+        }
       })
 
       return () => {
         unsubscribe()
-        unsubReconnect()
       }
     }
 
@@ -223,17 +254,8 @@ export default function App() {
     }
   }, [dispatch])
 
-  // Keyboard shortcuts: Ctrl+B prefix, then a command.
-  const prefixActiveRef = useRef(false)
-  const prefixTimeoutRef = useRef<number | null>(null)
-
+  // Keyboard shortcuts
   useEffect(() => {
-    function clearPrefix() {
-      prefixActiveRef.current = false
-      if (prefixTimeoutRef.current) window.clearTimeout(prefixTimeoutRef.current)
-      prefixTimeoutRef.current = null
-    }
-
     function isTextInput(el: any): boolean {
       if (!el) return false
       const tag = (el.tagName || '').toLowerCase()
@@ -245,47 +267,27 @@ export default function App() {
     function onKeyDown(e: KeyboardEvent) {
       if (isTextInput(e.target)) return
 
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault()
-        prefixActiveRef.current = true
-        if (prefixTimeoutRef.current) window.clearTimeout(prefixTimeoutRef.current)
-        prefixTimeoutRef.current = window.setTimeout(clearPrefix, 1500)
-        return
-      }
-
-      if (!prefixActiveRef.current) return
-
-      const key = e.key.toLowerCase()
-      clearPrefix()
-
-      if (key === 't') {
-        e.preventDefault()
-        dispatch(addTab({ mode: 'shell' }))
-        setView('terminal')
-      } else if (key === 'w') {
-        e.preventDefault()
-        if (activeTabId) dispatch(removeTab(activeTabId))
-      } else if (key === 's') {
-        e.preventDefault()
-        setView('sessions')
-      } else if (key === 'o') {
-        e.preventDefault()
-        setView('overview')
-      } else if (key === ',') {
-        e.preventDefault()
-        setView('settings')
-      } else if (key === 'b') {
-        e.preventDefault()
-        toggleSidebarCollapse()
+      // Tab switching: Ctrl+Shift+[ (prev) and Ctrl+Shift+] (next)
+      // Also handled in TerminalView.tsx for when terminal is focused
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+        if (e.code === 'BracketLeft') {
+          e.preventDefault()
+          dispatch(switchToPrevTab())
+          return
+        }
+        if (e.code === 'BracketRight') {
+          e.preventDefault()
+          dispatch(switchToNextTab())
+          return
+        }
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      if (prefixTimeoutRef.current) window.clearTimeout(prefixTimeoutRef.current)
     }
-  }, [dispatch, activeTabId])
+  }, [dispatch])
 
   // Ensure at least one tab exists for first-time users.
   useEffect(() => {
@@ -301,7 +303,7 @@ export default function App() {
     return (
       <div className="flex flex-col h-full">
         <TabBar />
-        <div className="flex-1 min-h-0 relative">
+        <div className="flex-1 min-h-0 relative bg-background">
           {tabs.map((t) => (
             <TabContent key={t.id} tabId={t.id} hidden={t.id !== activeTabId} />
           ))}
@@ -311,7 +313,16 @@ export default function App() {
   })()
 
   return (
-    <div className="h-full flex flex-col bg-background text-foreground">
+    <ContextMenuProvider
+      view={view}
+      onViewChange={setView}
+      onToggleSidebar={toggleSidebarCollapse}
+      sidebarCollapsed={sidebarCollapsed}
+    >
+      <div
+        className="h-full flex flex-col bg-background text-foreground"
+        data-context={ContextIds.Global}
+      >
       {/* Top header bar spanning full width */}
       <div className="h-8 px-4 flex items-center justify-between border-b border-border/30 bg-background flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -395,7 +406,7 @@ export default function App() {
       {/* Share modal for Windows */}
       {shareModalUrl && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
           onClick={() => setShareModalUrl(null)}
         >
           <div
@@ -436,6 +447,7 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ContextMenuProvider>
   )
 }

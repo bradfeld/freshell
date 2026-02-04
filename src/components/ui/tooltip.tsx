@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
+import { OVERLAY_Z } from '@/components/ui/overlay'
 
 type TooltipContextValue = {
   open: boolean
@@ -68,11 +69,14 @@ export function TooltipContent({
   const ctx = React.useContext(TooltipContext)
   const [position, setPosition] = React.useState({ top: 0, left: 0 })
 
+  const contentRef = React.useRef<HTMLDivElement>(null)
+
   React.useLayoutEffect(() => {
     if (ctx?.open && ctx.triggerRef.current) {
       const rect = ctx.triggerRef.current.getBoundingClientRect()
+      const contentHeight = contentRef.current?.offsetHeight || 24
       setPosition({
-        top: rect.bottom + sideOffset,
+        top: rect.top - contentHeight - sideOffset,
         left: rect.left,
       })
     }
@@ -82,8 +86,9 @@ export function TooltipContent({
 
   return createPortal(
     <div
+      ref={contentRef}
       className={cn(
-        'fixed z-50 rounded-md border px-2 py-1 text-xs shadow-lg animate-in fade-in-0 zoom-in-95',
+        `fixed rounded-md border px-2 py-1 text-xs shadow-lg animate-in fade-in-0 zoom-in-95 ${OVERLAY_Z.tooltip}`,
         'bg-zinc-100 text-zinc-900 border-zinc-300',
         'dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700',
         className

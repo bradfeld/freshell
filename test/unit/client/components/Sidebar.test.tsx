@@ -7,7 +7,32 @@ import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
+import sessionActivityReducer from '@/store/sessionActivitySlice'
 import type { ProjectGroup, BackgroundTerminal } from '@/store/types'
+
+// Mock react-window's List component
+vi.mock('react-window', () => ({
+  List: ({ rowCount, rowComponent: Row, rowProps, style }: {
+    rowCount: number
+    rowComponent: React.ComponentType<any>
+    rowProps: any
+    style: React.CSSProperties
+  }) => {
+    const items = []
+    for (let i = 0; i < rowCount; i++) {
+      items.push(
+        <Row
+          key={i}
+          index={i}
+          style={{ height: 56 }}
+          ariaAttributes={{}}
+          {...rowProps}
+        />
+      )
+    }
+    return <div style={style} data-testid="virtualized-list">{items}</div>
+  },
+}))
 
 // Mock the WebSocket client
 const mockSend = vi.fn()
@@ -22,20 +47,47 @@ vi.mock('@/lib/ws-client', () => ({
   }),
 }))
 
+// Mock the searchSessions API
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual('@/lib/api')
+  return {
+    ...actual,
+    searchSessions: vi.fn(),
+  }
+})
+
+import { searchSessions as mockSearchSessions } from '@/lib/api'
+
 function createTestStore(options?: {
   projects?: ProjectGroup[]
   terminals?: BackgroundTerminal[]
-  tabs?: Array<{ id: string; terminalId?: string; resumeSessionId?: string; mode?: string }>
+  tabs?: Array<{
+    id: string
+    terminalId?: string
+    resumeSessionId?: string
+    mode?: string
+    lastInputAt?: number
+  }>
   activeTabId?: string
-  sortMode?: 'hybrid' | 'recency' | 'activity' | 'project'
+  sortMode?: 'recency' | 'activity' | 'project'
   showProjectBadges?: boolean
+  sessionActivity?: Record<string, number>
 }) {
+  const projects = (options?.projects ?? []).map((project) => ({
+    ...project,
+    sessions: (project.sessions ?? []).map((session) => ({
+      ...session,
+      provider: session.provider ?? 'claude',
+    })),
+  }))
+
   return configureStore({
     reducer: {
       settings: settingsReducer,
       tabs: tabsReducer,
       connection: connectionReducer,
       sessions: sessionsReducer,
+      sessionActivity: sessionActivityReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -49,7 +101,7 @@ function createTestStore(options?: {
           ...defaultSettings,
           sidebar: {
             ...defaultSettings.sidebar,
-            sortMode: options?.sortMode ?? 'hybrid',
+            sortMode: options?.sortMode ?? 'activity',
             showProjectBadges: options?.showProjectBadges ?? true,
           },
         },
@@ -61,7 +113,7 @@ function createTestStore(options?: {
         activeTabId: options?.activeTabId ?? null,
       },
       sessions: {
-        projects: options?.projects ?? [],
+        projects,
         expandedProjects: new Set<string>(),
         isLoading: false,
         error: null,
@@ -69,6 +121,9 @@ function createTestStore(options?: {
       connection: {
         status: 'connected',
         error: null,
+      },
+      sessionActivity: {
+        sessions: options?.sessionActivity ?? {},
       },
     },
   })
@@ -241,15 +296,14 @@ describe('Sidebar Component - Session-Centric Display', () => {
         },
       ]
 
-      const store = createTestStore({ projects, sortMode: 'hybrid' })
+      const store = createTestStore({ projects, sortMode: 'activity' })
       renderSidebar(store, terminals)
 
       await act(async () => {
         vi.advanceTimersByTime(100)
       })
 
-      // In hybrid mode, running sessions appear in "Running" section
-      expect(screen.getByText('Running')).toBeInTheDocument()
+      expect(screen.queryByText(/^Running$/)).not.toBeInTheDocument()
       expect(screen.getByText('Active work session')).toBeInTheDocument()
     })
 
@@ -283,7 +337,7 @@ describe('Sidebar Component - Session-Centric Display', () => {
         },
       ]
 
-      const store = createTestStore({ projects, sortMode: 'hybrid' })
+      const store = createTestStore({ projects, sortMode: 'activity' })
       renderSidebar(store, terminals)
 
       vi.advanceTimersByTime(100)
@@ -323,7 +377,7 @@ describe('Sidebar Component - Session-Centric Display', () => {
         },
       ]
 
-      const store = createTestStore({ projects, sortMode: 'hybrid' })
+      const store = createTestStore({ projects, sortMode: 'activity' })
       renderSidebar(store, terminals)
 
       vi.advanceTimersByTime(100)
@@ -333,57 +387,499 @@ describe('Sidebar Component - Session-Centric Display', () => {
     })
   })
 
-  describe('hybrid sort mode', () => {
-    it('shows running sessions in separate section', async () => {
+  describe('activity sort mode', () => {
+    it('shows sessions with tabs above sessions without tabs', async () => {
       const now = Date.now()
       const projects: ProjectGroup[] = [
         {
           projectPath: '/home/user/project',
           sessions: [
             {
-              sessionId: 'session-running',
+              sessionId: 'session-no-tab',
               projectPath: '/home/user/project',
-              updatedAt: now - 1000,
-              title: 'Running session',
+              updatedAt: now,
+              title: 'Session without tab',
               cwd: '/home/user/project',
             },
             {
-              sessionId: 'session-recent',
+              sessionId: 'session-with-tab',
               projectPath: '/home/user/project',
-              updatedAt: now,
-              title: 'Recent session',
+              updatedAt: now - 10000,
+              title: 'Session with tab',
               cwd: '/home/user/project',
             },
           ],
         },
       ]
 
-      const terminals: BackgroundTerminal[] = [
+      const tabs = [
         {
-          terminalId: 'term-1',
-          title: 'Claude',
-          createdAt: now,
-          lastActivityAt: now,
-          status: 'running',
-          hasClients: false,
+          id: 'tab-1',
+          resumeSessionId: 'session-with-tab',
           mode: 'claude',
-          resumeSessionId: 'session-running',
-          cwd: '/home/user/project',
+          lastInputAt: now - 5000,
         },
       ]
 
-      const store = createTestStore({ projects, sortMode: 'hybrid' })
-      renderSidebar(store, terminals)
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
 
       await act(async () => {
         vi.advanceTimersByTime(100)
       })
 
-      // Both sections should appear
-      expect(screen.getByText('Running')).toBeInTheDocument()
-      expect(screen.getByText('Recent')).toBeInTheDocument()
-      expect(screen.getByText('Running session')).toBeInTheDocument()
-      expect(screen.getByText('Recent session')).toBeInTheDocument()
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('Session')
+      )
+
+      expect(buttons[0]).toHaveTextContent('Session with tab')
+      expect(buttons[1]).toHaveTextContent('Session without tab')
+    })
+
+    it('sorts tabbed sessions by lastInputAt', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-old-input',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'Old input session',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-recent-input',
+              projectPath: '/home/user/project',
+              updatedAt: now - 10000,
+              title: 'Recent input session',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const tabs = [
+        {
+          id: 'tab-1',
+          resumeSessionId: 'session-old-input',
+          mode: 'claude',
+          lastInputAt: now - 60000,
+        },
+        {
+          id: 'tab-2',
+          resumeSessionId: 'session-recent-input',
+          mode: 'claude',
+          lastInputAt: now - 1000,
+        },
+      ]
+
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('session')
+      )
+
+      expect(buttons[0]).toHaveTextContent('Recent input session')
+      expect(buttons[1]).toHaveTextContent('Old input session')
+    })
+
+    it('uses session timestamp for tabbed sessions without lastInputAt', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-with-input',
+              projectPath: '/home/user/project',
+              updatedAt: now - 60000,
+              title: 'Has input timestamp',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-no-input',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'No input timestamp',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const tabs = [
+        {
+          id: 'tab-1',
+          resumeSessionId: 'session-with-input',
+          mode: 'claude',
+          lastInputAt: now - 30000,
+        },
+        {
+          id: 'tab-2',
+          resumeSessionId: 'session-no-input',
+          mode: 'claude',
+        },
+      ]
+
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('timestamp')
+      )
+
+      expect(buttons[0]).toHaveTextContent('No input timestamp')
+      expect(buttons[1]).toHaveTextContent('Has input timestamp')
+    })
+
+    it('uses ratcheted sessionActivity for closed tabs (preserves position)', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-was-active',
+              projectPath: '/home/user/project',
+              updatedAt: now - 60000,
+              title: 'Was active session',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-never-active',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'Never active session',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const sessionActivity = {
+        'claude:session-was-active': now - 1000,
+      }
+
+      const store = createTestStore({
+        projects,
+        tabs: [],
+        sortMode: 'activity',
+        sessionActivity,
+      })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('session')
+      )
+
+      expect(buttons[0]).toHaveTextContent('Was active session')
+      expect(buttons[1]).toHaveTextContent('Never active session')
+    })
+
+    it('shows green indicator for sessions with tabs, grey for others', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-with-tab',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'Tabbed session',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-no-tab',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'No tab session',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const tabs = [
+        {
+          id: 'tab-1',
+          resumeSessionId: 'session-with-tab',
+          mode: 'claude',
+        },
+      ]
+
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const playIcons = document.querySelectorAll('.text-success')
+      expect(playIcons.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('activity sort mode', () => {
+    it('shows sessions with tabs above sessions without tabs', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-no-tab',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'Session without tab',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-with-tab',
+              projectPath: '/home/user/project',
+              updatedAt: now - 10000,
+              title: 'Session with tab',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const tabs = [
+        {
+          id: 'tab-1',
+          resumeSessionId: 'session-with-tab',
+          mode: 'claude',
+          lastInputAt: now - 5000,
+        },
+      ]
+
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('Session')
+      )
+
+      expect(buttons[0]).toHaveTextContent('Session with tab')
+      expect(buttons[1]).toHaveTextContent('Session without tab')
+    })
+
+    it('sorts tabbed sessions by lastInputAt', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-old-input',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'Old input session',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-recent-input',
+              projectPath: '/home/user/project',
+              updatedAt: now - 10000,
+              title: 'Recent input session',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const tabs = [
+        {
+          id: 'tab-1',
+          resumeSessionId: 'session-old-input',
+          mode: 'claude',
+          lastInputAt: now - 60000,
+        },
+        {
+          id: 'tab-2',
+          resumeSessionId: 'session-recent-input',
+          mode: 'claude',
+          lastInputAt: now - 1000,
+        },
+      ]
+
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('session')
+      )
+
+      expect(buttons[0]).toHaveTextContent('Recent input session')
+      expect(buttons[1]).toHaveTextContent('Old input session')
+    })
+
+    it('uses session timestamp for tabbed sessions without lastInputAt', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-with-input',
+              projectPath: '/home/user/project',
+              updatedAt: now - 60000,
+              title: 'Has input timestamp',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-no-input',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'No input timestamp',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const tabs = [
+        {
+          id: 'tab-1',
+          resumeSessionId: 'session-with-input',
+          mode: 'claude',
+          lastInputAt: now - 30000,
+        },
+        {
+          id: 'tab-2',
+          resumeSessionId: 'session-no-input',
+          mode: 'claude',
+        },
+      ]
+
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('timestamp')
+      )
+
+      expect(buttons[0]).toHaveTextContent('No input timestamp')
+      expect(buttons[1]).toHaveTextContent('Has input timestamp')
+    })
+
+    it('uses ratcheted sessionActivity for closed tabs (preserves position)', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-was-active',
+              projectPath: '/home/user/project',
+              updatedAt: now - 60000,
+              title: 'Was active session',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-never-active',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'Never active session',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const sessionActivity = {
+        'claude:session-was-active': now - 1000,
+      }
+
+      const store = createTestStore({
+        projects,
+        tabs: [],
+        sortMode: 'activity',
+        sessionActivity,
+      })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const buttons = screen.getAllByRole('button').filter(
+        (btn) => btn.textContent?.includes('session')
+      )
+
+      expect(buttons[0]).toHaveTextContent('Was active session')
+      expect(buttons[1]).toHaveTextContent('Never active session')
+    })
+
+    it('shows green indicator for sessions with tabs, grey for others', async () => {
+      const now = Date.now()
+      const projects: ProjectGroup[] = [
+        {
+          projectPath: '/home/user/project',
+          sessions: [
+            {
+              sessionId: 'session-with-tab',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'Tabbed session',
+              cwd: '/home/user/project',
+            },
+            {
+              sessionId: 'session-no-tab',
+              projectPath: '/home/user/project',
+              updatedAt: now,
+              title: 'No tab session',
+              cwd: '/home/user/project',
+            },
+          ],
+        },
+      ]
+
+      const tabs = [
+        {
+          id: 'tab-1',
+          resumeSessionId: 'session-with-tab',
+          mode: 'claude',
+        },
+      ]
+
+      const store = createTestStore({ projects, tabs, sortMode: 'activity' })
+      renderSidebar(store, [])
+
+      await act(async () => {
+        vi.advanceTimersByTime(100)
+      })
+
+      const playIcons = document.querySelectorAll('.text-success')
+      expect(playIcons.length).toBeGreaterThan(0)
     })
   })
 
@@ -593,7 +1089,7 @@ describe('Sidebar Component - Session-Centric Display', () => {
         },
       ]
 
-      const store = createTestStore({ projects, tabs: existingTabs, activeTabId: null, sortMode: 'hybrid' })
+      const store = createTestStore({ projects, tabs: existingTabs, activeTabId: null, sortMode: 'activity' })
       const { onNavigate } = renderSidebar(store, terminals)
 
       // Advance timers to process the mock response and wait for state update
@@ -617,7 +1113,7 @@ describe('Sidebar Component - Session-Centric Display', () => {
       expect(state.tabs.activeTabId).toBe('existing-tab-for-terminal')
     })
 
-    it.skip('creates new tab to attach when clicking running session without existing tab', async () => {
+    it('creates new tab to attach when clicking running session without existing tab', async () => {
       const projects: ProjectGroup[] = [
         {
           projectPath: '/home/user/project',
@@ -647,17 +1143,13 @@ describe('Sidebar Component - Session-Centric Display', () => {
         },
       ]
 
-      const store = createTestStore({ projects, tabs: [], activeTabId: null, sortMode: 'hybrid' })
+      const store = createTestStore({ projects, tabs: [], activeTabId: null, sortMode: 'activity' })
       const { onNavigate } = renderSidebar(store, terminals)
 
       // Advance timers to process the mock response and wait for state update
       await act(async () => {
         vi.advanceTimersByTime(100)
       })
-
-      // Verify the "Running" section appears (confirms terminals are loaded)
-      const runningSection = screen.queryByText('Running')
-      expect(runningSection).not.toBeNull()
 
       const sessionButton = screen.getByText('Running without tab').closest('button')
       fireEvent.click(sessionButton!)
@@ -669,6 +1161,7 @@ describe('Sidebar Component - Session-Centric Display', () => {
       const state = store.getState()
       expect(state.tabs.tabs).toHaveLength(1)
       expect(state.tabs.tabs[0].terminalId).toBe('orphan-terminal-id')
+      expect(state.tabs.tabs[0].resumeSessionId).toBe('session-running-no-tab')
       expect(state.tabs.tabs[0].mode).toBe('claude')
     })
   })
@@ -775,6 +1268,244 @@ describe('Sidebar Component - Session-Centric Display', () => {
 
       const sidebar = container.firstChild as HTMLElement
       expect(sidebar.className).toContain('transition-')
+    })
+  })
+
+  describe('Search clear button', () => {
+    it('shows clear button when search has text', async () => {
+      const store = createTestStore()
+      const { getByPlaceholderText, getByRole, queryByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // No clear button initially
+      expect(queryByRole('button', { name: /clear search/i })).not.toBeInTheDocument()
+
+      // Type in search
+      const input = getByPlaceholderText('Search...')
+      fireEvent.change(input, { target: { value: 'test' } })
+
+      // Should show clear button
+      expect(getByRole('button', { name: /clear search/i })).toBeInTheDocument()
+    })
+
+    it('clears search when clear button is clicked', async () => {
+      const store = createTestStore()
+      const { getByPlaceholderText, getByRole, queryByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // Type in search
+      const input = getByPlaceholderText('Search...')
+      fireEvent.change(input, { target: { value: 'test' } })
+      expect(input).toHaveValue('test')
+
+      // Click clear button
+      fireEvent.click(getByRole('button', { name: /clear search/i }))
+
+      // Search should be cleared
+      expect(input).toHaveValue('')
+      // Clear button should be hidden
+      expect(queryByRole('button', { name: /clear search/i })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Search tier toggle', () => {
+    it('renders tier selector when searching', async () => {
+      const store = createTestStore()
+      const { getByPlaceholderText, getByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // Type in search
+      const input = getByPlaceholderText('Search...')
+      fireEvent.change(input, { target: { value: 'test' } })
+
+      // Should show tier selector
+      expect(getByRole('combobox', { name: /search tier/i })).toBeInTheDocument()
+    })
+
+    it('hides tier selector when search is empty', async () => {
+      const store = createTestStore()
+      const { getByPlaceholderText, queryByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      const input = getByPlaceholderText('Search...')
+      expect(input).toHaveValue('')
+      expect(queryByRole('combobox', { name: /search tier/i })).not.toBeInTheDocument()
+    })
+
+    it('defaults to title tier', async () => {
+      const store = createTestStore()
+      const { getByPlaceholderText, getByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+
+      const select = getByRole('combobox', { name: /search tier/i })
+      expect(select).toHaveValue('title')
+    })
+  })
+
+  describe('Search loading state', () => {
+    it('shows loading indicator while searching', async () => {
+      // Make the search take some time
+      vi.mocked(mockSearchSessions).mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({
+          results: [],
+          tier: 'userMessages',
+          query: 'test',
+          totalScanned: 0,
+        }), 1000))
+      )
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole, getByTestId, queryByTestId } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // After debounce but before search completes
+      await act(() => vi.advanceTimersByTime(350))
+      expect(getByTestId('search-loading')).toBeInTheDocument()
+
+      // After search completes
+      await act(() => vi.advanceTimersByTime(1000))
+      expect(queryByTestId('search-loading')).not.toBeInTheDocument()
+    })
+
+    it('shows "No results" message when search returns empty', async () => {
+      vi.mocked(mockSearchSessions).mockResolvedValue({
+        results: [],
+        tier: 'userMessages',
+        query: 'nonexistent',
+        totalScanned: 10,
+      })
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole, getByText } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'nonexistent' } })
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // Wait for debounce and flush promises
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+      })
+
+      expect(getByText(/no results/i)).toBeInTheDocument()
+    })
+
+    it('clears loading state when switching back to title tier during search', async () => {
+      // Make the search take a long time to ensure we can switch tiers mid-search
+      vi.mocked(mockSearchSessions).mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({
+          results: [],
+          tier: 'userMessages',
+          query: 'test',
+          totalScanned: 0,
+        }), 5000))
+      )
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole, getByTestId, queryByTestId } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // Start a userMessages search
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // Wait for debounce - loading indicator should appear
+      await act(() => vi.advanceTimersByTime(350))
+      expect(getByTestId('search-loading')).toBeInTheDocument()
+
+      // Switch back to title tier while search is in progress
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'title' } })
+
+      // Loading indicator should disappear immediately
+      await act(() => vi.advanceTimersByTime(0))
+      expect(queryByTestId('search-loading')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Backend search integration', () => {
+    beforeEach(() => {
+      vi.mocked(mockSearchSessions).mockReset()
+    })
+
+    it('calls searchSessions API when tier is not title and query exists', async () => {
+      vi.mocked(mockSearchSessions).mockResolvedValue({
+        results: [
+          { sessionId: 'result-1', provider: 'claude', projectPath: '/proj', matchedIn: 'userMessage', updatedAt: 1000, snippet: 'Found it' },
+        ],
+        tier: 'userMessages',
+        query: 'test',
+        totalScanned: 5,
+      })
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      // Enter search query
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+
+      // Change tier to userMessages
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // Wait for debounce
+      await act(() => vi.advanceTimersByTime(500))
+
+      expect(mockSearchSessions).toHaveBeenCalledWith({
+        query: 'test',
+        tier: 'userMessages',
+      })
+    })
+
+    it('displays search results from API', async () => {
+      vi.mocked(mockSearchSessions).mockResolvedValue({
+        results: [
+          { sessionId: 'result-1', provider: 'claude', projectPath: '/proj', matchedIn: 'userMessage', updatedAt: 1000, title: 'Found Session', snippet: 'test found here' },
+        ],
+        tier: 'userMessages',
+        query: 'test',
+        totalScanned: 5,
+      })
+
+      const store = createTestStore({ projects: [] })
+      const { getByPlaceholderText, getByRole, getByText } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+      fireEvent.change(getByRole('combobox', { name: /search tier/i }), { target: { value: 'userMessages' } })
+
+      // Advance past debounce and flush promises
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+      })
+
+      expect(getByText('Found Session')).toBeInTheDocument()
+    })
+
+    it('does not call API for title tier (uses local filter)', async () => {
+      const store = createTestStore({
+        projects: [
+          {
+            projectPath: '/proj',
+            sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/proj', updatedAt: 1000, title: 'Test session', cwd: '/proj' }],
+          },
+        ],
+      })
+      const { getByPlaceholderText } = renderSidebar(store, [])
+      await act(() => vi.advanceTimersByTime(100))
+
+      fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'test' } })
+
+      // Keep default title tier
+      await act(() => vi.advanceTimersByTime(500))
+
+      expect(mockSearchSessions).not.toHaveBeenCalled()
     })
   })
 })

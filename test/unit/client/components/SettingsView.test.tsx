@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, cleanup, within } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
 import SettingsView from '@/components/SettingsView'
@@ -7,6 +7,7 @@ import settingsReducer, { defaultSettings, SettingsState } from '@/store/setting
 import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
+import { LOCAL_TERMINAL_FONT_KEY } from '@/lib/terminal-fonts'
 
 // Mock the api module
 vi.mock('@/lib/api', () => ({
@@ -21,6 +22,8 @@ vi.mock('@/lib/api', () => ({
 
 // Import mocked api after mocking
 import { api } from '@/lib/api'
+
+let originalFonts: Document['fonts'] | undefined
 
 function createTestStore(settingsState?: Partial<SettingsState>) {
   return configureStore({
@@ -57,6 +60,15 @@ function renderWithStore(store: ReturnType<typeof createTestStore>) {
 
 describe('SettingsView Component', () => {
   beforeEach(() => {
+    originalFonts = document.fonts
+    Object.defineProperty(document, 'fonts', {
+      value: {
+        check: vi.fn(() => true),
+        ready: Promise.resolve(),
+      },
+      configurable: true,
+    })
+    localStorage.clear()
     vi.useFakeTimers()
     vi.clearAllMocks()
   })
@@ -64,6 +76,15 @@ describe('SettingsView Component', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
+    if (originalFonts) {
+      Object.defineProperty(document, 'fonts', {
+        value: originalFonts,
+        configurable: true,
+      })
+    } else {
+      // @ts-expect-error - test cleanup for jsdom fonts override
+      delete document.fonts
+    }
   })
 
   describe('renders settings form', () => {
@@ -80,20 +101,53 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
+      expect(screen.getByText('Terminal preview')).toBeInTheDocument()
+
       expect(screen.getByText('Appearance')).toBeInTheDocument()
       expect(screen.getByText('Theme and visual preferences')).toBeInTheDocument()
-
-      expect(screen.getByText('Sidebar')).toBeInTheDocument()
-      expect(screen.getByText('Session list and navigation')).toBeInTheDocument()
 
       expect(screen.getByText('Terminal')).toBeInTheDocument()
       expect(screen.getByText('Font and rendering options')).toBeInTheDocument()
 
+      expect(screen.getByText('Sidebar')).toBeInTheDocument()
+      expect(screen.getByText('Session list and navigation')).toBeInTheDocument()
+
       expect(screen.getByText('Safety')).toBeInTheDocument()
       expect(screen.getByText('Auto-kill and idle terminal management')).toBeInTheDocument()
 
+      expect(screen.getByText('Debugging')).toBeInTheDocument()
+      expect(screen.getByText('Debug-level logs and perf instrumentation')).toBeInTheDocument()
+
+      expect(screen.getByText('Coding CLIs')).toBeInTheDocument()
+      expect(screen.getByText('Providers and defaults for coding sessions')).toBeInTheDocument()
+
       expect(screen.getByText('Keyboard shortcuts')).toBeInTheDocument()
-      expect(screen.getByText('Quick navigation')).toBeInTheDocument()
+      expect(screen.getByText('Tab navigation')).toBeInTheDocument()
+    })
+
+    it('renders a terminal preview above Appearance', () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const preview = screen.getByTestId('terminal-preview')
+      const appearanceHeading = screen.getByText('Appearance')
+
+      expect(preview).toBeInTheDocument()
+      expect(preview.compareDocumentPosition(appearanceHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+      const previewLines = within(preview).getAllByTestId('terminal-preview-line')
+      expect(previewLines).toHaveLength(8)
+    })
+
+    it('orders Sidebar section above Terminal', () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const terminalHeading = screen.getByText('Terminal')
+      const sidebarHeading = screen.getByText('Sidebar')
+
+      // Sidebar should come before Terminal (PRECEDING means Terminal comes after Sidebar)
+      expect(terminalHeading.compareDocumentPosition(sidebarHeading) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
     })
 
     it('renders all setting labels', () => {
@@ -120,6 +174,13 @@ describe('SettingsView Component', () => {
       expect(screen.getByText('Auto-kill idle (minutes)')).toBeInTheDocument()
       expect(screen.getByText('Warn before kill (minutes)')).toBeInTheDocument()
       expect(screen.getByText('Default working directory')).toBeInTheDocument()
+
+      // Coding CLI section
+      expect(screen.getByText('Enable Claude')).toBeInTheDocument()
+      expect(screen.getByText('Enable Codex')).toBeInTheDocument()
+      expect(screen.getByText('Claude permission mode')).toBeInTheDocument()
+      expect(screen.getByText('Codex model')).toBeInTheDocument()
+      expect(screen.getByText('Codex sandbox')).toBeInTheDocument()
     })
   })
 
@@ -197,6 +258,83 @@ describe('SettingsView Component', () => {
         return select.querySelector('option[value="JetBrains Mono"]') !== null
       })!
       expect(fontFamilySelect).toHaveValue('JetBrains Mono')
+    })
+
+    it('includes Cascadia and Meslo font options', () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const selects = screen.getAllByRole('combobox')
+      const fontFamilySelect = selects.find((select) => {
+        return select.querySelector('option[value="JetBrains Mono"]') !== null
+      })!
+
+      const optionValues = Array.from(fontFamilySelect.querySelectorAll('option')).map((opt) =>
+        opt.getAttribute('value')
+      )
+
+      expect(optionValues).toContain('Cascadia Code')
+      expect(optionValues).toContain('Cascadia Mono')
+      expect(optionValues).toContain('Meslo LG S')
+    })
+
+    it('hides fonts that are not installed locally', async () => {
+      Object.defineProperty(document, 'fonts', {
+        value: {
+          check: vi.fn((font: string) => {
+            if (font.includes('Cascadia Code')) return false
+            if (font.includes('Cascadia Mono')) return false
+            if (font.includes('Meslo LG S')) return false
+            return true
+          }),
+          ready: Promise.resolve(),
+        },
+        configurable: true,
+      })
+
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const selects = screen.getAllByRole('combobox')
+      const fontFamilySelect = selects.find((select) => {
+        return select.querySelector('option[value="JetBrains Mono"]') !== null
+      })!
+
+      await act(async () => {
+        await document.fonts.ready
+      })
+
+      const optionValues = Array.from(fontFamilySelect.querySelectorAll('option')).map((opt) =>
+        opt.getAttribute('value')
+      )
+      expect(optionValues).not.toContain('Cascadia Code')
+      expect(optionValues).not.toContain('Cascadia Mono')
+      expect(optionValues).not.toContain('Meslo LG S')
+    })
+
+    it('falls back to monospace when selected font is unavailable', async () => {
+      Object.defineProperty(document, 'fonts', {
+        value: {
+          check: vi.fn((font: string) => !font.includes('Cascadia Code')),
+          ready: Promise.resolve(),
+        },
+        configurable: true,
+      })
+
+      const store = createTestStore({
+        settings: {
+          ...defaultSettings,
+          terminal: { ...defaultSettings.terminal, fontFamily: 'Cascadia Code' },
+        },
+      })
+      renderWithStore(store)
+
+      await act(async () => {
+        await document.fonts.ready
+      })
+
+      expect(store.getState().settings.settings.terminal.fontFamily).toBe('monospace')
+      expect(localStorage.getItem(LOCAL_TERMINAL_FONT_KEY)).toBe('monospace')
     })
 
     it('displays sidebar sort mode value', () => {
@@ -517,11 +655,16 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      // Find the sidebar sort mode select (has 'hybrid' option)
+      // Find the sidebar sort mode select (contains activity/recency/project options)
       const selects = screen.getAllByRole('combobox')
       const sortModeSelect = selects.find((select) => {
-        return select.querySelector('option[value="hybrid"]') !== null
+        return select.querySelector('option[value="activity"]') !== null
+          && select.querySelector('option[value="recency"]') !== null
+          && select.querySelector('option[value="project"]') !== null
       })!
+      expect(sortModeSelect.querySelector('option[value="hybrid"]')).toBeNull()
+      const activityOption = sortModeSelect.querySelector('option[value="activity"]')
+      expect(activityOption?.textContent).toBe('Activity (tabs first)')
       fireEvent.change(sortModeSelect, { target: { value: 'activity' } })
 
       expect(store.getState().settings.settings.sidebar.sortMode).toBe('activity')
@@ -535,6 +678,29 @@ describe('SettingsView Component', () => {
       })
     })
 
+    it('updates sidebar sort mode to recency-pinned', async () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const selects = screen.getAllByRole('combobox')
+      const sortModeSelect = selects.find((select) => {
+        return select.querySelector('option[value="recency-pinned"]') !== null
+      })!
+      const recencyPinnedOption = sortModeSelect.querySelector('option[value="recency-pinned"]')
+      expect(recencyPinnedOption?.textContent).toBe('Recency (pinned)')
+      fireEvent.change(sortModeSelect, { target: { value: 'recency-pinned' } })
+
+      expect(store.getState().settings.settings.sidebar.sortMode).toBe('recency-pinned')
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        sidebar: { sortMode: 'recency-pinned' },
+      })
+    })
+
     it('toggles show project badges', async () => {
       const store = createTestStore({
         settings: {
@@ -544,16 +710,9 @@ describe('SettingsView Component', () => {
       })
       renderWithStore(store)
 
-      // Find toggle buttons - they have a specific structure (w-9 h-5 rounded-full)
-      const allButtons = screen.getAllByRole('button')
-      const toggleButtons = allButtons.filter((btn) => {
-        const classes = btn.className
-        return classes.includes('w-9') && classes.includes('h-5') && classes.includes('rounded-full')
-      })
-
-      // First toggle should be for "Show project badges"
-      expect(toggleButtons.length).toBeGreaterThan(0)
-      const showBadgesToggle = toggleButtons[0]
+      const showBadgesRow = screen.getByText('Show project badges').closest('div')
+      expect(showBadgesRow).toBeTruthy()
+      const showBadgesToggle = within(showBadgesRow!).getByRole('button')
       fireEvent.click(showBadgesToggle)
 
       expect(store.getState().settings.settings.sidebar.showProjectBadges).toBe(false)
@@ -568,15 +727,9 @@ describe('SettingsView Component', () => {
       })
       renderWithStore(store)
 
-      const allButtons = screen.getAllByRole('button')
-      const toggleButtons = allButtons.filter((btn) => {
-        const classes = btn.className
-        return classes.includes('w-9') && classes.includes('h-5') && classes.includes('rounded-full')
-      })
-
-      // Second toggle should be for cursor blink
-      expect(toggleButtons.length).toBeGreaterThan(1)
-      const cursorBlinkToggle = toggleButtons[1]
+      const cursorBlinkRow = screen.getByText('Cursor blink').closest('div')
+      expect(cursorBlinkRow).toBeTruthy()
+      const cursorBlinkToggle = within(cursorBlinkRow!).getByRole('button')
       fireEvent.click(cursorBlinkToggle)
 
       expect(store.getState().settings.settings.terminal.cursorBlink).toBe(false)
@@ -587,6 +740,82 @@ describe('SettingsView Component', () => {
 
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
         terminal: { cursorBlink: false },
+      })
+    })
+
+    it('toggles debug logging', async () => {
+      const store = createTestStore({
+        settings: {
+          ...defaultSettings,
+          logging: { ...defaultSettings.logging, debug: false },
+        },
+      })
+      renderWithStore(store)
+
+      const debugRow = screen.getByText('Debug logging').closest('div')
+      expect(debugRow).toBeTruthy()
+      const debugToggle = within(debugRow!).getByRole('button')
+      fireEvent.click(debugToggle)
+
+      expect(store.getState().settings.settings.logging.debug).toBe(true)
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        logging: { debug: true },
+      })
+    })
+
+    it('toggles codex provider enabled state', () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const row = screen.getByText('Enable Codex').closest('div')!
+      const toggle = row.querySelector('button')!
+      fireEvent.click(toggle)
+
+      expect(store.getState().settings.settings.codingCli.enabledProviders).not.toContain('codex')
+    })
+
+    it('updates codex model input', async () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const input = screen.getByPlaceholderText('e.g. gpt-5-codex')
+      fireEvent.change(input, { target: { value: 'gpt-5-codex' } })
+
+      expect(store.getState().settings.settings.codingCli.providers.codex?.model).toBe('gpt-5-codex')
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        codingCli: { providers: { codex: { model: 'gpt-5-codex' } } },
+      })
+    })
+
+    it('updates codex sandbox select', async () => {
+      const store = createTestStore()
+      renderWithStore(store)
+
+      const selects = screen.getAllByRole('combobox')
+      const sandboxSelect = selects.find((select) => {
+        return select.querySelector('option[value="workspace-write"]') !== null
+      })!
+
+      fireEvent.change(sandboxSelect, { target: { value: 'workspace-write' } })
+
+      expect(store.getState().settings.settings.codingCli.providers.codex?.sandbox).toBe('workspace-write')
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        codingCli: { providers: { codex: { sandbox: 'workspace-write' } } },
       })
     })
 
@@ -639,14 +868,13 @@ describe('SettingsView Component', () => {
       fireEvent.change(fontFamilySelect, { target: { value: 'Cascadia Code' } })
 
       expect(store.getState().settings.settings.terminal.fontFamily).toBe('Cascadia Code')
+      expect(localStorage.getItem(LOCAL_TERMINAL_FONT_KEY)).toBe('Cascadia Code')
 
       await act(async () => {
         vi.advanceTimersByTime(500)
       })
 
-      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-        terminal: { fontFamily: 'Cascadia Code' },
-      })
+      expect(api.patch).not.toHaveBeenCalled()
     })
 
     it('displays current font family in dropdown', () => {
@@ -699,22 +927,55 @@ describe('SettingsView Component', () => {
       expect(store.getState().settings.settings.safety.warnBeforeKillMinutes).toBe(10)
     })
 
-    it('updates default working directory input', async () => {
+    it('validates default working directory before saving', async () => {
+      vi.mocked(api.post).mockResolvedValue({ valid: true })
       const store = createTestStore()
       renderWithStore(store)
 
       const cwdInput = screen.getByPlaceholderText('e.g. C:\\Users\\you\\projects')
       fireEvent.change(cwdInput, { target: { value: '/home/user/projects' } })
 
-      expect(store.getState().settings.settings.defaultCwd).toBe('/home/user/projects')
+      expect(store.getState().settings.settings.defaultCwd).toBeUndefined()
 
       await act(async () => {
         vi.advanceTimersByTime(500)
+        await Promise.resolve()
       })
 
+      expect(api.post).toHaveBeenCalledWith('/api/files/validate-dir', {
+        path: '/home/user/projects',
+      })
       expect(api.patch).toHaveBeenCalledWith('/api/settings', {
         defaultCwd: '/home/user/projects',
       })
+      expect(store.getState().settings.settings.defaultCwd).toBe('/home/user/projects')
+    })
+
+    it('shows an error and clears default when directory is not found', async () => {
+      vi.mocked(api.post).mockResolvedValue({ valid: false })
+      const store = createTestStore({
+        settings: { ...defaultSettings, defaultCwd: '/some/path' },
+      })
+      renderWithStore(store)
+
+      const cwdInput = screen.getByDisplayValue('/some/path')
+      fireEvent.change(cwdInput, { target: { value: '/missing/path' } })
+
+      expect(store.getState().settings.settings.defaultCwd).toBe('/some/path')
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+      })
+
+      expect(api.post).toHaveBeenCalledWith('/api/files/validate-dir', {
+        path: '/missing/path',
+      })
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        defaultCwd: null,
+      })
+      expect(store.getState().settings.settings.defaultCwd).toBeUndefined()
+      expect(screen.getByText('directory not found')).toBeInTheDocument()
     })
 
     it('clears default working directory when input is emptied', async () => {
@@ -726,6 +987,17 @@ describe('SettingsView Component', () => {
       const cwdInput = screen.getByDisplayValue('/some/path')
       fireEvent.change(cwdInput, { target: { value: '' } })
 
+      expect(store.getState().settings.settings.defaultCwd).toBe('/some/path')
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+      })
+
+      expect(api.post).not.toHaveBeenCalled()
+      expect(api.patch).toHaveBeenCalledWith('/api/settings', {
+        defaultCwd: null,
+      })
       expect(store.getState().settings.settings.defaultCwd).toBeUndefined()
     })
   })
@@ -735,36 +1007,24 @@ describe('SettingsView Component', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      expect(screen.getByText('New terminal')).toBeInTheDocument()
-      expect(screen.getByText('Close tab')).toBeInTheDocument()
-      expect(screen.getByText('Sessions view')).toBeInTheDocument()
-      expect(screen.getByText('Overview')).toBeInTheDocument()
+      expect(screen.getByText('Previous tab')).toBeInTheDocument()
+      expect(screen.getByText('Next tab')).toBeInTheDocument()
     })
 
     it('displays keyboard shortcut keys', () => {
       const store = createTestStore()
       renderWithStore(store)
 
-      // Look for keyboard keys - use getAllByText for keys that appear multiple times
+      // Look for keyboard keys - Ctrl+Shift+[ and Ctrl+Shift+]
       const ctrlKeys = screen.getAllByText('Ctrl')
       expect(ctrlKeys.length).toBeGreaterThan(0)
 
-      // 'B' appears in multiple shortcuts, so use getAllByText
-      const bKeys = screen.getAllByText('B')
-      expect(bKeys.length).toBeGreaterThan(0)
+      const shiftKeys = screen.getAllByText('Shift')
+      expect(shiftKeys.length).toBeGreaterThan(0)
 
-      // These keys may appear multiple times too, use getAllByText
-      const tKeys = screen.getAllByText('T')
-      expect(tKeys.length).toBeGreaterThan(0)
-
-      const wKeys = screen.getAllByText('W')
-      expect(wKeys.length).toBeGreaterThan(0)
-
-      const oKeys = screen.getAllByText('O')
-      expect(oKeys.length).toBeGreaterThan(0)
-
-      const commaKeys = screen.getAllByText(',')
-      expect(commaKeys.length).toBeGreaterThan(0)
+      // Bracket keys
+      expect(screen.getByText('[')).toBeInTheDocument()
+      expect(screen.getByText(']')).toBeInTheDocument()
     })
   })
 

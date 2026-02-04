@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { updateTab } from '@/store/tabsSlice'
-import { updatePaneContent } from '@/store/panesSlice'
+import { updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
+import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
+import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
+import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
+import { copyText, readText } from '@/lib/clipboard'
+import { registerTerminalActions } from '@/lib/pane-action-registry'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
+import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
@@ -11,6 +17,8 @@ import { FitAddon } from 'xterm-addon-fit'
 import { Loader2 } from 'lucide-react'
 import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
+
+const SESSION_ACTIVITY_THROTTLE_MS = 5000
 
 interface TerminalViewProps {
   tabId: string
@@ -33,6 +41,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const fitRef = useRef<FitAddon | null>(null)
   const mountedRef = useRef(false)
   const hiddenRef = useRef(hidden)
+  const lastSessionActivityAtRef = useRef(0)
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -57,16 +66,22 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     hiddenRef.current = hidden
   }, [hidden])
 
+  useEffect(() => {
+    lastSessionActivityAtRef.current = 0
+  }, [tab?.resumeSessionId])
+
   // Helper to update pane content - uses ref to avoid recreation on content changes
   // This is CRITICAL: if updateContent depended on terminalContent directly,
   // it would be recreated on every status update, causing the effect to re-run
   const updateContent = useCallback((updates: Partial<TerminalPaneContent>) => {
     const current = contentRef.current
     if (!current) return
+    const next = { ...current, ...updates }
+    contentRef.current = next
     dispatch(updatePaneContent({
       tabId,
       paneId,
-      content: { ...current, ...updates },
+      content: next,
     }))
   }, [dispatch, tabId, paneId]) // NO terminalContent dependency - uses ref
 
@@ -87,7 +102,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       convertEol: true,
       cursorBlink: settings.terminal.cursorBlink,
       fontSize: settings.terminal.fontSize,
-      fontFamily: settings.terminal.fontFamily,
+      fontFamily: resolveTerminalFontFamily(settings.terminal.fontFamily),
       lineHeight: settings.terminal.lineHeight,
       scrollback: settings.terminal.scrollback,
       theme: getTerminalTheme(settings.terminal.theme, settings.theme),
@@ -100,6 +115,26 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     term.open(containerRef.current)
 
+    const unregisterActions = registerTerminalActions(paneId, {
+      copySelection: async () => {
+        const selection = term.getSelection()
+        if (selection) {
+          await copyText(selection)
+        }
+      },
+      paste: async () => {
+        const text = await readText()
+        if (!text) return
+        const tid = terminalIdRef.current
+        if (!tid) return
+        ws.send({ type: 'terminal.input', terminalId: tid, data: text })
+      },
+      selectAll: () => term.selectAll(),
+      clearScrollback: () => term.clear(),
+      reset: () => term.reset(),
+      hasSelection: () => term.getSelection().length > 0,
+    })
+
     requestAnimationFrame(() => {
       if (termRef.current === term) {
         try { fit.fit() } catch { /* disposed */ }
@@ -110,6 +145,22 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       const tid = terminalIdRef.current
       if (!tid) return
       ws.send({ type: 'terminal.input', terminalId: tid, data })
+
+      const currentTab = tabRef.current
+      if (currentTab) {
+        const now = Date.now()
+        dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: now } }))
+        if (currentTab.resumeSessionId) {
+          if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+            lastSessionActivityAtRef.current = now
+            const provider =
+              currentTab.codingCliProvider ||
+              (currentTab.mode !== 'shell' ? currentTab.mode : undefined) ||
+              'claude'
+            dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, provider, lastInputAt: now }))
+          }
+        }
+      }
     })
 
     term.attachCustomKeyEventHandler((event) => {
@@ -121,8 +172,33 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
         return false
       }
-      // Paste is handled by xterm.js's internal paste handler, which fires onData.
-      // We intentionally do NOT handle Ctrl+Shift+V here to avoid double-paste.
+
+      // Ctrl+V or Ctrl+Shift+V to paste
+      // xterm.js does NOT have a built-in paste handler - we must handle it explicitly
+      if (event.ctrlKey && (event.key === 'v' || event.key === 'V') && event.type === 'keydown' && !event.repeat) {
+        void readText().then((text) => {
+          if (!text) return
+          const tid = terminalIdRef.current
+          if (!tid) return
+          ws.send({ type: 'terminal.input', terminalId: tid, data: text })
+        })
+        return false
+      }
+
+      // Tab switching: Ctrl+Shift+[ (prev) and Ctrl+Shift+] (next)
+      if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.type === 'keydown' && !event.repeat) {
+        if (event.code === 'BracketLeft') {
+          event.preventDefault()
+          dispatch(switchToPrevTab())
+          return false
+        }
+        if (event.code === 'BracketRight') {
+          event.preventDefault()
+          dispatch(switchToNextTab())
+          return false
+        }
+      }
+
       return true
     })
 
@@ -140,6 +216,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     return () => {
       ro.disconnect()
+      unregisterActions()
       if (termRef.current === term) {
         term.dispose()
         termRef.current = null
@@ -154,6 +231,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   useEffect(() => {
     tabRef.current = tab
   }, [tab])
+
+  // Ref for paneId to avoid stale closures in title handlers
+  const paneIdRef = useRef(paneId)
+  useEffect(() => {
+    paneIdRef.current = paneId
+  }, [paneId])
 
   // Track last title we set to avoid churn from spinner animations
   const lastTitleRef = useRef<string | null>(null)
@@ -187,10 +270,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       lastTitleUpdateRef.current = now
 
       dispatch(updateTab({ id: currentTab.id, updates: { title: cleanTitle } }))
+      dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: cleanTitle }))
     })
 
     return () => disposable.dispose()
-  }, [isTerminal, dispatch])
+  }, [isTerminal, dispatch, tabId])
 
   // Apply settings changes
   useEffect(() => {
@@ -199,7 +283,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (!term) return
     term.options.cursorBlink = settings.terminal.cursorBlink
     term.options.fontSize = settings.terminal.fontSize
-    term.options.fontFamily = settings.terminal.fontFamily
+    term.options.fontFamily = resolveTerminalFontFamily(settings.terminal.fontFamily)
     term.options.lineHeight = settings.terminal.lineHeight
     term.options.scrollback = settings.terminal.scrollback
     term.options.theme = getTerminalTheme(settings.terminal.theme, settings.theme)
@@ -207,18 +291,16 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   }, [isTerminal, settings, hidden])
 
   // When becoming visible, fit and send size
+  // Note: With visibility:hidden CSS, dimensions are always stable, so no RAF needed
   useEffect(() => {
     if (!isTerminal) return
     if (!hidden) {
-      const frameId = requestAnimationFrame(() => {
-        fitRef.current?.fit()
-        const term = termRef.current
-        const tid = terminalIdRef.current
-        if (term && tid) {
-          ws.send({ type: 'terminal.resize', terminalId: tid, cols: term.cols, rows: term.rows })
-        }
-      })
-      return () => cancelAnimationFrame(frameId)
+      fitRef.current?.fit()
+      const term = termRef.current
+      const tid = terminalIdRef.current
+      if (term && tid) {
+        ws.send({ type: 'terminal.resize', terminalId: tid, cols: term.cols, rows: term.rows })
+      }
     }
   }, [isTerminal, hidden, ws])
 
@@ -230,7 +312,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     // NOTE: We intentionally don't destructure terminalId here.
     // We read it from terminalIdRef.current to avoid stale closures.
-    const { createRequestId, mode, shell, initialCwd, resumeSessionId } = terminalContent
+    const { createRequestId, mode, shell, initialCwd } = terminalContent
 
     let unsub = () => {}
     let unsubReconnect = () => {}
@@ -285,12 +367,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.exit' && msg.terminalId === tid) {
-          updateContent({ status: 'exited' })
+          // Clear terminalIdRef AND the stored terminalId to prevent any subsequent
+          // operations (resize, input) from sending commands to the dead terminal,
+          // which would trigger INVALID_TERMINAL_ID and cause a reconnection loop.
+          // We must clear both the ref AND the Redux state because the ref sync effect
+          // would otherwise reset the ref from the Redux state on re-render.
+          terminalIdRef.current = undefined
+          updateContent({ terminalId: undefined, status: 'exited' })
           const exitTab = tabRef.current
           if (exitTab) {
             const code = typeof msg.exitCode === 'number' ? msg.exitCode : undefined
             // Only modify title if user hasn't manually set it
-            const updates: { status: 'exited'; title?: string } = { status: 'exited' }
+            const updates: { terminalId: undefined; status: 'exited'; title?: string } = { terminalId: undefined, status: 'exited' }
             if (!exitTab.titleSetByUser) {
               updates.title = exitTab.title + (code !== undefined ? ` (exit ${code})` : '')
             }
@@ -303,6 +391,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           const titleTab = tabRef.current
           if (titleTab && !titleTab.titleSetByUser && msg.title) {
             dispatch(updateTab({ id: titleTab.id, updates: { title: msg.title } }))
+            dispatch(updatePaneTitle({ tabId, paneId: paneIdRef.current, title: msg.title }))
+          }
+        }
+
+        // Handle one-time session association (when Claude creates a new session)
+        // Message type: { type: 'terminal.session.associated', terminalId: string, sessionId: string }
+        if (msg.type === 'terminal.session.associated' && msg.terminalId === tid) {
+          const sessionId = msg.sessionId as string
+          updateContent({ resumeSessionId: sessionId })
+          // Also update the tab for sidebar session matching
+          const currentTab = tabRef.current
+          if (currentTab) {
+            dispatch(updateTab({ id: currentTab.id, updates: { resumeSessionId: sessionId } }))
           }
         }
 
@@ -313,20 +414,16 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'error' && msg.code === 'INVALID_TERMINAL_ID' && !msg.requestId) {
-          if (terminalIdRef.current) {
+          const currentTerminalId = terminalIdRef.current
+          if (msg.terminalId && msg.terminalId !== currentTerminalId) {
+            return
+          }
+          if (currentTerminalId) {
             term.writeln('\r\n[Reconnecting...]\r\n')
             const newRequestId = nanoid()
             requestIdRef.current = newRequestId
             terminalIdRef.current = undefined
             updateContent({ terminalId: undefined, createRequestId: newRequestId, status: 'creating' })
-            ws.send({
-              type: 'terminal.create',
-              requestId: newRequestId,
-              mode,
-              shell: shell || 'system',
-              cwd: initialCwd,
-              resumeSessionId,
-            })
           }
         }
       })
@@ -351,7 +448,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           mode,
           shell: shell || 'system',
           cwd: initialCwd,
-          resumeSessionId,
+          resumeSessionId: getResumeSessionIdFromRef(contentRef),
         })
       }
     }
@@ -389,7 +486,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const showSpinner = terminalContent.status === 'creating' || isAttaching
 
   return (
-    <div className={cn('h-full w-full relative', hidden ? 'hidden' : '')}>
+    <div
+      className={cn('h-full w-full', hidden ? 'tab-hidden' : 'tab-visible relative')}
+      data-context={ContextIds.Terminal}
+      data-pane-id={paneId}
+      data-tab-id={tabId}
+    >
       <div ref={containerRef} className="h-full w-full" />
       {showSpinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">

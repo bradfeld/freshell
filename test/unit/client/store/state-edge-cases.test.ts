@@ -802,6 +802,9 @@ describe('State Edge Cases', () => {
         const customSettings: AppSettings = {
           theme: 'light',
           uiScale: 2.0,
+          logging: {
+            debug: false,
+          },
           terminal: {
             fontSize: 24,
             fontFamily: 'Fira Code',
@@ -818,6 +821,18 @@ describe('State Edge Cases', () => {
           sidebar: {
             sortMode: 'activity',
             showProjectBadges: false,
+            width: 400,
+            collapsed: true,
+          },
+          panes: {
+            defaultNewPane: 'shell',
+          },
+          codingCli: {
+            enabledProviders: ['claude', 'codex'],
+            providers: {
+              claude: { permissionMode: 'default' },
+              codex: { model: 'gpt-5-codex' },
+            },
           },
         }
 

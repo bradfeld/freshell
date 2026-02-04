@@ -1,8 +1,11 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { ArrowLeft, ArrowRight, RotateCcw, X, Wrench } from 'lucide-react'
 import { useAppDispatch } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
 import { cn } from '@/lib/utils'
+import { copyText } from '@/lib/clipboard'
+import { registerBrowserActions } from '@/lib/pane-action-registry'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 interface BrowserPaneProps {
   paneId: string
@@ -125,8 +128,29 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
 
   const currentUrl = history[historyIndex] || ''
 
+  useEffect(() => {
+    return registerBrowserActions(paneId, {
+      back: goBack,
+      forward: goForward,
+      reload: refresh,
+      stop,
+      copyUrl: async () => {
+        if (currentUrl) await copyText(currentUrl)
+      },
+      openExternal: () => {
+        if (currentUrl) window.open(currentUrl, '_blank', 'noopener,noreferrer')
+      },
+      toggleDevTools,
+    })
+  }, [paneId, goBack, goForward, refresh, stop, toggleDevTools, currentUrl])
+
   return (
-    <div className="flex flex-col h-full w-full bg-background">
+    <div
+      className="flex flex-col h-full w-full bg-background"
+      data-context={ContextIds.Browser}
+      data-pane-id={paneId}
+      data-tab-id={tabId}
+    >
       {/* Toolbar */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-card">
         <button

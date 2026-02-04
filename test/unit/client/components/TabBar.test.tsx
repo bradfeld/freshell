@@ -4,7 +4,9 @@ import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import TabBar from '@/components/TabBar'
 import tabsReducer, { TabsState } from '@/store/tabsSlice'
-import claudeReducer from '@/store/claudeSlice'
+import codingCliReducer, { registerCodingCliRequest } from '@/store/codingCliSlice'
+import panesReducer from '@/store/panesSlice'
+import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import type { Tab } from '@/store/types'
 
 // Mock the ws-client module
@@ -54,7 +56,9 @@ function createStore(initialState: Partial<TabsState> = {}) {
   return configureStore({
     reducer: {
       tabs: tabsReducer,
-      claude: claudeReducer,
+      codingCli: codingCliReducer,
+      panes: panesReducer,
+      settings: settingsReducer,
     },
     preloadedState: {
       tabs: {
@@ -62,8 +66,17 @@ function createStore(initialState: Partial<TabsState> = {}) {
         activeTabId: null,
         ...initialState,
       },
-      claude: {
+      codingCli: {
         sessions: {},
+        pendingRequests: {},
+      },
+      panes: {
+        layouts: {},
+        activePane: {},
+      },
+      settings: {
+        settings: defaultSettings,
+        loaded: true,
       },
     },
   })
@@ -150,8 +163,8 @@ describe('TabBar', () => {
       const activeTabElement = screen.getByText('Active Tab').closest('div[class*="group"]')
       const inactiveTabElement = screen.getByText('Inactive Tab').closest('div[class*="group"]')
 
-      // Active tab should have bg-muted class
-      expect(activeTabElement?.className).toContain('bg-muted')
+      // Active tab should have bg-background class (tab-like styling)
+      expect(activeTabElement?.className).toContain('bg-background')
       expect(activeTabElement?.className).toContain('text-foreground')
 
       // Inactive tab should have text-muted-foreground class
@@ -171,7 +184,7 @@ describe('TabBar', () => {
 
       // Initial state - tab 1 is active
       let tab1Element = screen.getByText('Tab 1').closest('div[class*="group"]')
-      expect(tab1Element?.className).toContain('bg-muted')
+      expect(tab1Element?.className).toContain('bg-background')
 
       // Click tab 2 to change active tab
       fireEvent.click(screen.getByText('Tab 2'))
@@ -187,8 +200,8 @@ describe('TabBar', () => {
       const tab2Element = screen.getByText('Tab 2').closest('div[class*="group"]')
       tab1Element = screen.getByText('Tab 1').closest('div[class*="group"]')
 
-      expect(tab2Element?.className).toContain('bg-muted')
-      expect(tab1Element?.className).not.toContain('bg-muted text-foreground')
+      expect(tab2Element?.className).toContain('bg-background')
+      expect(tab1Element?.className).not.toContain('bg-background text-foreground')
     })
   })
 

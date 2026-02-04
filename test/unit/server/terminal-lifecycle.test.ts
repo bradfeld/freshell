@@ -42,17 +42,24 @@ vi.mock('node-pty', () => ({
   }),
 }))
 
-vi.mock('../../../server/logger', () => ({
-  logger: {
+vi.mock('../../../server/logger', () => {
+  const logger = {
     info: vi.fn(),
     warn: vi.fn(),
     debug: vi.fn(),
     error: vi.fn(),
-  },
-}))
+    trace: vi.fn(),
+    fatal: vi.fn(),
+    child: vi.fn(),
+  }
+  logger.child.mockReturnValue(logger)
+  return { logger }
+})
 
 // Import after mocking
 import { TerminalRegistry, type TerminalRecord, ChunkRingBuffer } from '../../../server/terminal-registry'
+import { getPerfConfig, setPerfLoggingEnabled } from '../../../server/perf-logger'
+import { logger } from '../../../server/logger'
 import type { AppSettings } from '../../../server/config-store'
 
 // Mock WebSocket
@@ -68,15 +75,33 @@ function createMockWebSocket(): any {
 function createTestSettings(overrides?: Partial<AppSettings>): AppSettings {
   return {
     theme: 'system',
+    uiScale: 1.0,
+    logging: {
+      debug: false,
+    },
     terminal: {
-      fontFamily: 'monospace',
       fontSize: 14,
+      lineHeight: 1,
       cursorBlink: true,
       scrollback: 5000,
+      theme: 'auto',
     },
     safety: {
       autoKillIdleMinutes: 30,
       warnBeforeKillMinutes: 5,
+    },
+    sidebar: {
+      sortMode: 'hybrid',
+      showProjectBadges: true,
+      width: 288,
+      collapsed: false,
+    },
+    codingCli: {
+      enabledProviders: ['claude', 'codex'],
+      providers: {
+        claude: { permissionMode: 'default' },
+        codex: {},
+      },
     },
     ...overrides,
   }
@@ -96,6 +121,31 @@ describe('TerminalRegistry Lifecycle', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  describe('terminal input perf logging', () => {
+    afterEach(() => {
+      setPerfLoggingEnabled(false, 'test')
+    })
+
+    it('logs input lag when output follows delayed input', () => {
+      setPerfLoggingEnabled(true, 'test')
+      getPerfConfig().terminalInputLagMs = 100
+
+      const perfRegistry = new TerminalRegistry(settings)
+      const term = perfRegistry.create({ mode: 'shell' })
+      const pty = mockPtyProcess.instances[mockPtyProcess.instances.length - 1]
+
+      logger.debug.mockClear()
+      vi.setSystemTime(10_000)
+      perfRegistry.input(term.terminalId, 'a')
+      vi.advanceTimersByTime(150)
+      pty._emitData('echo')
+
+      const events = logger.debug.mock.calls.map((call) => call[0]?.event)
+      expect(events).toContain('terminal_input_lag')
+
+    })
   })
 
   describe('Terminal created but never attached', () => {

@@ -2,8 +2,10 @@ import { Plus } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, closeTab, setActiveTab, updateTab, reorderTabs } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
+import { getTabDisplayTitle } from '@/lib/tab-title'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import TabItem from './TabItem'
+import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import {
   DndContext,
   closestCenter,
@@ -24,9 +26,11 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Tab } from '@/store/types'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 interface SortableTabProps {
   tab: Tab
+  displayTitle: string
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
@@ -41,6 +45,7 @@ interface SortableTabProps {
 
 function SortableTab({
   tab,
+  displayTitle,
   isActive,
   isDragging,
   isRenaming,
@@ -65,10 +70,16 @@ function SortableTab({
     transition: transition || 'transform 150ms ease',
   }
 
+  // Create tab with display title for rendering
+  const tabWithDisplayTitle = useMemo(
+    () => ({ ...tab, title: displayTitle }),
+    [tab, displayTitle]
+  )
+
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       <TabItem
-        tab={tab}
+        tab={tabWithDisplayTitle}
         isActive={isActive}
         isDragging={isDragging}
         isRenaming={isRenaming}
@@ -84,11 +95,22 @@ function SortableTab({
   )
 }
 
+// Stable empty object to avoid creating new references
+const EMPTY_LAYOUTS: Record<string, never> = {}
+
 export default function TabBar() {
   const dispatch = useAppDispatch()
   const { tabs, activeTabId } = useAppSelector((s) => s.tabs)
+  const paneLayouts = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
 
   const ws = useMemo(() => getWsClient(), [])
+
+  // Compute display title for a single tab
+  // Priority: user-set title > programmatically-set title (e.g., from Claude) > derived name
+  const getDisplayTitle = useCallback(
+    (tab: Tab): string => getTabDisplayTitle(tab, paneLayouts[tab.id]),
+    [paneLayouts]
+  )
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -146,7 +168,7 @@ export default function TabBar() {
   if (tabs.length === 0) return null
 
   return (
-    <div className="h-10 flex items-center gap-1 px-2 border-b border-border/30 bg-background">
+    <div className="h-10 flex items-end px-2 bg-card" data-context={ContextIds.Global}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -157,11 +179,12 @@ export default function TabBar() {
           items={tabs.map((t: Tab) => t.id)}
           strategy={horizontalListSortingStrategy}
         >
-          <div className="flex items-center gap-0.5 overflow-x-auto flex-1 py-1">
+          <div className="flex items-end gap-0.5 overflow-x-auto flex-1">
             {tabs.map((tab: Tab) => (
               <SortableTab
                 key={tab.id}
                 tab={tab}
+                displayTitle={getDisplayTitle(tab)}
                 isActive={tab.id === activeTabId}
                 isDragging={activeId === tab.id}
                 isRenaming={renamingId === tab.id}
@@ -177,6 +200,7 @@ export default function TabBar() {
                   setRenamingId(null)
                 }}
                 onRenameKeyDown={(e) => {
+                  e.stopPropagation() // Prevent dnd-kit from intercepting keys (esp. space)
                   if (e.key === 'Enter' || e.key === 'Escape') {
                     ;(e.target as HTMLInputElement).blur()
                   }
@@ -187,16 +211,33 @@ export default function TabBar() {
                       type: e.shiftKey ? 'terminal.kill' : 'terminal.detach',
                       terminalId: tab.terminalId,
                     })
+                  } else if (tab.codingCliSessionId) {
+                    if (tab.status === 'creating') {
+                      dispatch(cancelCodingCliRequest({ requestId: tab.codingCliSessionId }))
+                    } else {
+                      ws.send({
+                        type: 'codingcli.kill',
+                        sessionId: tab.codingCliSessionId,
+                      })
+                    }
                   }
                   dispatch(closeTab(tab.id))
                 }}
                 onClick={() => dispatch(setActiveTab(tab.id))}
                 onDoubleClick={() => {
                   setRenamingId(tab.id)
-                  setRenameValue(tab.title)
+                  setRenameValue(getDisplayTitle(tab))
                 }}
               />
             ))}
+            <button
+              className="flex-shrink-0 ml-1 mb-1 p-1 rounded-md border border-dashed border-muted-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground/50 hover:bg-muted/30 transition-colors"
+              title="New shell tab"
+              onClick={() => dispatch(addTab({ mode: 'shell' }))}
+              data-context={ContextIds.TabAdd}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
           </div>
         </SortableContext>
 
@@ -211,7 +252,7 @@ export default function TabBar() {
               }}
             >
               <TabItem
-                tab={activeTab}
+                tab={{ ...activeTab, title: getDisplayTitle(activeTab) }}
                 isActive={activeTab.id === activeTabId}
                 isDragging={false}
                 isRenaming={false}
@@ -227,14 +268,6 @@ export default function TabBar() {
           ) : null}
         </DragOverlay>
       </DndContext>
-
-      <button
-        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-        title="New shell tab"
-        onClick={() => dispatch(addTab({ mode: 'shell' }))}
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { nanoid } from 'nanoid'
 import type { PanesState, PaneContent, PaneContentInput, PaneNode } from './paneTypes'
+import { derivePaneTitle } from '@/lib/derivePaneTitle'
 
 /**
  * Normalize terminal input to full PaneContent with defaults.
@@ -28,6 +29,7 @@ function loadInitialPanesState(): PanesState {
   const defaultState: PanesState = {
     layouts: {},
     activePane: {},
+    paneTitles: {},
   }
 
   try {
@@ -38,6 +40,7 @@ function loadInitialPanesState(): PanesState {
     return {
       layouts: parsed.layouts || {},
       activePane: parsed.activePane || {},
+      paneTitles: parsed.paneTitles || {},
     }
   } catch (err) {
     console.error('[PanesSlice] Failed to load from localStorage:', err)
@@ -176,6 +179,22 @@ export const panesSlice = createSlice({
       state.activePane[tabId] = paneId
     },
 
+    resetLayout: (
+      state,
+      action: PayloadAction<{ tabId: string; content: PaneContentInput }>
+    ) => {
+      const { tabId, content } = action.payload
+      const paneId = nanoid()
+      const normalized = normalizeContent(content)
+      state.layouts[tabId] = {
+        type: 'leaf',
+        id: paneId,
+        content: normalized,
+      }
+      state.activePane[tabId] = paneId
+      state.paneTitles[tabId] = { [paneId]: derivePaneTitle(normalized) }
+    },
+
     splitPane: (
       state,
       action: PayloadAction<{
@@ -217,6 +236,13 @@ export const panesSlice = createSlice({
       if (newRoot) {
         state.layouts[tabId] = newRoot
         state.activePane[tabId] = newPaneId
+
+        // Initialize title for new pane
+        const normalizedContent = normalizeContent(newContent)
+        if (!state.paneTitles[tabId]) {
+          state.paneTitles[tabId] = {}
+        }
+        state.paneTitles[tabId][newPaneId] = derivePaneTitle(normalizedContent)
       }
     },
 
@@ -255,6 +281,12 @@ export const panesSlice = createSlice({
       const allLeaves = [...existingLeaves, newLeaf]
       state.layouts[tabId] = buildGridLayout(allLeaves)
       state.activePane[tabId] = newPaneId
+
+      // Initialize title for new pane
+      if (!state.paneTitles[tabId]) {
+        state.paneTitles[tabId] = {}
+      }
+      state.paneTitles[tabId][newPaneId] = derivePaneTitle(newLeaf.content)
     },
 
     closePane: (
@@ -282,6 +314,11 @@ export const panesSlice = createSlice({
       if (state.activePane[tabId] === paneId) {
         // Set active to the last remaining leaf (similar to where the new pane would be)
         state.activePane[tabId] = remainingLeaves[remainingLeaves.length - 1].id
+      }
+
+      // Clean up pane title
+      if (state.paneTitles[tabId]?.[paneId]) {
+        delete state.paneTitles[tabId][paneId]
       }
     },
 
@@ -315,6 +352,54 @@ export const panesSlice = createSlice({
       state.layouts[tabId] = updateSizes(root)
     },
 
+    resetSplit: (
+      state,
+      action: PayloadAction<{ tabId: string; splitId: string }>
+    ) => {
+      const { tabId, splitId } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      function update(node: PaneNode): PaneNode {
+        if (node.type === 'leaf') return node
+        if (node.id === splitId) {
+          return { ...node, sizes: [50, 50] }
+        }
+        return {
+          ...node,
+          children: [update(node.children[0]), update(node.children[1])],
+        }
+      }
+
+      state.layouts[tabId] = update(root)
+    },
+
+    swapSplit: (
+      state,
+      action: PayloadAction<{ tabId: string; splitId: string }>
+    ) => {
+      const { tabId, splitId } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      function update(node: PaneNode): PaneNode {
+        if (node.type === 'leaf') return node
+        if (node.id === splitId) {
+          return {
+            ...node,
+            children: [node.children[1], node.children[0]],
+            sizes: [node.sizes[1], node.sizes[0]],
+          }
+        }
+        return {
+          ...node,
+          children: [update(node.children[0]), update(node.children[1])],
+        }
+      }
+
+      state.layouts[tabId] = update(root)
+    },
+
     updatePaneContent: (
       state,
       action: PayloadAction<{ tabId: string; paneId: string; content: PaneContent }>
@@ -337,6 +422,12 @@ export const panesSlice = createSlice({
       }
 
       state.layouts[tabId] = updateContent(root)
+
+      // Update pane title when content changes
+      if (!state.paneTitles[tabId]) {
+        state.paneTitles[tabId] = {}
+      }
+      state.paneTitles[tabId][paneId] = derivePaneTitle(content)
     },
 
     removeLayout: (
@@ -346,25 +437,42 @@ export const panesSlice = createSlice({
       const { tabId } = action.payload
       delete state.layouts[tabId]
       delete state.activePane[tabId]
+      delete state.paneTitles[tabId]
     },
 
     hydratePanes: (state, action: PayloadAction<PanesState>) => {
       state.layouts = action.payload.layouts || {}
       state.activePane = action.payload.activePane || {}
+      state.paneTitles = action.payload.paneTitles || {}
+    },
+
+    updatePaneTitle: (
+      state,
+      action: PayloadAction<{ tabId: string; paneId: string; title: string }>
+    ) => {
+      const { tabId, paneId, title } = action.payload
+      if (!state.paneTitles[tabId]) {
+        state.paneTitles[tabId] = {}
+      }
+      state.paneTitles[tabId][paneId] = title
     },
   },
 })
 
 export const {
   initLayout,
+  resetLayout,
   splitPane,
   addPane,
   closePane,
   setActivePane,
   resizePanes,
+  resetSplit,
+  swapSplit,
   updatePaneContent,
   removeLayout,
   hydratePanes,
+  updatePaneTitle,
 } = panesSlice.actions
 
 export default panesSlice.reducer

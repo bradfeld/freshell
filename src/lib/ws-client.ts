@@ -1,8 +1,12 @@
+import { getClientPerfConfig, isClientPerfLoggingEnabled, logClientPerf } from '@/lib/perf-logger'
+
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'ready'
 type MessageHandler = (msg: any) => void
 type ReconnectHandler = () => void
+type HelloExtensionProvider = () => { sessions?: { active?: string; visible?: string[]; background?: string[] } }
 
 const CONNECTION_TIMEOUT_MS = 10_000
+const perfConfig = getClientPerfConfig()
 
 // Single source of auth token: sessionStorage only.
 function getAuthToken(): string | undefined {
@@ -33,6 +37,7 @@ export class WsClient {
   private reconnectHandlers = new Set<ReconnectHandler>()
   private pendingMessages: unknown[] = []
   private intentionalClose = false
+  private helloExtensionProvider?: HelloExtensionProvider
 
   private reconnectAttempts = 0
   private maxReconnectAttempts = 10
@@ -40,8 +45,18 @@ export class WsClient {
   private wasConnectedOnce = false
 
   private maxQueueSize = 1000
+  private connectStartedAt: number | null = null
+  private lastQueueLogAt = 0
 
   constructor(private url: string) {}
+
+  /**
+   * Set a provider for additional data to include in the hello message.
+   * Used to send session IDs for prioritized repair scanning.
+   */
+  setHelloExtensionProvider(provider: HelloExtensionProvider): void {
+    this.helloExtensionProvider = provider
+  }
 
   get state(): ConnectionState {
     return this._state
@@ -58,6 +73,9 @@ export class WsClient {
 
     this.intentionalClose = false
     this._state = 'connecting'
+    if (isClientPerfLoggingEnabled()) {
+      this.connectStartedAt = performance.now()
+    }
 
     return new Promise((resolve, reject) => {
       let finished = false
@@ -87,10 +105,18 @@ export class WsClient {
 
         // Send hello with token in message body (not URL).
         const token = getAuthToken()
-        this.ws?.send(JSON.stringify({ type: 'hello', token }))
+        const extensions = this.helloExtensionProvider?.() || {}
+        this.ws?.send(JSON.stringify({ type: 'hello', token, ...extensions }))
       }
 
       this.ws.onmessage = (event) => {
+        let payloadBytes: number | undefined
+        if (isClientPerfLoggingEnabled()) {
+          if (typeof event.data === 'string') payloadBytes = event.data.length
+          else if (event.data instanceof Blob) payloadBytes = event.data.size
+          else if (event.data instanceof ArrayBuffer) payloadBytes = event.data.byteLength
+        }
+
         let msg: any
         try {
           msg = JSON.parse(event.data)
@@ -104,6 +130,22 @@ export class WsClient {
           const isReconnect = this.wasConnectedOnce
           this.wasConnectedOnce = true
           this._state = 'ready'
+
+          if (isClientPerfLoggingEnabled() && this.connectStartedAt !== null) {
+            const durationMs = performance.now() - this.connectStartedAt
+            this.connectStartedAt = null
+            if (durationMs >= perfConfig.wsReadySlowMs) {
+              logClientPerf('perf.ws_ready_slow', {
+                durationMs: Number(durationMs.toFixed(2)),
+                reconnect: isReconnect,
+              }, 'warn')
+            } else {
+              logClientPerf('perf.ws_ready', {
+                durationMs: Number(durationMs.toFixed(2)),
+                reconnect: isReconnect,
+              })
+            }
+          }
 
           // Flush queued messages
           while (this.pendingMessages.length > 0) {
@@ -124,7 +166,21 @@ export class WsClient {
           return
         }
 
-        this.messageHandlers.forEach((handler) => handler(msg))
+        if (isClientPerfLoggingEnabled()) {
+          const start = performance.now()
+          this.messageHandlers.forEach((handler) => handler(msg))
+          const durationMs = performance.now() - start
+          if (durationMs >= perfConfig.wsMessageSlowMs) {
+            logClientPerf('perf.ws_message_handlers_slow', {
+              durationMs: Number(durationMs.toFixed(2)),
+              messageType: msg?.type,
+              payloadBytes,
+              handlerCount: this.messageHandlers.size,
+            }, 'warn')
+          }
+        } else {
+          this.messageHandlers.forEach((handler) => handler(msg))
+        }
       }
 
       this.ws.onclose = (event) => {
@@ -157,6 +213,14 @@ export class WsClient {
           finishReject(new Error('Connection closed before ready'))
         }
 
+        if (isClientPerfLoggingEnabled()) {
+          logClientPerf('perf.ws_closed', {
+            code: event.code,
+            reason: event.reason,
+            wasConnecting,
+          }, 'warn')
+        }
+
         if (!this.intentionalClose) {
           this.scheduleReconnect()
         }
@@ -185,6 +249,13 @@ export class WsClient {
         this.connect().catch((err) => console.error('WsClient: reconnect failed', err))
       }
     }, delay)
+
+    if (isClientPerfLoggingEnabled()) {
+      logClientPerf('perf.ws_reconnect_scheduled', {
+        delayMs: delay,
+        attempt: this.reconnectAttempts,
+      })
+    }
   }
 
   disconnect() {
@@ -212,6 +283,16 @@ export class WsClient {
       this.pendingMessages.shift()
     }
     this.pendingMessages.push(msg)
+
+    if (isClientPerfLoggingEnabled() && this.pendingMessages.length >= perfConfig.wsQueueWarnSize) {
+      const now = Date.now()
+      if (now - this.lastQueueLogAt >= perfConfig.rateLimitMs) {
+        this.lastQueueLogAt = now
+        logClientPerf('perf.ws_queue_backlog', {
+          queueSize: this.pendingMessages.length,
+        }, 'warn')
+      }
+    }
   }
 
   onMessage(handler: MessageHandler): () => void {

@@ -1,27 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal, History, Settings, LayoutGrid, Search, Play } from 'lucide-react'
+import { Terminal, History, Settings, LayoutGrid, Search, Loader2, X, Archive } from 'lucide-react'
+import { List, type RowComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, setActiveTab } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
-import type { BackgroundTerminal, ClaudeSession, ProjectGroup } from '@/store/types'
+import { searchSessions, type SearchResult } from '@/lib/api'
+import { getProviderLabel } from '@/lib/coding-cli-utils'
+import type { BackgroundTerminal, CodingCliProviderName } from '@/store/types'
+import { makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
+import { ProviderIcon } from '@/components/icons/provider-icons'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
 
-interface SessionItem {
-  id: string
-  sessionId: string
-  title: string
-  subtitle?: string
-  projectPath?: string
-  projectColor?: string
-  timestamp: number
-  cwd?: string
-  // Running state (derived from terminals)
-  isRunning: boolean
-  runningTerminalId?: string
-}
+type SessionItem = SidebarSessionItem
+
+const SESSION_ITEM_HEIGHT = 56
+const SESSION_LIST_MAX_HEIGHT = 600
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now()
@@ -37,9 +34,9 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function getProjectName(path: string): string {
-  const parts = path.replace(/\\/g, '/').split('/')
-  return parts[parts.length - 1] || path
+function getProjectName(projectPath: string): string {
+  const parts = projectPath.replace(/\\/g, '/').split('/')
+  return parts[parts.length - 1] || projectPath
 }
 
 export default function Sidebar({
@@ -53,14 +50,19 @@ export default function Sidebar({
 }) {
   const dispatch = useAppDispatch()
   const settings = useAppSelector((s) => s.settings.settings)
-  const projects = useAppSelector((s) => s.sessions.projects)
   const tabs = useAppSelector((s) => s.tabs.tabs)
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
+  const selectSortedItems = useMemo(() => makeSelectSortedSessionItems(), [])
 
   const ws = useMemo(() => getWsClient(), [])
   const [terminals, setTerminals] = useState<BackgroundTerminal[]>([])
   const [filter, setFilter] = useState('')
+  const [searchTier, setSearchTier] = useState<'title' | 'userMessages' | 'fullText'>('title')
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null)
+  const [isSearching, setIsSearching] = useState(false)
   const requestIdRef = useRef<string | null>(null)
+  const listContainerRef = useRef<HTMLDivElement | null>(null)
+  const [listHeight, setListHeight] = useState(0)
 
   // Fetch background terminals
   const refresh = () => {
@@ -90,95 +92,108 @@ export default function Sidebar({
     }
   }, [ws])
 
-  // Build session list with running state from terminals
-  const sessionItems = useMemo(() => {
-    const items: SessionItem[] = []
-    const terminalsArray = terminals ?? []
-    const projectsArray = projects ?? []
+  // Backend search for non-title tiers
+  useEffect(() => {
+    if (!filter.trim() || searchTier === 'title') {
+      setSearchResults(null)
+      setIsSearching(false)
+      return
+    }
 
-    // Build map: sessionId -> running terminalId
-    const runningSessionMap = new Map<string, string>()
-    terminalsArray.forEach((t) => {
-      if (t.mode === 'claude' && t.status === 'running' && t.resumeSessionId) {
-        runningSessionMap.set(t.resumeSessionId, t.terminalId)
-      }
-    })
-
-    // Add sessions with running state
-    projectsArray.forEach((project) => {
-      project.sessions.forEach((session) => {
-        const runningTerminalId = runningSessionMap.get(session.sessionId)
-        items.push({
-          id: `session-${session.sessionId}`,
-          sessionId: session.sessionId,
-          title: session.title || session.sessionId.slice(0, 8),
-          subtitle: getProjectName(project.projectPath),
-          projectPath: project.projectPath,
-          projectColor: project.color,
-          timestamp: session.updatedAt,
-          cwd: session.cwd,
-          isRunning: !!runningTerminalId,
-          runningTerminalId,
+    const controller = new AbortController()
+    const timeoutId = setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const response = await searchSessions({
+          query: filter.trim(),
+          tier: searchTier,
         })
-      })
-    })
+        if (!controller.signal.aborted) {
+          setSearchResults(response.results)
+        }
+      } catch (err) {
+        console.error('Search failed:', err)
+        if (!controller.signal.aborted) {
+          setSearchResults([])
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearching(false)
+        }
+      }
+    }, 300) // Debounce 300ms
 
-    return items
-  }, [terminals, projects])
+    return () => {
+      controller.abort()
+      clearTimeout(timeoutId)
+      setIsSearching(false)
+    }
+  }, [filter, searchTier])
 
-  // Filter items
-  const filteredItems = useMemo(() => {
-    if (!filter.trim()) return sessionItems
-    const q = filter.toLowerCase()
-    return sessionItems.filter(
-      (item) =>
-        item.title.toLowerCase().includes(q) ||
-        item.subtitle?.toLowerCase().includes(q) ||
-        item.projectPath?.toLowerCase().includes(q)
-    )
-  }, [sessionItems, filter])
+  // Build session list with selector for local filtering (title tier)
+  const localFilteredItems = useAppSelector((state) => selectSortedItems(state, terminals, filter))
+  const allItems = useAppSelector((state) => selectSortedItems(state, terminals, ''))
+  const itemsByKey = useMemo(() => {
+    const map = new Map<string, SidebarSessionItem>()
+    for (const item of allItems) {
+      map.set(`${item.provider}:${item.sessionId}`, item)
+    }
+    return map
+  }, [allItems])
 
-  // Sort items based on settings
+  // Combine local and backend search results
   const sortedItems = useMemo(() => {
-    const sortMode = settings.sidebar?.sortMode || 'hybrid'
-    const items = [...filteredItems]
-
-    if (sortMode === 'recency') {
-      return items.sort((a, b) => b.timestamp - a.timestamp)
-    }
-
-    if (sortMode === 'activity') {
-      return items.sort((a, b) => {
-        if (a.isRunning && !b.isRunning) return -1
-        if (!a.isRunning && b.isRunning) return 1
-        return b.timestamp - a.timestamp
+    // If we have backend search results, convert them to SessionItems
+    if (searchResults !== null) {
+      return searchResults.map((result): SessionItem => {
+        const provider = (result.provider || 'claude') as CodingCliProviderName
+        const key = `${provider}:${result.sessionId}`
+        const existing = itemsByKey.get(key)
+        return {
+          id: `search-${provider}-${result.sessionId}`,
+          sessionId: result.sessionId,
+          provider,
+          title: result.title || result.sessionId.slice(0, 8),
+          subtitle: getProjectName(result.projectPath),
+          projectPath: result.projectPath,
+          projectColor: existing?.projectColor,
+          timestamp: result.updatedAt,
+          archived: result.archived,
+          cwd: result.cwd,
+          hasTab: existing?.hasTab ?? false,
+          tabLastInputAt: existing?.tabLastInputAt,
+          ratchetedActivity: existing?.ratchetedActivity,
+          isRunning: existing?.isRunning ?? false,
+          runningTerminalId: existing?.runningTerminalId,
+        }
       })
     }
 
-    if (sortMode === 'project') {
-      return items.sort((a, b) => {
-        const projA = a.projectPath || a.subtitle || ''
-        const projB = b.projectPath || b.subtitle || ''
-        if (projA !== projB) return projA.localeCompare(projB)
-        return b.timestamp - a.timestamp
-      })
+    // Otherwise use local filtering for title tier
+    return localFilteredItems
+  }, [itemsByKey, localFilteredItems, searchResults])
+
+  useEffect(() => {
+    const container = listContainerRef.current
+    if (!container) return
+
+    const updateHeight = () => {
+      const nextHeight = container.clientHeight
+      if (nextHeight > 0) {
+        setListHeight(nextHeight)
+      }
     }
 
-    // Hybrid: running sessions first, then recency
-    const running = items.filter((i) => i.isRunning)
-    const rest = items.filter((i) => !i.isRunning)
-    running.sort((a, b) => b.timestamp - a.timestamp)
-    rest.sort((a, b) => b.timestamp - a.timestamp)
-    return [...running, ...rest]
-  }, [filteredItems, settings.sidebar?.sortMode])
+    updateHeight()
 
-  // Separate running sessions for hybrid display
-  const runningSessions = sortedItems.filter((i) => i.isRunning)
-  const otherItems = settings.sidebar?.sortMode === 'hybrid'
-    ? sortedItems.filter((i) => !i.isRunning)
-    : sortedItems
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => updateHeight())
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [])
 
   const handleItemClick = (item: SessionItem) => {
+    const provider = item.provider as CodingCliProviderName
     if (item.isRunning && item.runningTerminalId) {
       // Session is running - check if tab with this terminal already exists
       const existingTab = tabs.find((t) => t.terminalId === item.runningTerminalId)
@@ -190,19 +205,24 @@ export default function Sidebar({
           title: item.title,
           terminalId: item.runningTerminalId,
           status: 'running',
-          mode: 'claude'
+          mode: provider,
+          codingCliProvider: provider,
+          resumeSessionId: item.sessionId,
         }))
       }
     } else {
       // Session not running - check if tab with this session already exists
-      const existingTab = tabs.find((t) => t.resumeSessionId === item.sessionId)
+      const existingTab = tabs.find((t) =>
+        t.resumeSessionId === item.sessionId && (t.codingCliProvider || t.mode) === provider
+      )
       if (existingTab) {
         dispatch(setActiveTab(existingTab.id))
       } else {
         // Create new tab to resume the session
         dispatch(addTab({
           title: item.title,
-          mode: 'claude',
+          mode: provider,
+          codingCliProvider: provider,
           initialCwd: item.cwd,
           resumeSessionId: item.sessionId
         }))
@@ -217,6 +237,41 @@ export default function Sidebar({
     { id: 'overview' as const, label: 'Overview', icon: LayoutGrid, shortcut: 'O' },
     { id: 'settings' as const, label: 'Settings', icon: Settings, shortcut: ',' },
   ]
+
+  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeProvider = activeTab?.codingCliProvider || (activeTab?.mode !== 'shell' ? activeTab?.mode : undefined)
+  const activeSessionKey = activeTab?.resumeSessionId && activeProvider
+    ? `${activeProvider}:${activeTab.resumeSessionId}`
+    : null
+  const activeTerminalId = activeTab?.terminalId
+  const effectiveListHeight = listHeight > 0
+    ? listHeight
+    : Math.min(sortedItems.length * SESSION_ITEM_HEIGHT, SESSION_LIST_MAX_HEIGHT)
+
+  const rowProps = useMemo(() => ({
+    items: sortedItems,
+    activeSessionKey,
+    activeTerminalId,
+    showProjectBadge: settings.sidebar?.showProjectBadges,
+    onItemClick: handleItemClick,
+  }), [sortedItems, activeSessionKey, activeTerminalId, settings.sidebar?.showProjectBadges, handleItemClick])
+
+  const Row = ({ index, style, ariaAttributes, ...data }: RowComponentProps<typeof rowProps>) => {
+    const item = data.items[index]
+    const isActive = item.isRunning
+      ? item.runningTerminalId === data.activeTerminalId
+      : `${item.provider}:${item.sessionId}` === data.activeSessionKey
+    return (
+      <div style={{ ...style, paddingBottom: 2 }} {...ariaAttributes}>
+        <SidebarItem
+          item={item}
+          isActiveTab={isActive}
+          showProjectBadge={data.showProjectBadge}
+          onClick={() => data.onItemClick(item)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div
@@ -237,9 +292,32 @@ export default function Sidebar({
             placeholder="Search..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="w-full h-8 pl-8 pr-3 text-sm bg-muted/50 border-0 rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border"
+            className="w-full h-8 pl-8 pr-8 text-sm bg-muted/50 border-0 rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border"
           />
+          {filter && (
+            <button
+              aria-label="Clear search"
+              onClick={() => setFilter('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
+        {filter.trim() && (
+          <div className="mt-2">
+            <select
+              aria-label="Search tier"
+              value={searchTier}
+              onChange={(e) => setSearchTier(e.target.value as typeof searchTier)}
+              className="w-full h-7 px-2 text-xs bg-muted/50 border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+            >
+              <option value="title">Title</option>
+              <option value="userMessages">User Msg</option>
+              <option value="fullText">Full Text</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Navigation */}
@@ -268,64 +346,32 @@ export default function Sidebar({
       </div>
 
       {/* Session List */}
-      <div className="flex-1 overflow-y-auto px-2">
-        {/* Running sessions section (hybrid mode) */}
-        {settings.sidebar?.sortMode === 'hybrid' && runningSessions.length > 0 && (
-          <div className="mb-3">
-            <div className="px-2 py-1.5 text-2xs font-medium text-muted-foreground uppercase tracking-wider">
-              Running
-            </div>
-            <div className="space-y-0.5">
-              {runningSessions.map((item) => {
-                const activeTab = tabs.find((t) => t.id === activeTabId)
-                const isActive = item.runningTerminalId === activeTab?.terminalId
-
-                return (
-                  <SidebarItem
-                    key={item.id}
-                    item={item}
-                    isActiveTab={isActive}
-                    showProjectBadge={settings.sidebar?.showProjectBadges}
-                    onClick={() => handleItemClick(item)}
-                  />
-                )
-              })}
-            </div>
+      <div ref={listContainerRef} className="flex-1 px-2">
+        {isSearching && (
+          <div className="flex items-center justify-center py-8" data-testid="search-loading">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-sm text-muted-foreground">Searching...</span>
           </div>
         )}
-
-        {/* Recent items */}
-        <div>
-          {settings.sidebar?.sortMode === 'hybrid' && runningSessions.length > 0 && otherItems.length > 0 && (
-            <div className="px-2 py-1.5 text-2xs font-medium text-muted-foreground uppercase tracking-wider">
-              Recent
-            </div>
-          )}
-          <div className="space-y-0.5">
-            {otherItems.length === 0 && runningSessions.length === 0 ? (
-              <div className="px-2 py-8 text-center text-sm text-muted-foreground">
-                No sessions yet
-              </div>
-            ) : (
-              otherItems.map((item) => {
-                const activeTab = tabs.find((t) => t.id === activeTabId)
-                const isActive = item.isRunning
-                  ? item.runningTerminalId === activeTab?.terminalId
-                  : item.sessionId === activeTab?.resumeSessionId
-
-                return (
-                  <SidebarItem
-                    key={item.id}
-                    item={item}
-                    isActiveTab={isActive}
-                    showProjectBadge={settings.sidebar?.showProjectBadges}
-                    onClick={() => handleItemClick(item)}
-                  />
-                )
-              })
-            )}
+        {!isSearching && sortedItems.length === 0 ? (
+          <div className="px-2 py-8 text-center text-sm text-muted-foreground">
+            {filter.trim() && searchTier !== 'title'
+              ? 'No results found'
+              : filter.trim()
+              ? 'No matching sessions'
+              : 'No sessions yet'}
           </div>
-        </div>
+        ) : !isSearching ? (
+          <List
+            defaultHeight={effectiveListHeight}
+            rowCount={sortedItems.length}
+            rowHeight={SESSION_ITEM_HEIGHT}
+            rowComponent={Row}
+            rowProps={rowProps}
+            className="overflow-y-auto"
+            style={{ height: effectiveListHeight, width: '100%' }}
+          />
+        ) : null}
       </div>
 
     </div>
@@ -344,35 +390,38 @@ function SidebarItem({
   onClick: () => void
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
-        isActiveTab
-          ? 'bg-muted'
-          : 'hover:bg-muted/50'
-      )}
-    >
-      {/* Status indicator */}
-      <div className="flex-shrink-0">
-        {item.isRunning ? (
-          <div className="relative">
-            <Play className="h-2.5 w-2.5 fill-success text-success" />
-            <div className="absolute inset-0 h-2.5 w-2.5 rounded-full bg-success/30 animate-pulse-subtle" />
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          className={cn(
+            'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors group',
+            isActiveTab
+              ? 'bg-muted'
+              : 'hover:bg-muted/50'
+          )}
+          data-context={ContextIds.SidebarSession}
+          data-session-id={item.sessionId}
+          data-provider={item.provider}
+          data-running-terminal-id={item.runningTerminalId}
+          data-has-tab={item.hasTab ? 'true' : 'false'}
+        >
+          {/* Provider icon */}
+          <div className="flex-shrink-0">
+            <div className={cn('relative', item.hasTab && 'animate-pulse-subtle')}>
+              <ProviderIcon
+                provider={item.provider}
+                className={cn(
+                  'h-3.5 w-3.5',
+                  item.hasTab ? 'text-success' : 'text-muted-foreground'
+                )}
+              />
+            </div>
           </div>
-        ) : (
-          <div
-            className="h-2 w-2 rounded-sm"
-            style={{ backgroundColor: item.projectColor || '#6b7280' }}
-          />
-        )}
-      </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
               <span
                 className={cn(
                   'text-sm truncate',
@@ -381,26 +430,27 @@ function SidebarItem({
               >
                 {item.title}
               </span>
-            </TooltipTrigger>
-            <TooltipContent>{item.title}</TooltipContent>
-          </Tooltip>
-        </div>
-        {item.subtitle && showProjectBadge && (
-          <Tooltip>
-            <TooltipTrigger asChild>
+              {item.archived && (
+                <Archive className="h-3 w-3 text-muted-foreground/70" aria-label="Archived session" />
+              )}
+            </div>
+            {item.subtitle && showProjectBadge && (
               <div className="text-2xs text-muted-foreground truncate">
                 {item.subtitle}
               </div>
-            </TooltipTrigger>
-            <TooltipContent>{item.subtitle}</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
+            )}
+          </div>
 
-      {/* Timestamp */}
-      <span className="text-2xs text-muted-foreground/60 flex-shrink-0">
-        {formatRelativeTime(item.timestamp)}
-      </span>
-    </button>
+          {/* Timestamp */}
+          <span className="text-2xs text-muted-foreground/60 flex-shrink-0">
+            {formatRelativeTime(item.timestamp)}
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div>{getProviderLabel(item.provider)}: {item.title}</div>
+        <div className="text-muted-foreground">{item.subtitle || item.projectPath || getProviderLabel(item.provider)}</div>
+      </TooltipContent>
+    </Tooltip>
   )
 }

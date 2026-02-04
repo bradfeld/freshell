@@ -3,14 +3,11 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { Tab } from '@/store/types'
 import type { MouseEvent, KeyboardEvent } from 'react'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 function StatusIndicator({ status }: { status: string }) {
   if (status === 'running') {
-    return (
-      <div className="relative">
-        <Circle className="h-2 w-2 fill-success text-success" />
-      </div>
-    )
+    return <Circle className="h-2 w-2 fill-success text-success" />
   }
   if (status === 'exited') {
     return <Circle className="h-2 w-2 text-muted-foreground/40" />
@@ -18,6 +15,7 @@ function StatusIndicator({ status }: { status: string }) {
   if (status === 'error') {
     return <Circle className="h-2 w-2 fill-destructive text-destructive" />
   }
+  // Creating state
   return <Circle className="h-2 w-2 text-muted-foreground/20 animate-pulse" />
 }
 
@@ -51,12 +49,14 @@ export default function TabItem({
   return (
     <div
       className={cn(
-        'group flex items-center gap-2 h-7 px-3 rounded-md text-sm cursor-pointer transition-all',
+        'group flex items-center gap-2 h-8 px-3 rounded-t-md text-sm cursor-pointer transition-all',
         isActive
-          ? 'bg-muted text-foreground'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+          ? 'bg-background text-foreground shadow-sm'
+          : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-accent mt-1',
         isDragging && 'opacity-50'
       )}
+      data-context={ContextIds.Tab}
+      data-tab-id={tab.id}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >

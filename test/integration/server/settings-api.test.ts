@@ -68,13 +68,25 @@ describe('Settings API Integration', () => {
       res.json(s)
     })
 
+    const normalizeSettingsPatch = (patch: Record<string, any>) => {
+      if (Object.prototype.hasOwnProperty.call(patch, 'defaultCwd')) {
+        const raw = patch.defaultCwd
+        if (raw === null) {
+          patch.defaultCwd = undefined
+        } else if (typeof raw === 'string' && raw.trim() === '') {
+          patch.defaultCwd = undefined
+        }
+      }
+      return patch
+    }
+
     app.patch('/api/settings', async (req, res) => {
-      const updated = await configStore.patchSettings(req.body || {})
+      const updated = await configStore.patchSettings(normalizeSettingsPatch(req.body || {}))
       res.json(updated)
     })
 
     app.put('/api/settings', async (req, res) => {
-      const updated = await configStore.patchSettings(req.body || {})
+      const updated = await configStore.patchSettings(normalizeSettingsPatch(req.body || {}))
       res.json(updated)
     })
   })
@@ -160,16 +172,22 @@ describe('Settings API Integration', () => {
 
       expect(res.status).toBe(200)
       expect(res.body).toHaveProperty('theme')
+      expect(res.body).toHaveProperty('uiScale')
       expect(res.body).toHaveProperty('terminal')
       expect(res.body).toHaveProperty('safety')
+      expect(res.body).toHaveProperty('sidebar')
+      expect(res.body).toHaveProperty('codingCli')
       expect(res.body.terminal).toHaveProperty('fontSize')
-      expect(res.body.terminal).toHaveProperty('fontFamily')
       expect(res.body.terminal).toHaveProperty('lineHeight')
       expect(res.body.terminal).toHaveProperty('cursorBlink')
       expect(res.body.terminal).toHaveProperty('scrollback')
       expect(res.body.terminal).toHaveProperty('theme')
       expect(res.body.safety).toHaveProperty('autoKillIdleMinutes')
       expect(res.body.safety).toHaveProperty('warnBeforeKillMinutes')
+      expect(res.body.sidebar).toHaveProperty('sortMode')
+      expect(res.body.sidebar).toHaveProperty('showProjectBadges')
+      expect(res.body.sidebar).toHaveProperty('width')
+      expect(res.body.sidebar).toHaveProperty('collapsed')
     })
 
     it('returns previously saved settings', async () => {
@@ -251,7 +269,7 @@ describe('Settings API Integration', () => {
       expect(res.body.terminal.fontSize).toBe(16)
       expect(res.body.terminal.cursorBlink).toBe(false)
       // Other terminal settings preserved
-      expect(res.body.terminal.fontFamily).toBe(defaultSettings.terminal.fontFamily)
+      expect(res.body.terminal.lineHeight).toBe(defaultSettings.terminal.lineHeight)
     })
 
     it('handles nested safety settings', async () => {
@@ -529,8 +547,8 @@ describe('Settings API Integration', () => {
         .send({ defaultCwd: null })
 
       expect(res.status).toBe(200)
-      // null overwrites the previous value
-      expect(res.body.defaultCwd).toBeNull()
+      // null clears the previous value
+      expect(res.body.defaultCwd).toBeUndefined()
     })
 
     it('handles deeply nested objects', async () => {
@@ -551,12 +569,26 @@ describe('Settings API Integration', () => {
       expect(res.status).toBe(200)
       expect(res.body.terminal).toEqual({
         fontSize: 14,
-        fontFamily: 'monospace',
         lineHeight: 1.5,
         cursorBlink: false,
         scrollback: 3000,
         theme: 'light',
       })
+      expect(res.body.terminal).not.toHaveProperty('fontFamily')
+    })
+  })
+
+  describe('PATCH /api/settings', () => {
+    it('clears defaultCwd when null is provided', async () => {
+      await configStore.patchSettings({ defaultCwd: '/tmp' })
+
+      const res = await request(app)
+        .patch('/api/settings')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .send({ defaultCwd: null })
+
+      expect(res.status).toBe(200)
+      expect(res.body.defaultCwd).toBeUndefined()
     })
   })
 })

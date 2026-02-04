@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { isLinuxPath, getSystemShell, escapeCmdExe, buildSpawnSpec, TerminalRegistry } from '../../../server/terminal-registry'
+import { isLinuxPath, getSystemShell, escapeCmdExe, buildSpawnSpec, TerminalRegistry, isWsl, isWindowsLike } from '../../../server/terminal-registry'
 import * as fs from 'fs'
+import os from 'os'
 
 // Mock fs.existsSync for shell existence checks
 // Need to provide both named export and default export since the implementation uses `import fs from 'fs'`
 vi.mock('fs', () => {
   const existsSync = vi.fn()
+  const statSync = vi.fn()
   return {
     existsSync,
-    default: { existsSync },
+    statSync,
+    default: { existsSync, statSync },
   }
 })
 
@@ -29,14 +32,19 @@ vi.mock('node-pty', async () => {
 })
 
 // Mock logger to avoid console output during tests
-vi.mock('../../../server/logger', () => ({
-  logger: {
+vi.mock('../../../server/logger', () => {
+  const logger = {
     info: vi.fn(),
     warn: vi.fn(),
     debug: vi.fn(),
     error: vi.fn(),
-  },
-}))
+    trace: vi.fn(),
+    fatal: vi.fn(),
+    child: vi.fn(),
+  }
+  logger.child.mockReturnValue(logger)
+  return { logger }
+})
 
 /**
  * Tests for getSystemShell - cross-platform shell resolution
@@ -311,6 +319,112 @@ describe('isLinuxPath', () => {
     it('identifies /Users/dan as Linux path', () => {
       expect(isLinuxPath('/Users/dan')).toBe(true)
     })
+  })
+})
+
+/**
+ * Tests for isWsl
+ * This function detects if running inside Windows Subsystem for Linux
+ * by checking for WSL-specific environment variables.
+ */
+describe('isWsl', () => {
+  const originalPlatform = process.platform
+  const originalEnv = { ...process.env }
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform })
+    process.env = { ...originalEnv }
+  })
+
+  it('returns false on Windows', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    process.env.WSL_DISTRO_NAME = 'Ubuntu'
+
+    expect(isWsl()).toBe(false)
+  })
+
+  it('returns false on macOS', () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+
+    expect(isWsl()).toBe(false)
+  })
+
+  it('returns false on native Linux without WSL env vars', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    delete process.env.WSL_DISTRO_NAME
+    delete process.env.WSL_INTEROP
+    delete process.env.WSLENV
+
+    expect(isWsl()).toBe(false)
+  })
+
+  it('returns true on Linux with WSL_DISTRO_NAME', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    process.env.WSL_DISTRO_NAME = 'Ubuntu'
+    delete process.env.WSL_INTEROP
+    delete process.env.WSLENV
+
+    expect(isWsl()).toBe(true)
+  })
+
+  it('returns true on Linux with WSL_INTEROP', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    delete process.env.WSL_DISTRO_NAME
+    process.env.WSL_INTEROP = '/run/WSL/123_interop'
+    delete process.env.WSLENV
+
+    expect(isWsl()).toBe(true)
+  })
+
+  it('returns true on Linux with WSLENV', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    delete process.env.WSL_DISTRO_NAME
+    delete process.env.WSL_INTEROP
+    process.env.WSLENV = 'PATH/l'
+
+    expect(isWsl()).toBe(true)
+  })
+})
+
+/**
+ * Tests for isWindowsLike
+ * Returns true when Windows shells are available (native Windows or WSL).
+ */
+describe('isWindowsLike', () => {
+  const originalPlatform = process.platform
+  const originalEnv = { ...process.env }
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform })
+    process.env = { ...originalEnv }
+  })
+
+  it('returns true on Windows', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+
+    expect(isWindowsLike()).toBe(true)
+  })
+
+  it('returns false on macOS', () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+
+    expect(isWindowsLike()).toBe(false)
+  })
+
+  it('returns false on native Linux', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    delete process.env.WSL_DISTRO_NAME
+    delete process.env.WSL_INTEROP
+    delete process.env.WSLENV
+
+    expect(isWindowsLike()).toBe(false)
+  })
+
+  it('returns true on WSL', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    process.env.WSL_DISTRO_NAME = 'Ubuntu'
+
+    expect(isWindowsLike()).toBe(true)
   })
 })
 
@@ -598,6 +712,15 @@ describe('buildSpawnSpec Unix paths', () => {
       const spec = buildSpawnSpec('codex', '/home/user', 'system')
 
       expect(spec.file).toBe('/opt/codex/bin/codex')
+    })
+
+    it('adds resume subcommand when resumeSessionId provided', () => {
+      delete process.env.CODEX_CMD
+
+      const spec = buildSpawnSpec('codex', '/home/user/project', 'system', 'session-123')
+
+      expect(spec.file).toBe('codex')
+      expect(spec.args).toEqual(['resume', 'session-123'])
     })
   })
 
@@ -971,6 +1094,179 @@ describe('buildSpawnSpec Unix paths', () => {
 })
 
 /**
+ * Tests for buildSpawnSpec - WSL (Windows Subsystem for Linux) code paths
+ *
+ * These tests verify spawn spec generation when running inside WSL.
+ * In WSL, we can spawn Windows executables (cmd.exe, powershell.exe) via interop,
+ * but 'wsl' and 'system' shells should use the native Linux shell.
+ */
+describe('buildSpawnSpec WSL paths', () => {
+  const originalPlatform = process.platform
+  const originalEnv = { ...process.env }
+
+  function mockWsl() {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+      writable: true,
+      configurable: true,
+    })
+    process.env.WSL_DISTRO_NAME = 'Ubuntu'
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    process.env = { ...originalEnv }
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+      writable: true,
+      configurable: true,
+    })
+    process.env = originalEnv
+  })
+
+  describe('shell type handling in WSL', () => {
+    it('uses Linux shell for system shell type in WSL', () => {
+      mockWsl()
+      process.env.SHELL = '/bin/bash'
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'system')
+
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args).toContain('-l')
+      expect(spec.cwd).toBe('/home/user/project')
+    })
+
+    it('uses Linux shell for wsl shell type in WSL', () => {
+      mockWsl()
+      process.env.SHELL = '/bin/bash'
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'wsl')
+
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args).toContain('-l')
+    })
+
+    it('uses full path to cmd.exe for cmd shell type in WSL', () => {
+      mockWsl()
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
+
+      // WSL uses full path since cmd.exe may not be on PATH
+      expect(spec.file).toBe('/mnt/c/Windows/System32/cmd.exe')
+      expect(spec.args).toContain('/K')
+    })
+
+    it('uses full path to powershell.exe for powershell shell type in WSL', () => {
+      mockWsl()
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'powershell')
+
+      // WSL uses full path since powershell.exe may not be on PATH
+      expect(spec.file).toBe('/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe')
+      expect(spec.args).toContain('-NoLogo')
+    })
+  })
+
+  describe('cwd handling for Windows shells in WSL', () => {
+    // In WSL, we can't pass Linux paths to node-pty for Windows executables
+    // (they become UNC paths which cmd.exe rejects). Instead, we pass cwd: undefined
+    // to node-pty and use cd /d or Set-Location commands in the args.
+
+    it('uses cd command for cmd.exe with Linux path in WSL', () => {
+      mockWsl()
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
+
+      // cwd should be undefined to avoid UNC path translation
+      expect(spec.cwd).toBeUndefined()
+      // Directory change should be in the command args
+      expect(spec.args).toContain('/K')
+      expect(spec.args.some(arg => arg.includes('cd /d "/mnt/c"'))).toBe(true)
+    })
+
+    it('uses Set-Location for powershell.exe with Linux path in WSL', () => {
+      mockWsl()
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'powershell')
+
+      // cwd should be undefined to avoid UNC path translation
+      expect(spec.cwd).toBeUndefined()
+      // Directory change should be in the command args
+      expect(spec.args).toContain('-NoLogo')
+      expect(spec.args.some(arg => arg.includes('Set-Location') && arg.includes('/mnt/c'))).toBe(true)
+    })
+
+    it('uses USERPROFILE for Windows default cwd in cmd args when available in WSL', () => {
+      mockWsl()
+      process.env.USERPROFILE = 'C:\\Users\\testuser'
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
+
+      // cwd undefined, path in args
+      expect(spec.cwd).toBeUndefined()
+      expect(spec.args.some(arg => arg.includes('cd /d "/mnt/c/Users/testuser"'))).toBe(true)
+
+      delete process.env.USERPROFILE
+    })
+
+    it('respects custom WSL mount prefix from WSL_WINDOWS_SYS32 in cmd args', () => {
+      mockWsl()
+      // Custom mount root (drives at root: /c instead of /mnt/c)
+      process.env.WSL_WINDOWS_SYS32 = '/c/Windows/System32'
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'cmd')
+
+      // With drives at root, mount prefix is empty, so C:\ is /c
+      expect(spec.cwd).toBeUndefined()
+      expect(spec.args.some(arg => arg.includes('cd /d "/c"'))).toBe(true)
+
+      delete process.env.WSL_WINDOWS_SYS32
+    })
+
+    it('respects custom WSL mount prefix when converting USERPROFILE in powershell args', () => {
+      mockWsl()
+      process.env.WSL_WINDOWS_SYS32 = '/win/c/Windows/System32'
+      process.env.USERPROFILE = 'D:\\Users\\testuser'
+
+      const spec = buildSpawnSpec('shell', '/home/user/project', 'powershell')
+
+      // Should use custom mount prefix for USERPROFILE conversion in args
+      expect(spec.cwd).toBeUndefined()
+      expect(spec.args.some(arg => arg.includes('Set-Location') && arg.includes('/win/d/Users/testuser'))).toBe(true)
+
+      delete process.env.WSL_WINDOWS_SYS32
+      delete process.env.USERPROFILE
+    })
+  })
+
+  describe('coding CLI modes in WSL with Linux shell', () => {
+    it('spawns claude directly in WSL with system shell', () => {
+      mockWsl()
+      delete process.env.CLAUDE_CMD
+
+      const spec = buildSpawnSpec('claude', '/home/user/project', 'system')
+
+      expect(spec.file).toBe('claude')
+      expect(spec.cwd).toBe('/home/user/project')
+    })
+
+    it('spawns codex directly in WSL with system shell', () => {
+      mockWsl()
+      delete process.env.CODEX_CMD
+
+      const spec = buildSpawnSpec('codex', '/home/user/project', 'system')
+
+      expect(spec.file).toBe('codex')
+      expect(spec.cwd).toBe('/home/user/project')
+    })
+  })
+})
+
+/**
  * Tests for TerminalRegistry class - resumeSessionId functionality
  *
  * These tests verify the resumeSessionId storage and retrieval functionality
@@ -1031,6 +1327,43 @@ describe('TerminalRegistry', () => {
 
       expect(record.resumeSessionId).toBe('shell-session-123')
       expect(record.mode).toBe('shell')
+    })
+  })
+
+  describe('defaultCwd validation', () => {
+    const originalPlatform = process.platform
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: originalPlatform })
+    })
+
+    it('uses defaultCwd when directory exists', () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' })
+      vi.mocked(fs.statSync).mockImplementation((pathValue) => {
+        if (pathValue === '/valid/path') {
+          return { isDirectory: () => true } as any
+        }
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      })
+
+      const registryWithSettings = new TerminalRegistry({ defaultCwd: '/valid/path' } as any, 10)
+      const record = registryWithSettings.create({ mode: 'shell' })
+
+      expect(record.cwd).toBe('/valid/path')
+      registryWithSettings.shutdown()
+    })
+
+    it('falls back to home when defaultCwd is invalid', () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' })
+      vi.mocked(fs.statSync).mockImplementation(() => {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      })
+
+      const registryWithSettings = new TerminalRegistry({ defaultCwd: '/missing/path' } as any, 10)
+      const record = registryWithSettings.create({ mode: 'shell' })
+
+      expect(record.cwd).toBe(os.homedir())
+      registryWithSettings.shutdown()
     })
   })
 
@@ -1116,7 +1449,7 @@ describe('TerminalRegistry', () => {
     })
   })
 
-  describe('findClaudeTerminalsBySession() exact match', () => {
+  describe('findTerminalsBySession() exact match', () => {
     it('finds terminal by exact resumeSessionId match', () => {
       const record = registry.create({
         mode: 'claude',
@@ -1124,7 +1457,7 @@ describe('TerminalRegistry', () => {
         resumeSessionId: 'session-exact-match',
       })
 
-      const found = registry.findClaudeTerminalsBySession('session-exact-match')
+      const found = registry.findTerminalsBySession('claude', 'session-exact-match')
 
       expect(found).toHaveLength(1)
       expect(found[0].terminalId).toBe(record.terminalId)
@@ -1138,7 +1471,7 @@ describe('TerminalRegistry', () => {
         resumeSessionId: 'session-different',
       })
 
-      const found = registry.findClaudeTerminalsBySession('session-nonexistent')
+      const found = registry.findTerminalsBySession('claude', 'session-nonexistent')
 
       expect(found).toHaveLength(0)
     })
@@ -1155,14 +1488,14 @@ describe('TerminalRegistry', () => {
         resumeSessionId: 'session-shared',
       })
 
-      const found = registry.findClaudeTerminalsBySession('session-shared')
+      const found = registry.findTerminalsBySession('claude', 'session-shared')
 
       expect(found).toHaveLength(2)
       expect(found.every(t => t.resumeSessionId === 'session-shared')).toBe(true)
     })
   })
 
-  describe('findClaudeTerminalsBySession() ignores cwd parameter', () => {
+  describe('findTerminalsBySession() ignores cwd parameter', () => {
     it('does not match by cwd, only by resumeSessionId', () => {
       registry.create({
         mode: 'claude',
@@ -1171,7 +1504,7 @@ describe('TerminalRegistry', () => {
       })
 
       // cwd matches but sessionId doesn't - should not find terminal
-      const found = registry.findClaudeTerminalsBySession('session-nonexistent', '/home/user/project')
+      const found = registry.findTerminalsBySession('claude', 'session-nonexistent', '/home/user/project')
 
       expect(found).toHaveLength(0)
     })
@@ -1184,14 +1517,14 @@ describe('TerminalRegistry', () => {
       })
 
       // cwd differs but sessionId matches - should find terminal
-      const found = registry.findClaudeTerminalsBySession('session-target', '/home/user/different')
+      const found = registry.findTerminalsBySession('claude', 'session-target', '/home/user/different')
 
       expect(found).toHaveLength(1)
       expect(found[0].terminalId).toBe(record.terminalId)
     })
   })
 
-  describe('findClaudeTerminalsBySession() ignores shell mode', () => {
+  describe('findTerminalsBySession() ignores shell mode', () => {
     it('does not return shell-mode terminals even with matching resumeSessionId', () => {
       registry.create({
         mode: 'shell',
@@ -1199,7 +1532,7 @@ describe('TerminalRegistry', () => {
         resumeSessionId: 'session-123',
       })
 
-      const found = registry.findClaudeTerminalsBySession('session-123', '/home/user/project')
+      const found = registry.findTerminalsBySession('claude', 'session-123', '/home/user/project')
 
       expect(found).toHaveLength(0)
     })
@@ -1211,7 +1544,7 @@ describe('TerminalRegistry', () => {
         resumeSessionId: 'session-exact',
       })
 
-      const found = registry.findClaudeTerminalsBySession('session-exact')
+      const found = registry.findTerminalsBySession('claude', 'session-exact')
 
       expect(found).toHaveLength(0)
     })
@@ -1223,7 +1556,7 @@ describe('TerminalRegistry', () => {
         resumeSessionId: 'session-123',
       })
 
-      const found = registry.findClaudeTerminalsBySession('session-123', '/home/user/project')
+      const found = registry.findTerminalsBySession('claude', 'session-123', '/home/user/project')
 
       expect(found).toHaveLength(0)
     })
@@ -1245,11 +1578,92 @@ describe('TerminalRegistry', () => {
         resumeSessionId: 'session-shared',
       })
 
-      const found = registry.findClaudeTerminalsBySession('session-shared')
+      const found = registry.findTerminalsBySession('claude', 'session-shared')
 
       expect(found).toHaveLength(1)
       expect(found[0].terminalId).toBe(claudeRecord.terminalId)
       expect(found[0].mode).toBe('claude')
+    })
+  })
+
+  describe('findUnassociatedClaudeTerminals', () => {
+    it('should find claude terminals without resumeSessionId matching cwd', () => {
+      // Create a claude terminal without resumeSessionId
+      const term1 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+      // Create a claude terminal WITH resumeSessionId (should not match)
+      registry.create({ mode: 'claude', cwd: '/home/user/project', resumeSessionId: 'existing-session' })
+      // Create a shell terminal (should not match)
+      registry.create({ mode: 'shell', cwd: '/home/user/project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('/home/user/project')
+
+      expect(results).toHaveLength(1)
+      expect(results[0].terminalId).toBe(term1.terminalId)
+    })
+
+    it('should return empty array when no matching terminals', () => {
+      registry.create({ mode: 'claude', cwd: '/other/path' })
+
+      const results = registry.findUnassociatedClaudeTerminals('/home/user/project')
+
+      expect(results).toHaveLength(0)
+    })
+
+    it('should match cwd case-insensitively on Windows', () => {
+      const term = registry.create({ mode: 'claude', cwd: 'C:\\Users\\Dan\\project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('c:/users/dan/project')
+
+      // On Windows, paths are case-insensitive
+      // On Unix, this test would fail (which is correct behavior)
+      if (process.platform === 'win32') {
+        expect(results).toHaveLength(1)
+        expect(results[0].terminalId).toBe(term.terminalId)
+      } else {
+        // Unix: different case = different path
+        expect(results).toHaveLength(0)
+      }
+    })
+
+    it('should normalize backslashes to forward slashes', () => {
+      const term = registry.create({ mode: 'claude', cwd: 'C:\\Users\\Dan\\project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('C:/Users/Dan/project')
+
+      expect(results).toHaveLength(1)
+      expect(results[0].terminalId).toBe(term.terminalId)
+    })
+
+    it('should return results sorted by createdAt (oldest first)', () => {
+      // Create terminals with slight delays to ensure different createdAt
+      const term1 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+      const term2 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+      const term3 = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+      const results = registry.findUnassociatedClaudeTerminals('/home/user/project')
+
+      expect(results).toHaveLength(3)
+      // Oldest first (by createdAt)
+      expect(results[0].terminalId).toBe(term1.terminalId)
+      expect(results[1].terminalId).toBe(term2.terminalId)
+      expect(results[2].terminalId).toBe(term3.terminalId)
+    })
+  })
+
+  describe('setResumeSessionId', () => {
+    it('should set resumeSessionId on existing terminal', () => {
+      const term = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+      const result = registry.setResumeSessionId(term.terminalId, 'new-session-id')
+
+      expect(result).toBe(true)
+      expect(registry.get(term.terminalId)?.resumeSessionId).toBe('new-session-id')
+    })
+
+    it('should return false for non-existent terminal', () => {
+      const result = registry.setResumeSessionId('nonexistent', 'session-id')
+
+      expect(result).toBe(false)
     })
   })
 })
@@ -2113,11 +2527,15 @@ describe('buildSpawnSpec Unix paths', () => {
         expect(specWsl.file).toBe('/bin/zsh')
       })
 
-      it('normalizes windows shell types to system on linux', () => {
+      it('normalizes windows shell types to system on native linux (not WSL)', () => {
         mockPlatform('linux')
         process.env.SHELL = '/bin/bash'
+        // Clear WSL env vars to simulate native Linux (not WSL)
+        delete process.env.WSL_DISTRO_NAME
+        delete process.env.WSL_INTEROP
+        delete process.env.WSLENV
 
-        // cmd, powershell, and wsl should all normalize to system shell on Linux
+        // cmd, powershell, and wsl should all normalize to system shell on native Linux
         const specCmd = buildSpawnSpec('shell', '/home/user', 'cmd')
         const specPowershell = buildSpawnSpec('shell', '/home/user', 'powershell')
         const specWsl = buildSpawnSpec('shell', '/home/user', 'wsl')

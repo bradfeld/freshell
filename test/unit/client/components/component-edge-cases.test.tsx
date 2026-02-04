@@ -23,7 +23,7 @@
  *
  * IDENTIFIED CRASH SCENARIOS:
  * - OverviewView: Crashes when API returns null instead of array (items.filter fails)
- * - SettingsView: Crashes when safety settings are undefined (direct property access)
+ * - SettingsView: Should render safely even when safety settings are undefined
  * - Sidebar: Crashes when projects array is undefined (forEach fails)
  * - HistoryView: Crashes when projects array is undefined (reduce/map fails)
  * - TabBar: Crashes when tabs array is undefined (map fails)
@@ -52,6 +52,7 @@ vi.mock('@/lib/ws-client', () => ({
     connect: mockWsConnect,
     onMessage: mockWsOnMessage,
     onReconnect: mockWsOnReconnect,
+    setHelloExtensionProvider: vi.fn(),
   }),
 }))
 
@@ -90,6 +91,30 @@ vi.mock('lucide-react', () => ({
   MessageSquare: ({ className }: { className?: string }) => <svg data-testid="message-square-icon" className={className} />,
 }))
 
+// Mock react-window to avoid hook usage in JSDOM edge case tests
+vi.mock('react-window', () => ({
+  List: ({ rowCount, rowComponent: Row, rowProps, style }: {
+    rowCount: number
+    rowComponent: React.ComponentType<any>
+    rowProps: any
+    style: React.CSSProperties
+  }) => {
+    const items = []
+    for (let i = 0; i < rowCount; i++) {
+      items.push(
+        <Row
+          key={i}
+          index={i}
+          style={{ height: 56 }}
+          ariaAttributes={{}}
+          {...rowProps}
+        />
+      )
+    }
+    return <div style={style} data-testid="virtualized-list">{items}</div>
+  },
+}))
+
 // Now import the components and store slices after mocks are set up
 import TabBar from '@/components/TabBar'
 import SettingsView from '@/components/SettingsView'
@@ -101,7 +126,8 @@ import tabsReducer, { TabsState } from '@/store/tabsSlice'
 import settingsReducer, { defaultSettings, SettingsState } from '@/store/settingsSlice'
 import sessionsReducer, { SessionsState } from '@/store/sessionsSlice'
 import connectionReducer from '@/store/connectionSlice'
-import claudeReducer from '@/store/claudeSlice'
+import codingCliReducer from '@/store/codingCliSlice'
+import panesReducer from '@/store/panesSlice'
 import type { Tab, AppSettings, ProjectGroup, BackgroundTerminal } from '@/store/types'
 
 // Import the mocked api to get access to the mocks
@@ -125,7 +151,8 @@ function createTestStore(state: TestStoreState = {}) {
       settings: settingsReducer,
       sessions: sessionsReducer,
       connection: connectionReducer,
-      claude: claudeReducer,
+      codingCli: codingCliReducer,
+      panes: panesReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -149,6 +176,13 @@ function createTestStore(state: TestStoreState = {}) {
         projects: [],
         expandedProjects: new Set<string>(),
         ...state.sessions,
+      },
+      codingCli: {
+        sessions: {},
+      },
+      panes: {
+        layouts: {},
+        activePane: {},
       },
     },
   })
@@ -188,6 +222,7 @@ describe('Component Edge Cases', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    localStorage.clear()
     mockWsOnMessage.mockReturnValue(() => {})
     mockWsOnReconnect.mockReturnValue(() => {})
     mockWsConnect.mockResolvedValue(undefined)
@@ -284,9 +319,8 @@ describe('Component Edge Cases', () => {
           settings: { settings: settingsWithUndefinedSafety },
         })
 
-        // This might throw because safety settings are accessed directly
-        // Tests the component's resilience
-        expect(() => renderWithStore(<SettingsView />, store)).toThrow()
+        // SettingsView should be resilient to partial settings payloads
+        expect(() => renderWithStore(<SettingsView />, store)).not.toThrow()
       })
     })
 
@@ -464,8 +498,8 @@ describe('Component Edge Cases', () => {
         const searchInput = screen.getByPlaceholderText('Search...')
         fireEvent.change(searchInput, { target: { value: 'xyznonexistent' } })
 
-        // Should show empty state
-        expect(screen.getByText('No sessions yet')).toBeInTheDocument()
+        // Should show empty state for a filtered search
+        expect(screen.getByText('No matching sessions')).toBeInTheDocument()
       })
     })
 
@@ -1046,8 +1080,8 @@ describe('Component Edge Cases', () => {
           },
         })
 
-        // This should throw because settings properties are accessed
-        expect(() => renderWithStore(<SettingsView />, store as any)).toThrow()
+        // SettingsView should provide safe defaults even if settings are missing
+        expect(() => renderWithStore(<SettingsView />, store as any)).not.toThrow()
       })
     })
 

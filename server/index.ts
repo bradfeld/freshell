@@ -1,30 +1,74 @@
-import { detectLanIps } from './bootstrap' // Must be first - ensures .env exists before dotenv loads
+import { detectLanIps } from './bootstrap.js' // Must be first - ensures .env exists before dotenv loads
 import 'dotenv/config'
+import { setupWslPortForwarding } from './wsl-port-forward.js'
 import express from 'express'
 import fs from 'fs'
 import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import rateLimit from 'express-rate-limit'
-import { logger } from './logger'
-import { validateStartupSecurity, httpAuthMiddleware } from './auth'
-import { configStore } from './config-store'
-import { TerminalRegistry } from './terminal-registry'
-import { WsHandler } from './ws-handler'
-import { claudeIndexer } from './claude-indexer'
-import { claudeSessionManager } from './claude-session'
-import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts'
+import { z } from 'zod'
+import { logger, setLogLevel } from './logger.js'
+import { requestLogger } from './request-logger.js'
+import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
+import { configStore } from './config-store.js'
+import { TerminalRegistry } from './terminal-registry.js'
+import { WsHandler } from './ws-handler.js'
+import { claudeIndexer } from './claude-indexer.js'
+import { CodingCliSessionIndexer } from './coding-cli/session-indexer.js'
+import { CodingCliSessionManager } from './coding-cli/session-manager.js'
+import { claudeProvider } from './coding-cli/providers/claude.js'
+import { codexProvider } from './coding-cli/providers/codex.js'
+import { makeSessionKey, type CodingCliProviderName } from './coding-cli/types.js'
+import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts.js'
+import { migrateSettingsSortMode } from './settings-migrate.js'
+import { filesRouter } from './files-router.js'
+import { getSessionRepairService } from './session-scanner/service.js'
+import { createClientLogsRouter } from './client-logs.js'
+import { createStartupState } from './startup-state.js'
+import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, startPerfTimer, withPerfSpan } from './perf-logger.js'
+import { detectPlatform } from './platform.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// Find package.json by walking up from current directory
+function findPackageJson(): string {
+  let dir = __dirname
+  while (dir !== path.dirname(dir)) {
+    const candidate = path.join(dir, 'package.json')
+    if (fs.existsSync(candidate)) {
+      return candidate
+    }
+    dir = path.dirname(dir)
+  }
+  throw new Error('Could not find package.json')
+}
+
+const packageJson = JSON.parse(fs.readFileSync(findPackageJson(), 'utf-8'))
+const APP_VERSION: string = packageJson.version
+const log = logger.child({ component: 'server' })
+const perfConfig = getPerfConfig()
+
 async function main() {
   validateStartupSecurity()
+
+  // WSL2 port forwarding - must run AFTER security validation passes
+  // and AFTER dotenv loads so PORT/NODE_ENV from .env are available
+  const wslPortForwardResult = setupWslPortForwarding()
+  if (wslPortForwardResult === 'success') {
+    console.log('[server] WSL2 port forwarding configured')
+  } else if (wslPortForwardResult === 'failed') {
+    console.warn('[server] WSL2 port forwarding failed - LAN access may not work')
+  }
+
+  initPerfLogging()
 
   const app = express()
   app.disable('x-powered-by')
 
   app.use(express.json({ limit: '1mb' }))
+  app.use(requestLogger)
 
   // --- Local file serving for browser pane (no auth required, same-origin only) ---
   app.get('/local-file', (req, res) => {
@@ -47,8 +91,20 @@ async function main() {
       return res.status(400).json({ error: 'Cannot serve directories' })
     }
 
-    // Send the file with appropriate content type
-    res.sendFile(resolved)
+  // Send the file with appropriate content type
+  res.sendFile(resolved)
+  })
+
+  const startupState = createStartupState()
+
+  // Health check endpoint (no auth required - used by precheck script)
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      app: 'freshell',
+      ok: true,
+      version: APP_VERSION,
+      ready: startupState.isReady(),
+    })
   })
 
   // Basic rate limiting for /api
@@ -63,28 +119,58 @@ async function main() {
   )
 
   app.use('/api', httpAuthMiddleware)
+  app.use('/api', createClientLogsRouter())
 
-  app.get('/api/health', (_req, res) => {
-    res.json({ ok: true })
-  })
+  const codingCliProviders = [claudeProvider, codexProvider]
+  const codingCliIndexer = new CodingCliSessionIndexer(codingCliProviders)
+  const codingCliSessionManager = new CodingCliSessionManager(codingCliProviders)
 
   app.get('/api/debug', async (_req, res) => {
     const cfg = await configStore.snapshot()
     res.json({
       version: 1,
+      appVersion: APP_VERSION,
       wsConnections: wsHandler.connectionCount(),
       settings: cfg.settings,
-      sessionsProjects: claudeIndexer.getProjects(),
+      sessionsProjects: codingCliIndexer.getProjects(),
       terminals: registry.list(),
       time: new Date().toISOString(),
     })
   })
 
-  const settings = await configStore.getSettings()
+  const settings = migrateSettingsSortMode(await configStore.getSettings())
   const registry = new TerminalRegistry(settings)
 
+  const sessionRepairService = getSessionRepairService()
+
   const server = http.createServer(app)
-  const wsHandler = new WsHandler(server, registry, claudeSessionManager)
+  const wsHandler = new WsHandler(server, registry, codingCliSessionManager, sessionRepairService, async () => {
+    const currentSettings = migrateSettingsSortMode(await configStore.getSettings())
+    return {
+      settings: currentSettings,
+      projects: codingCliIndexer.getProjects(),
+      perfLogging: perfConfig.enabled,
+    }
+  })
+
+  const applyDebugLogging = (enabled: boolean, source: string) => {
+    const nextEnabled = !!enabled
+    setLogLevel(nextEnabled ? 'debug' : 'info')
+    setPerfLoggingEnabled(nextEnabled, source)
+    wsHandler.broadcast({ type: 'perf.logging', enabled: nextEnabled })
+  }
+
+  applyDebugLogging(!!settings.logging?.debug, 'settings')
+
+  app.post('/api/perf', async (req, res) => {
+    const enabled = req.body?.enabled === true
+    const updated = await configStore.patchSettings({ logging: { debug: enabled } })
+    const migrated = migrateSettingsSortMode(updated)
+    registry.setSettings(migrated)
+    applyDebugLogging(!!migrated.logging?.debug, 'api')
+    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
+    res.json({ ok: true, enabled })
+  })
 
   // --- API: settings ---
   //
@@ -106,51 +192,176 @@ async function main() {
   //
   app.get('/api/settings', async (_req, res) => {
     const s = await configStore.getSettings()
-    res.json(s)
+    res.json(migrateSettingsSortMode(s))
   })
 
   app.get('/api/lan-info', (_req, res) => {
     res.json({ ips: detectLanIps() })
   })
 
+  app.get('/api/platform', async (_req, res) => {
+    const platform = await detectPlatform()
+    res.json({ platform })
+  })
+
+  const normalizeSettingsPatch = (patch: Record<string, any>) => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'defaultCwd')) {
+      const raw = patch.defaultCwd
+      if (raw === null) {
+        patch.defaultCwd = undefined
+      } else if (typeof raw === 'string' && raw.trim() === '') {
+        patch.defaultCwd = undefined
+      }
+    }
+    return patch
+  }
+
   app.patch('/api/settings', async (req, res) => {
-    const updated = await configStore.patchSettings(req.body || {})
-    registry.setSettings(updated)
-    wsHandler.broadcast({ type: 'settings.updated', settings: updated })
-    res.json(updated)
+    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
+    const updated = await configStore.patchSettings(patch)
+    const migrated = migrateSettingsSortMode(updated)
+    registry.setSettings(migrated)
+    applyDebugLogging(!!migrated.logging?.debug, 'settings')
+    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
+    await withPerfSpan(
+      'coding_cli_refresh',
+      () => codingCliIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
+    await withPerfSpan(
+      'claude_refresh',
+      () => claudeIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
+    res.json(migrated)
   })
 
   // Alias (matches implementation plan)
   app.put('/api/settings', async (req, res) => {
-    const updated = await configStore.patchSettings(req.body || {})
-    registry.setSettings(updated)
-    wsHandler.broadcast({ type: 'settings.updated', settings: updated })
-    res.json(updated)
+    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
+    const updated = await configStore.patchSettings(patch)
+    const migrated = migrateSettingsSortMode(updated)
+    registry.setSettings(migrated)
+    applyDebugLogging(!!migrated.logging?.debug, 'settings')
+    wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
+    await withPerfSpan(
+      'coding_cli_refresh',
+      () => codingCliIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
+    await withPerfSpan(
+      'claude_refresh',
+      () => claudeIndexer.refresh(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
+    res.json(migrated)
   })
 
   // --- API: sessions ---
+  // Search endpoint must come BEFORE the generic /api/sessions route
+  app.get('/api/sessions/search', async (req, res) => {
+    try {
+      const { SearchRequestSchema, searchSessions } = await import('./session-search.js')
+
+      const parsed = SearchRequestSchema.safeParse({
+        query: req.query.q,
+        tier: req.query.tier || 'title',
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+        maxFiles: req.query.maxFiles ? Number(req.query.maxFiles) : undefined,
+      })
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
+      }
+
+      const endSearchTimer = startPerfTimer(
+        'sessions_search',
+        {
+          queryLength: parsed.data.query.length,
+          tier: parsed.data.tier,
+          limit: parsed.data.limit,
+        },
+        { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+      )
+
+      try {
+        const response = await searchSessions({
+          projects: codingCliIndexer.getProjects(),
+          providers: codingCliProviders,
+          query: parsed.data.query,
+          tier: parsed.data.tier,
+          limit: parsed.data.limit,
+          maxFiles: parsed.data.maxFiles,
+        })
+
+        endSearchTimer({ resultCount: response.results.length, totalScanned: response.totalScanned })
+
+        res.json(response)
+      } catch (err: any) {
+        endSearchTimer({
+          error: true,
+          errorName: err?.name,
+          errorMessage: err?.message,
+        })
+        throw err
+      }
+    } catch (err: any) {
+      log.error({ err }, 'Session search failed')
+      res.status(500).json({ error: 'Search failed' })
+    }
+  })
+
   app.get('/api/sessions', async (_req, res) => {
-    res.json(claudeIndexer.getProjects())
+    res.json(codingCliIndexer.getProjects())
   })
 
   app.patch('/api/sessions/:sessionId', async (req, res) => {
-    const sessionId = req.params.sessionId
-    const { titleOverride, summaryOverride, deleted } = req.body || {}
-    const next = await configStore.patchSessionOverride(sessionId, {
-      titleOverride,
-      summaryOverride,
-      deleted,
+    const rawId = req.params.sessionId
+    const provider = (req.query.provider as CodingCliProviderName) || 'claude'
+    const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
+    const SessionPatchSchema = z.object({
+      titleOverride: z.string().optional().nullable(),
+      summaryOverride: z.string().optional().nullable(),
+      deleted: z.coerce.boolean().optional(),
+      archived: z.coerce.boolean().optional(),
+      createdAtOverride: z.coerce.number().optional(),
     })
+    const parsed = SessionPatchSchema.safeParse(req.body || {})
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
+    }
+    const cleanString = (value: string | null | undefined) => {
+      const trimmed = typeof value === 'string' ? value.trim() : value
+      return trimmed ? trimmed : undefined
+    }
+    const { titleOverride, summaryOverride, deleted, archived, createdAtOverride } = parsed.data
+    const next = await configStore.patchSessionOverride(compositeKey, {
+      titleOverride: cleanString(titleOverride),
+      summaryOverride: cleanString(summaryOverride),
+      deleted,
+      archived,
+      createdAtOverride,
+    })
+    await codingCliIndexer.refresh()
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await claudeIndexer.refresh()
-    wsHandler.broadcast({ type: 'sessions.updated', projects: claudeIndexer.getProjects() })
     res.json(next)
   })
 
   app.delete('/api/sessions/:sessionId', async (req, res) => {
-    const sessionId = req.params.sessionId
-    await configStore.deleteSession(sessionId)
+    const rawId = req.params.sessionId
+    const provider = (req.query.provider as CodingCliProviderName) || 'claude'
+    const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
+    await configStore.deleteSession(compositeKey)
+    await codingCliIndexer.refresh()
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await claudeIndexer.refresh()
-    wsHandler.broadcast({ type: 'sessions.updated', projects: claudeIndexer.getProjects() })
     res.json({ ok: true })
   })
 
@@ -158,8 +369,9 @@ async function main() {
     const { projectPath, color } = req.body || {}
     if (!projectPath || !color) return res.status(400).json({ error: 'projectPath and color required' })
     await configStore.setProjectColor(projectPath, color)
+    await codingCliIndexer.refresh()
+    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
     await claudeIndexer.refresh()
-    wsHandler.broadcast({ type: 'sessions.updated', projects: claudeIndexer.getProjects() })
     res.json({ ok: true })
   })
 
@@ -225,6 +437,14 @@ async function main() {
       return res.json({ description: heuristic(), source: 'heuristic' })
     }
 
+    const endSummaryTimer = startPerfTimer(
+      'ai_summary',
+      { terminalId, snapshotChars: snapshot.length },
+      { minDurationMs: perfConfig.slowAiSummaryMs, level: 'warn' },
+    )
+    let summarySource: 'ai' | 'heuristic' = 'ai'
+    let summaryError = false
+
     try {
       const { generateText } = await import('ai')
       const { google } = await import('@ai-sdk/google')
@@ -241,10 +461,17 @@ async function main() {
       const description = (result.text || '').trim().slice(0, 240) || heuristic()
       res.json({ description, source: 'ai' })
     } catch (err: any) {
-      logger.warn({ err }, 'AI summary failed; using heuristic')
+      summarySource = 'heuristic'
+      summaryError = true
+      log.warn({ err }, 'AI summary failed; using heuristic')
       res.json({ description: heuristic(), source: 'heuristic' })
+    } finally {
+      endSummaryTimer({ source: summarySource, error: summaryError })
     }
   })
+
+  // --- API: files (for editor pane) ---
+  app.use('/api/files', filesRouter)
 
   // --- Static client in production ---
   const distRoot = path.resolve(__dirname, '..')
@@ -256,10 +483,9 @@ async function main() {
     app.get('*', (_req, res) => res.sendFile(indexHtml))
   }
 
-  // Start Claude watcher
-  await claudeIndexer.start()
-  claudeIndexer.onUpdate((projects) => {
-    wsHandler.broadcast({ type: 'sessions.updated', projects })
+  // Coding CLI watcher hooks
+  codingCliIndexer.onUpdate((projects) => {
+    wsHandler.broadcastSessionsUpdated(projects)
 
     // Auto-update terminal titles based on session data
     for (const project of projects) {
@@ -267,10 +493,16 @@ async function main() {
         if (!session.title) continue
 
         // Find terminals that match this session
-        const matchingTerminals = registry.findClaudeTerminalsBySession(session.sessionId, session.cwd)
+        const matchingTerminals = registry.findTerminalsBySession(session.provider, session.sessionId, session.cwd)
         for (const term of matchingTerminals) {
-          // Only update if title is still the default "Claude"
-          if (term.title === 'Claude') {
+          const defaultTitle =
+            session.provider === 'claude'
+              ? 'Claude'
+              : session.provider === 'codex'
+                ? 'Codex'
+                : 'CLI'
+          // Only update if title is still the default
+          if (term.title === defaultTitle) {
             registry.updateTitle(term.terminalId, session.title)
             wsHandler.broadcast({
               type: 'terminal.title.updated',
@@ -283,40 +515,131 @@ async function main() {
     }
   })
 
+  // Claude watcher hooks (for search + session association)
+
+  // One-time session association for new Claude sessions
+  // When Claude creates a session file, associate it with the oldest unassociated
+  // claude-mode terminal matching the session's cwd. This allows the terminal to
+  // resume the session after server restart.
+  //
+  // Broadcast message type: { type: 'terminal.session.associated', terminalId: string, sessionId: string }
+  claudeIndexer.onNewSession((session) => {
+    if (!session.cwd) return
+
+    const unassociated = registry.findUnassociatedClaudeTerminals(session.cwd)
+    if (unassociated.length === 0) return
+
+    // Only associate the oldest terminal (first in sorted list)
+    // This prevents incorrect associations when multiple terminals share the same cwd
+    const term = unassociated[0]
+    log.info({ terminalId: term.terminalId, sessionId: session.sessionId }, 'Associating terminal with new Claude session')
+    registry.setResumeSessionId(term.terminalId, session.sessionId)
+    try {
+      wsHandler.broadcast({
+        type: 'terminal.session.associated' as const,
+        terminalId: term.terminalId,
+        sessionId: session.sessionId,
+      })
+    } catch (err) {
+      log.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
+    }
+  })
+
+  const startBackgroundTasks = () => {
+    void withPerfSpan(
+      'session_repair_start',
+      () => sessionRepairService.start(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
+      .then(() => {
+        startupState.markReady('sessionRepairService')
+        logger.info({ task: 'sessionRepairService' }, 'Startup task ready')
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Session repair service failed to start')
+      })
+
+    void withPerfSpan(
+      'coding_cli_indexer_start',
+      () => codingCliIndexer.start(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
+      .then(() => {
+        startupState.markReady('codingCliIndexer')
+        logger.info({ task: 'codingCliIndexer' }, 'Startup task ready')
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Coding CLI indexer failed to start')
+      })
+
+    void withPerfSpan(
+      'claude_indexer_start',
+      () => claudeIndexer.start(),
+      {},
+      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+    )
+      .then(() => {
+        startupState.markReady('claudeIndexer')
+        logger.info({ task: 'claudeIndexer' }, 'Startup task ready')
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Claude indexer failed to start')
+      })
+  }
+
   const port = Number(process.env.PORT || 3001)
   server.listen(port, '0.0.0.0', () => {
-    logger.info({ port }, 'Server listening')
+    log.info({ port, appVersion: APP_VERSION }, 'Server listening')
+
+    // Print friendly startup message
+    const token = process.env.AUTH_TOKEN
+    const lanIps = detectLanIps()
+    const lanIp = lanIps[0] || 'localhost'
+    const url = `http://${lanIp}:${port}/?token=${token}`
+
+    console.log('')
+    console.log(`\x1b[32m\u{1F41A}\u{1F525} freshell is ready!\x1b[0m`)
+    console.log(`   Visit from anywhere on your network: \x1b[36m${url}\x1b[0m`)
+    console.log('')
+
+    startBackgroundTasks()
   })
 
   // Graceful shutdown handler
   let isShuttingDown = false
-  const shutdown = (signal: string) => {
+  const shutdown = async (signal: string) => {
     if (isShuttingDown) return
     isShuttingDown = true
 
-    logger.info({ signal }, 'Shutting down...')
+    log.info({ signal }, 'Shutting down...')
 
     // 1. Stop accepting new connections by closing the HTTP server
     server.close((err) => {
       if (err) {
-        logger.warn({ err }, 'Error closing HTTP server')
+        log.warn({ err }, 'Error closing HTTP server')
       }
     })
 
     // 2. Kill all running terminals
     registry.shutdown()
 
-    // 3. Kill all Claude sessions
-    claudeSessionManager.shutdown()
+    // 3. Kill all coding CLI sessions
+    codingCliSessionManager.shutdown()
 
     // 4. Close WebSocket connections gracefully
     wsHandler.close()
 
-    // 5. Stop the Claude indexer
+    // 5. Stop session indexers
+    codingCliIndexer.stop()
     claudeIndexer.stop()
 
-    // 5. Exit cleanly
-    logger.info('Shutdown complete')
+    // 6. Stop session repair service
+    await sessionRepairService.stop()
+
+    // 7. Exit cleanly
+    log.info('Shutdown complete')
     process.exit(0)
   }
 
@@ -325,6 +648,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  logger.error({ err }, 'Fatal startup error')
+  log.error({ err }, 'Fatal startup error')
   process.exit(1)
 })

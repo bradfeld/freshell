@@ -1,7 +1,8 @@
 import fsp from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { logger } from './logger'
+import { logger } from './logger.js'
+import type { CodingCliProviderName } from './coding-cli/types.js'
 
 /**
  * Simple promise-based mutex to serialize write operations.
@@ -25,18 +26,47 @@ class Mutex {
 
 export type AppSettings = {
   theme: 'system' | 'light' | 'dark'
+  uiScale: number
   terminal: {
     fontSize: number
-    fontFamily: string
     lineHeight: number
     cursorBlink: boolean
     scrollback: number
-    theme: 'default' | 'dark' | 'light'
+    theme:
+      | 'auto'
+      | 'dracula'
+      | 'one-dark'
+      | 'solarized-dark'
+      | 'github-dark'
+      | 'one-light'
+      | 'solarized-light'
+      | 'github-light'
   }
   defaultCwd?: string
+  logging: {
+    debug: boolean
+  }
   safety: {
     autoKillIdleMinutes: number
     warnBeforeKillMinutes: number
+  }
+  panes: {
+    defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor'
+  }
+  sidebar: {
+    sortMode: 'recency' | 'activity' | 'project'
+    showProjectBadges: boolean
+    width: number
+    collapsed: boolean
+  }
+  codingCli: {
+    enabledProviders: CodingCliProviderName[]
+    providers: Partial<Record<CodingCliProviderName, {
+      model?: string
+      sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'
+      permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions'
+      maxTurns?: number
+    }>>
   }
 }
 
@@ -44,6 +74,8 @@ export type SessionOverride = {
   titleOverride?: string
   summaryOverride?: string
   deleted?: boolean
+  archived?: boolean
+  createdAtOverride?: number
 }
 
 export type TerminalOverride = {
@@ -60,20 +92,45 @@ export type UserConfig = {
   projectColors: Record<string, string>
 }
 
+export function resolveDefaultLoggingDebug(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV !== 'production'
+}
+
 export const defaultSettings: AppSettings = {
   theme: 'system',
+  uiScale: 1.0,
   terminal: {
-    fontSize: 12,
-    fontFamily: 'Consolas',
+    fontSize: 16,
     lineHeight: 1,
     cursorBlink: true,
     scrollback: 5000,
-    theme: 'default',
+    theme: 'auto',
   },
   defaultCwd: undefined,
+  logging: {
+    debug: resolveDefaultLoggingDebug(),
+  },
   safety: {
     autoKillIdleMinutes: 180,
     warnBeforeKillMinutes: 5,
+  },
+  panes: {
+    defaultNewPane: 'ask',
+  },
+  sidebar: {
+    sortMode: 'activity',
+    showProjectBadges: true,
+    width: 288,
+    collapsed: false,
+  },
+  codingCli: {
+    enabledProviders: ['claude', 'codex'],
+    providers: {
+      claude: {
+        permissionMode: 'default',
+      },
+      codex: {},
+    },
   },
 }
 
@@ -85,14 +142,123 @@ function configPath(): string {
   return path.join(configDir(), 'config.json')
 }
 
+const CONFIG_TMP_PREFIX = 'config.json.tmp-'
+const DEFAULT_CONFIG_TMP_MAX_AGE_MS = 24 * 60 * 60 * 1000
+let cleanupPromise: Promise<void> | null = null
+let cleanupDir: string | null = null
+
 async function ensureDir() {
   await fsp.mkdir(configDir(), { recursive: true })
+}
+
+const RENAME_RETRY_DELAYS_MS = [10, 25, 50, 100, 200]
+
+function isRetryableRenameError(err: unknown): err is NodeJS.ErrnoException {
+  if (!err || typeof err !== 'object') return false
+  const code = (err as NodeJS.ErrnoException).code
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
+}
+
+async function delay(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function renameWithRetry(tmpPath: string, filePath: string) {
+  for (let attempt = 0; attempt <= RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      await fsp.rename(tmpPath, filePath)
+      return
+    } catch (err) {
+      if (!isRetryableRenameError(err) || attempt === RENAME_RETRY_DELAYS_MS.length) {
+        throw err
+      }
+      await delay(RENAME_RETRY_DELAYS_MS[attempt])
+    }
+  }
+}
+
+async function cleanupStaleConfigTmpFiles(options: { directory?: string; maxAgeMs?: number } = {}) {
+  const directory = options.directory ?? configDir()
+  const maxAgeMs = options.maxAgeMs ?? DEFAULT_CONFIG_TMP_MAX_AGE_MS
+  let entries: string[]
+  try {
+    entries = await fsp.readdir(directory)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+    logger.warn({ event: 'config_tmp_cleanup_error', directory, err }, 'Failed to read config directory for temp cleanup')
+    return
+  }
+
+  const now = Date.now()
+  let removed = 0
+  let failed = 0
+  const errors: Array<{ file: string; code?: string; message: string }> = []
+
+  for (const entry of entries) {
+    if (!entry.startsWith(CONFIG_TMP_PREFIX)) continue
+    const filePath = path.join(directory, entry)
+    try {
+      const stat = await fsp.stat(filePath)
+      if (!stat.isFile()) continue
+      if (now - stat.mtimeMs <= maxAgeMs) continue
+      await fsp.rm(filePath, { force: true })
+      removed += 1
+    } catch (err) {
+      failed += 1
+      if (errors.length < 5) {
+        errors.push({
+          file: entry,
+          code: (err as NodeJS.ErrnoException).code,
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+  }
+
+  if (removed === 0 && failed === 0) return
+
+  const payload = {
+    event: 'config_tmp_cleanup',
+    directory,
+    removed,
+    failed,
+    maxAgeMs,
+    errors: errors.length > 0 ? errors : undefined,
+  }
+
+  if (failed > 0) {
+    logger.warn(payload, 'Config temp cleanup completed with errors')
+    return
+  }
+
+  logger.info(payload, 'Config temp cleanup completed')
+}
+
+function ensureConfigTmpCleanup(): Promise<void> {
+  const directory = configDir()
+  if (cleanupPromise && cleanupDir === directory) return cleanupPromise
+  cleanupDir = directory
+  cleanupPromise = cleanupStaleConfigTmpFiles({ directory }).catch((err) => {
+    logger.warn({ event: 'config_tmp_cleanup_error', directory, err }, 'Config temp cleanup failed')
+  })
+  return cleanupPromise
 }
 
 async function atomicWriteFile(filePath: string, data: string) {
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
   await fsp.writeFile(tmp, data, 'utf-8')
-  await fsp.rename(tmp, filePath)
+  try {
+    await renameWithRetry(tmp, filePath)
+  } catch (err) {
+    if (isRetryableRenameError(err)) {
+      logger.warn({ err, filePath }, 'Atomic rename failed; falling back to direct write')
+      await fsp.writeFile(filePath, data, 'utf-8')
+      return
+    }
+    throw err
+  } finally {
+    await fsp.rm(tmp, { force: true })
+  }
 }
 
 async function readConfigFile(): Promise<UserConfig | null> {
@@ -107,11 +273,36 @@ async function readConfigFile(): Promise<UserConfig | null> {
 }
 
 function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
+  const baseLogging = base.logging ?? defaultSettings.logging
+  const terminalPatch: Partial<AppSettings['terminal']> = patch.terminal ?? {}
+  const terminalUpdates = {
+    fontSize: terminalPatch.fontSize,
+    lineHeight: terminalPatch.lineHeight,
+    cursorBlink: terminalPatch.cursorBlink,
+    scrollback: terminalPatch.scrollback,
+    theme: terminalPatch.theme,
+  }
   return {
     ...base,
     ...patch,
-    terminal: { ...base.terminal, ...(patch.terminal || {}) },
+    terminal: {
+      ...base.terminal,
+      ...Object.fromEntries(
+        Object.entries(terminalUpdates).filter(([, value]) => value !== undefined)
+      ),
+    },
+    logging: { ...baseLogging, ...(patch.logging || {}) },
     safety: { ...base.safety, ...(patch.safety || {}) },
+    panes: { ...base.panes, ...(patch.panes || {}) },
+    sidebar: { ...base.sidebar, ...(patch.sidebar || {}) },
+    codingCli: {
+      ...base.codingCli,
+      ...(patch.codingCli || {}),
+      providers: {
+        ...base.codingCli.providers,
+        ...(patch.codingCli?.providers || {}),
+      },
+    },
   }
 }
 
@@ -121,6 +312,7 @@ export class ConfigStore {
 
   async load(): Promise<UserConfig> {
     if (this.cache) return this.cache
+    await ensureConfigTmpCleanup()
     const existing = await readConfigFile()
     if (existing) {
       this.cache = {

@@ -1,32 +1,58 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { TerminalStatus } from '@/store/types'
+import PaneHeader from './PaneHeader'
+import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 interface PaneProps {
+  tabId: string
+  paneId: string
   isActive: boolean
   isOnlyPane: boolean
+  title?: string
+  status?: TerminalStatus
   onClose: () => void
   onFocus: () => void
   children: React.ReactNode
 }
 
 export default function Pane({
+  tabId,
+  paneId,
   isActive,
   isOnlyPane,
+  title,
+  status,
   onClose,
   onFocus,
   children,
 }: PaneProps) {
+  const showHeader = !isOnlyPane && title !== undefined
+
   return (
     <div
       className={cn(
-        'relative h-full w-full overflow-hidden',
-        !isActive && 'opacity-70'
+        'relative h-full w-full overflow-hidden flex flex-col',
+        !isActive && 'opacity-[0.85]'
       )}
-      onClick={onFocus}
+      onMouseDown={onFocus}
     >
-      {/* Close button - hidden if only pane */}
-      {!isOnlyPane && (
+      {/* Pane header - shown when multiple panes and title available */}
+      {showHeader && (
+        <div data-context={ContextIds.Pane} data-tab-id={tabId} data-pane-id={paneId}>
+          <PaneHeader
+            title={title}
+            status={status || 'creating'}
+            isActive={isActive}
+            onClose={onClose}
+          />
+        </div>
+      )}
+
+      {/* Fallback close button - shown when no header but multiple panes */}
+      {!isOnlyPane && !showHeader && (
         <button
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
             onClose()
@@ -39,7 +65,7 @@ export default function Pane({
       )}
 
       {/* Content */}
-      <div className="h-full w-full">
+      <div className="h-full w-full min-h-0">
         {children}
       </div>
     </div>

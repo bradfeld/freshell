@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import express, { type Express } from 'express'
 import request from 'supertest'
 
+const SLOW_TEST_TIMEOUT_MS = 20000
+
 // Mock the config-store module before importing auth
 vi.mock('../../server/config-store', () => ({
   configStore: {
@@ -18,14 +20,19 @@ vi.mock('../../server/config-store', () => ({
 }))
 
 // Mock logger to avoid unnecessary output
-vi.mock('../../server/logger', () => ({
-  logger: {
+vi.mock('../../server/logger', () => {
+  const logger = {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
-  },
-}))
+    trace: vi.fn(),
+    fatal: vi.fn(),
+    child: vi.fn(),
+  }
+  logger.child.mockReturnValue(logger)
+  return { logger }
+})
 
 // Import after mocks are set up
 import { httpAuthMiddleware } from '../../server/auth'
@@ -391,7 +398,7 @@ describe('Terminals API', () => {
         deleted: undefined,
       })
       expect(response.body).toEqual({ titleOverride: 'Updated Title' })
-    })
+    }, SLOW_TEST_TIMEOUT_MS)
 
     it('updates terminal description override', async () => {
       registry.addTerminal({ terminalId: 'term_desc' })

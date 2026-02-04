@@ -21,6 +21,7 @@ vi.mock('@/lib/ws-client', () => ({
     onMessage: mockOnMessage,
     onReconnect: mockOnReconnect,
     connect: mockConnect,
+    setHelloExtensionProvider: vi.fn(),
   }),
 }))
 
@@ -122,6 +123,7 @@ describe('App Component - Share Button', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     // Reset sessionStorage mock - key must be 'auth-token' to match ws-client.ts
     const sessionStorageMock: Record<string, string> = {
       'auth-token': 'test-token-abc123',
@@ -552,6 +554,201 @@ describe('App Component - Share Button', () => {
       // Should still have called share (with localhost fallback)
       const callArgs = mockShare.mock.calls[0][0]
       expect(callArgs.text).toContain('token=test-token-abc123')
+    })
+  })
+})
+
+describe('App Bootstrap', () => {
+  const originalSessionStorage = global.sessionStorage
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    const sessionStorageMock: Record<string, string> = {
+      'auth-token': 'test-token-abc123',
+    }
+    Object.defineProperty(global, 'sessionStorage', {
+      value: {
+        getItem: vi.fn((key: string) => sessionStorageMock[key] || null),
+        setItem: vi.fn((key: string, value: string) => {
+          sessionStorageMock[key] = value
+        }),
+        removeItem: vi.fn((key: string) => {
+          delete sessionStorageMock[key]
+        }),
+        clear: vi.fn(),
+      },
+      writable: true,
+    })
+    mockApiGet.mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    cleanup()
+    Object.defineProperty(global, 'sessionStorage', {
+      value: originalSessionStorage,
+      writable: true,
+    })
+  })
+
+  it('does not refetch settings or sessions after websocket connect', async () => {
+    let resolveConnect: () => void
+    const connectPromise = new Promise<void>((resolve) => {
+      resolveConnect = resolve
+    })
+    mockConnect.mockReturnValueOnce(connectPromise)
+
+    renderApp()
+
+    await waitFor(() => {
+      expect(mockConnect).toHaveBeenCalled()
+    })
+
+    await waitFor(() => {
+      const sessionsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions')
+      const settingsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/settings')
+      expect(sessionsCalls.length).toBe(1)
+      expect(settingsCalls.length).toBe(1)
+    })
+
+    resolveConnect!()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const sessionsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions')
+    const settingsCalls = mockApiGet.mock.calls.filter(([url]) => url === '/api/settings')
+    expect(sessionsCalls.length).toBe(1)
+    expect(settingsCalls.length).toBe(1)
+  })
+})
+
+describe('Tab Switching Keyboard Shortcuts', () => {
+  const originalSessionStorage = global.sessionStorage
+
+  function createStoreWithTabs(tabCount: number, activeIndex: number = 0) {
+    const tabs = Array.from({ length: tabCount }, (_, i) => ({
+      id: `tab-${i + 1}`,
+      createRequestId: `req-${i + 1}`,
+      title: `Tab ${i + 1}`,
+      mode: 'shell' as const,
+      shell: 'system' as const,
+      status: 'running' as const,
+      createdAt: Date.now(),
+    }))
+    return configureStore({
+      reducer: {
+        settings: settingsReducer,
+        tabs: tabsReducer,
+        connection: connectionReducer,
+        sessions: sessionsReducer,
+        panes: panesReducer,
+      },
+      middleware: (getDefault) =>
+        getDefault({
+          serializableCheck: {
+            ignoredPaths: ['sessions.expandedProjects'],
+          },
+        }),
+      preloadedState: {
+        settings: {
+          settings: defaultSettings,
+          loaded: true,
+          lastSavedAt: undefined,
+        },
+        tabs: {
+          tabs,
+          activeTabId: tabs[activeIndex]?.id || null,
+        },
+        sessions: {
+          projects: [],
+          expandedProjects: new Set<string>(),
+          isLoading: false,
+          error: null,
+        },
+        connection: {
+          status: 'ready' as const,
+          lastError: undefined,
+        },
+        panes: {
+          layouts: {},
+          activePane: {},
+        },
+      },
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    const sessionStorageMock: Record<string, string> = {
+      'auth-token': 'test-token',
+    }
+    Object.defineProperty(global, 'sessionStorage', {
+      value: {
+        getItem: vi.fn((key: string) => sessionStorageMock[key] || null),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+      },
+      writable: true,
+    })
+    mockApiGet.mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    cleanup()
+    Object.defineProperty(global, 'sessionStorage', {
+      value: originalSessionStorage,
+      writable: true,
+    })
+  })
+
+  describe('Ctrl+Shift+[ and Ctrl+Shift+] (bracket shortcuts)', () => {
+    it('Ctrl+Shift+] switches to next tab', async () => {
+      const store = createStoreWithTabs(3, 0)
+      renderApp(store)
+
+      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
+
+      expect(store.getState().tabs.activeTabId).toBe('tab-2')
+    })
+
+    it('Ctrl+Shift+[ switches to previous tab', async () => {
+      const store = createStoreWithTabs(3, 1)
+      renderApp(store)
+
+      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+
+      expect(store.getState().tabs.activeTabId).toBe('tab-1')
+    })
+
+    it('Ctrl+Shift+] wraps to first tab when on last tab', async () => {
+      const store = createStoreWithTabs(3, 2)
+      renderApp(store)
+
+      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
+
+      expect(store.getState().tabs.activeTabId).toBe('tab-1')
+    })
+
+    it('Ctrl+Shift+[ wraps to last tab when on first tab', async () => {
+      const store = createStoreWithTabs(3, 0)
+      renderApp(store)
+
+      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+
+      expect(store.getState().tabs.activeTabId).toBe('tab-3')
+    })
+
+    it('does nothing with single tab', async () => {
+      const store = createStoreWithTabs(1, 0)
+      renderApp(store)
+
+      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
+      expect(store.getState().tabs.activeTabId).toBe('tab-1')
+
+      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+      expect(store.getState().tabs.activeTabId).toBe('tab-1')
     })
   })
 })

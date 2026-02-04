@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
+import { updateSettingsLocal, markSaved, defaultSettings, mergeSettings } from '@/store/settingsSlice'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { terminalThemes, darkThemes, lightThemes } from '@/lib/terminal-themes'
-import type { SidebarSortMode, TerminalTheme } from '@/store/types'
+import { terminalThemes, darkThemes, lightThemes, getTerminalTheme } from '@/lib/terminal-themes'
+import { resolveTerminalFontFamily, saveLocalTerminalFontFamily } from '@/lib/terminal-fonts'
+import type { SidebarSortMode, TerminalTheme, CodexSandboxMode, ClaudePermissionMode, CodingCliProviderName } from '@/store/types'
+import { CODING_CLI_PROVIDER_CONFIGS } from '@/lib/coding-cli-utils'
 
 /** Monospace fonts with good Unicode block element support for terminal use */
 const terminalFonts = [
   { value: 'JetBrains Mono', label: 'JetBrains Mono' },
   { value: 'Cascadia Code', label: 'Cascadia Code' },
+  { value: 'Cascadia Mono', label: 'Cascadia Mono' },
   { value: 'Fira Code', label: 'Fira Code' },
+  { value: 'Meslo LG S', label: 'Meslo LG S' },
   { value: 'Source Code Pro', label: 'Source Code Pro' },
   { value: 'IBM Plex Mono', label: 'IBM Plex Mono' },
   { value: 'Consolas', label: 'Consolas' },
@@ -19,12 +23,152 @@ const terminalFonts = [
   { value: 'monospace', label: 'System monospace' },
 ]
 
+type PreviewTokenKind =
+  | 'comment'
+  | 'keyword'
+  | 'type'
+  | 'function'
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'null'
+  | 'property'
+  | 'operator'
+  | 'punctuation'
+  | 'variable'
+
+type PreviewToken = {
+  text: string
+  kind?: PreviewTokenKind
+}
+
+const terminalPreviewWidth = 40
+const terminalPreviewHeight = 8
+
+const terminalPreviewLines: PreviewToken[][] = [
+  [{ text: '// terminal preview: syntax demo', kind: 'comment' }],
+  [
+    { text: 'const ', kind: 'keyword' },
+    { text: 'answer', kind: 'variable' },
+    { text: ': ', kind: 'punctuation' },
+    { text: 'number', kind: 'type' },
+    { text: ' = ', kind: 'operator' },
+    { text: '42', kind: 'number' },
+  ],
+  [
+    { text: 'type ', kind: 'keyword' },
+    { text: 'User', kind: 'type' },
+    { text: ' = ', kind: 'operator' },
+    { text: '{ ', kind: 'punctuation' },
+    { text: 'id', kind: 'property' },
+    { text: ': ', kind: 'punctuation' },
+    { text: 'number', kind: 'type' },
+    { text: ' }', kind: 'punctuation' },
+  ],
+  [
+    { text: 'const ', kind: 'keyword' },
+    { text: 'user', kind: 'variable' },
+    { text: ': ', kind: 'punctuation' },
+    { text: 'User', kind: 'type' },
+    { text: ' = ', kind: 'operator' },
+    { text: '{ ', kind: 'punctuation' },
+    { text: 'id', kind: 'property' },
+    { text: ': ', kind: 'punctuation' },
+    { text: '7', kind: 'number' },
+    { text: ' }', kind: 'punctuation' },
+  ],
+  [
+    { text: 'function ', kind: 'keyword' },
+    { text: 'greet', kind: 'function' },
+    { text: '(', kind: 'punctuation' },
+    { text: 'name', kind: 'variable' },
+    { text: ': ', kind: 'punctuation' },
+    { text: 'string', kind: 'type' },
+    { text: ') {', kind: 'punctuation' },
+  ],
+  [
+    { text: '  ', kind: 'punctuation' },
+    { text: 'return ', kind: 'keyword' },
+    { text: '"hi, "', kind: 'string' },
+    { text: ' + ', kind: 'operator' },
+    { text: 'name', kind: 'variable' },
+  ],
+  [
+    { text: '}', kind: 'punctuation' },
+    { text: ' ', kind: 'punctuation' },
+    { text: '// end', kind: 'comment' },
+  ],
+  [
+    { text: 'const ', kind: 'keyword' },
+    { text: 'ok', kind: 'variable' },
+    { text: ' = ', kind: 'operator' },
+    { text: 'true', kind: 'boolean' },
+    { text: ' && ', kind: 'operator' },
+    { text: 'null', kind: 'null' },
+    { text: ' === ', kind: 'operator' },
+    { text: '0', kind: 'number' },
+  ],
+].map((tokens) => normalizePreviewLine(tokens, terminalPreviewWidth))
+
+function normalizePreviewLine(tokens: PreviewToken[], width: number): PreviewToken[] {
+  let remaining = width
+  const normalized: PreviewToken[] = []
+
+  for (const token of tokens) {
+    if (remaining <= 0) break
+    const text = token.text.slice(0, remaining)
+    if (!text.length) continue
+    normalized.push({ ...token, text })
+    remaining -= text.length
+  }
+
+  if (remaining > 0) {
+    normalized.push({ text: ' '.repeat(remaining) })
+  }
+
+  return normalized
+}
+
 export default function SettingsView() {
   const dispatch = useAppDispatch()
-  const settings = useAppSelector((s) => s.settings.settings)
+  const rawSettings = useAppSelector((s) => s.settings.settings)
+  const settings = useMemo(
+    () => mergeSettings(defaultSettings, rawSettings || {}),
+    [rawSettings],
+  )
   const lastSavedAt = useAppSelector((s) => s.settings.lastSavedAt)
+  const enabledProviders = settings.codingCli?.enabledProviders ?? []
+
+  const [availableTerminalFonts, setAvailableTerminalFonts] = useState(terminalFonts)
+  const [fontsReady, setFontsReady] = useState(false)
+  const [defaultCwdInput, setDefaultCwdInput] = useState(settings.defaultCwd ?? '')
+  const [defaultCwdError, setDefaultCwdError] = useState<string | null>(null)
 
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const defaultCwdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const defaultCwdValidationRef = useRef(0)
+  const lastSettingsDefaultCwdRef = useRef(settings.defaultCwd ?? '')
+  const previewTheme = useMemo(
+    () => getTerminalTheme(settings.terminal.theme, settings.theme),
+    [settings.terminal.theme, settings.theme],
+  )
+  const previewColors = useMemo(
+    () => ({
+      comment: previewTheme.brightBlack ?? previewTheme.foreground ?? '#c0c0c0',
+      keyword: previewTheme.blue ?? previewTheme.foreground ?? '#7aa2f7',
+      type: previewTheme.magenta ?? previewTheme.foreground ?? '#bb9af7',
+      function: previewTheme.cyan ?? previewTheme.foreground ?? '#7dcfff',
+      string: previewTheme.green ?? previewTheme.foreground ?? '#9ece6a',
+      number: previewTheme.yellow ?? previewTheme.foreground ?? '#e0af68',
+      boolean: previewTheme.magenta ?? previewTheme.foreground ?? '#bb9af7',
+      null: previewTheme.red ?? previewTheme.foreground ?? '#f7768e',
+      property: previewTheme.cyan ?? previewTheme.foreground ?? '#7dcfff',
+      operator: previewTheme.foreground ?? '#c0c0c0',
+      punctuation: previewTheme.foreground ?? '#c0c0c0',
+      variable: previewTheme.foreground ?? '#c0c0c0',
+    }),
+    [previewTheme],
+  )
 
   const patch = useMemo(
     () => async (updates: any) => {
@@ -37,16 +181,166 @@ export default function SettingsView() {
   useEffect(() => {
     return () => {
       if (pendingRef.current) clearTimeout(pendingRef.current)
+      if (defaultCwdTimerRef.current) clearTimeout(defaultCwdTimerRef.current)
     }
   }, [])
 
-  function scheduleSave(updates: any) {
+  const scheduleSave = useCallback((updates: any) => {
     if (pendingRef.current) clearTimeout(pendingRef.current)
     pendingRef.current = setTimeout(() => {
       patch(updates).catch((err) => console.warn('Failed to save settings', err))
       pendingRef.current = null
     }, 500)
-  }
+  }, [patch])
+
+  useEffect(() => {
+    const next = settings.defaultCwd ?? ''
+    if (defaultCwdInput === lastSettingsDefaultCwdRef.current) {
+      setDefaultCwdInput(next)
+    }
+    lastSettingsDefaultCwdRef.current = next
+  }, [defaultCwdInput, settings.defaultCwd])
+
+  const commitDefaultCwd = useCallback((nextValue: string | undefined) => {
+    if (nextValue === settings.defaultCwd) return
+    dispatch(updateSettingsLocal({ defaultCwd: nextValue } as any))
+    patch({ defaultCwd: nextValue ?? null } as any).catch((err) => console.warn('Failed to save settings', err))
+  }, [dispatch, patch, settings.defaultCwd])
+
+  const scheduleDefaultCwdValidation = useCallback((value: string) => {
+    defaultCwdValidationRef.current += 1
+    const validationId = defaultCwdValidationRef.current
+    if (defaultCwdTimerRef.current) clearTimeout(defaultCwdTimerRef.current)
+
+    defaultCwdTimerRef.current = setTimeout(() => {
+      if (defaultCwdValidationRef.current !== validationId) return
+      const trimmed = value.trim()
+      if (!trimmed) {
+        setDefaultCwdError(null)
+        commitDefaultCwd(undefined)
+        return
+      }
+
+      api.post<{ valid: boolean }>('/api/files/validate-dir', { path: trimmed })
+        .then((result) => {
+          if (defaultCwdValidationRef.current !== validationId) return
+          if (result.valid) {
+            setDefaultCwdError(null)
+            commitDefaultCwd(trimmed)
+            return
+          }
+          setDefaultCwdError('directory not found')
+          commitDefaultCwd(undefined)
+        })
+        .catch(() => {
+          if (defaultCwdValidationRef.current !== validationId) return
+          setDefaultCwdError('directory not found')
+          commitDefaultCwd(undefined)
+        })
+    }, 500)
+  }, [commitDefaultCwd])
+
+  const setProviderEnabled = useCallback((provider: CodingCliProviderName, enabled: boolean) => {
+    const next = enabled
+      ? Array.from(new Set([...enabledProviders, provider]))
+      : enabledProviders.filter((p) => p !== provider)
+    dispatch(updateSettingsLocal({ codingCli: { enabledProviders: next } } as any))
+    scheduleSave({ codingCli: { enabledProviders: next } })
+  }, [dispatch, enabledProviders, scheduleSave])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const detectFonts = async () => {
+      if (typeof document === 'undefined' || !document.fonts || !document.fonts.check) {
+        if (!cancelled) {
+          setAvailableTerminalFonts(terminalFonts.filter((font) => font.value === 'monospace'))
+          setFontsReady(true)
+        }
+        return
+      }
+
+      try {
+        await document.fonts.ready
+      } catch {
+        // Ignore font readiness errors and attempt checks anyway.
+      }
+
+      if (cancelled) return
+
+      let ctx: CanvasRenderingContext2D | null = null
+      if (typeof CanvasRenderingContext2D !== 'undefined') {
+        const canvas = document.createElement('canvas')
+        try {
+          ctx = canvas.getContext('2d')
+        } catch {
+          ctx = null
+        }
+      }
+      const testText = 'mmmmmmmmmmlilliiWWWWWW'
+      const testSize = 72
+      const baseFonts = ['monospace', 'serif', 'sans-serif']
+      const baseWidths = ctx
+        ? baseFonts.map((base) => {
+          ctx.font = `${testSize}px ${base}`
+          return ctx.measureText(testText).width
+        })
+        : []
+
+      const isFontAvailable = (fontFamily: string) => {
+        if (fontFamily === 'monospace') return true
+        if (document.fonts && !document.fonts.check(`12px "${fontFamily}"`)) return false
+        if (!ctx) return true
+        return baseFonts.some((base, index) => {
+          ctx.font = `${testSize}px "${fontFamily}", ${base}`
+          return ctx.measureText(testText).width !== baseWidths[index]
+        })
+      }
+
+      const available = terminalFonts.filter((font) => {
+        if (font.value === 'monospace') return true
+        return isFontAvailable(font.value)
+      })
+
+      setAvailableTerminalFonts(
+        available.length > 0
+          ? available
+          : terminalFonts.filter((font) => font.value === 'monospace')
+      )
+      setFontsReady(true)
+    }
+
+    void detectFonts()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const availableFontValues = useMemo(
+    () => new Set(availableTerminalFonts.map((font) => font.value)),
+    [availableTerminalFonts]
+  )
+  const isSelectedFontAvailable = availableFontValues.has(settings.terminal.fontFamily)
+  const fallbackFontFamily =
+    availableTerminalFonts.find((font) => font.value === 'monospace')?.value
+    ?? availableTerminalFonts[0]?.value
+    ?? 'monospace'
+
+  useEffect(() => {
+    if (!fontsReady) return
+    if (isSelectedFontAvailable) return
+    if (fallbackFontFamily === settings.terminal.fontFamily) return
+
+    dispatch(updateSettingsLocal({ terminal: { fontFamily: fallbackFontFamily } } as any))
+    saveLocalTerminalFontFamily(fallbackFontFamily)
+  }, [
+    dispatch,
+    fallbackFontFamily,
+    fontsReady,
+    isSelectedFontAvailable,
+    settings.terminal.fontFamily,
+  ])
 
   return (
     <div className="h-full flex flex-col">
@@ -65,6 +359,43 @@ export default function SettingsView() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-6 py-6 space-y-8">
+
+          {/* Terminal preview */}
+          <div className="space-y-2" data-testid="terminal-preview">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium">Terminal preview</h2>
+              <span className="text-xs text-muted-foreground">40×8</span>
+            </div>
+            <div
+              aria-label="Terminal preview"
+              className="rounded-md border border-border/40 shadow-sm overflow-hidden font-mono"
+              style={{
+                width: '40ch',
+                height: `${terminalPreviewHeight * settings.terminal.lineHeight}em`,
+                fontFamily: resolveTerminalFontFamily(settings.terminal.fontFamily),
+                fontSize: `${settings.terminal.fontSize}px`,
+                lineHeight: settings.terminal.lineHeight,
+                backgroundColor: previewTheme.background,
+                color: previewTheme.foreground,
+                whiteSpace: 'pre',
+              }}
+            >
+              {terminalPreviewLines.map((line, lineIndex) => (
+                <div key={lineIndex} data-testid="terminal-preview-line">
+                  {line.map((token, tokenIndex) => (
+                    <span
+                      key={`${lineIndex}-${tokenIndex}`}
+                      style={{
+                        color: token.kind ? previewColors[token.kind] : previewTheme.foreground,
+                      }}
+                    >
+                      {token.text}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Appearance */}
           <SettingsSection title="Appearance" description="Theme and visual preferences">
@@ -104,7 +435,7 @@ export default function SettingsView() {
           <SettingsSection title="Sidebar" description="Session list and navigation">
             <SettingsRow label="Sort mode">
               <select
-                value={settings.sidebar?.sortMode || 'hybrid'}
+                value={settings.sidebar?.sortMode || 'recency-pinned'}
                 onChange={(e) => {
                   const v = e.target.value as SidebarSortMode
                   dispatch(updateSettingsLocal({ sidebar: { sortMode: v } } as any))
@@ -112,9 +443,9 @@ export default function SettingsView() {
                 }}
                 className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
               >
-                <option value="hybrid">Hybrid (running first)</option>
                 <option value="recency">Recency</option>
-                <option value="activity">Activity</option>
+                <option value="recency-pinned">Recency (pinned)</option>
+                <option value="activity">Activity (tabs first)</option>
                 <option value="project">Project</option>
               </select>
             </SettingsRow>
@@ -127,6 +458,27 @@ export default function SettingsView() {
                   scheduleSave({ sidebar: { showProjectBadges: checked } })
                 }}
               />
+            </SettingsRow>
+          </SettingsSection>
+
+          {/* Panes */}
+          <SettingsSection title="Panes" description="New pane behavior">
+            <SettingsRow label="Default new pane">
+              <select
+                aria-label="Default new pane"
+                value={settings.panes?.defaultNewPane || 'ask'}
+                onChange={(e) => {
+                  const v = e.target.value as 'ask' | 'shell' | 'browser' | 'editor'
+                  dispatch(updateSettingsLocal({ panes: { defaultNewPane: v } } as any))
+                  scheduleSave({ panes: { defaultNewPane: v } })
+                }}
+                className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+              >
+                <option value="ask">Ask</option>
+                <option value="shell">Shell</option>
+                <option value="browser">Browser</option>
+                <option value="editor">Editor</option>
+              </select>
             </SettingsRow>
           </SettingsSection>
 
@@ -212,14 +564,14 @@ export default function SettingsView() {
 
             <SettingsRow label="Font family">
               <select
-                value={settings.terminal.fontFamily}
+                value={isSelectedFontAvailable ? settings.terminal.fontFamily : fallbackFontFamily}
                 onChange={(e) => {
                   dispatch(updateSettingsLocal({ terminal: { fontFamily: e.target.value } } as any))
-                  scheduleSave({ terminal: { fontFamily: e.target.value } })
+                  saveLocalTerminalFontFamily(e.target.value)
                 }}
                 className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
               >
-                {terminalFonts.map((font) => (
+                {availableTerminalFonts.map((font) => (
                   <option key={font.value} value={font.value}>{font.label}</option>
                 ))}
               </select>
@@ -257,27 +609,130 @@ export default function SettingsView() {
             </SettingsRow>
 
             <SettingsRow label="Default working directory">
-              <input
-                type="text"
-                value={settings.defaultCwd || ''}
-                placeholder="e.g. C:\Users\you\projects"
-                onChange={(e) => {
-                  dispatch(updateSettingsLocal({ defaultCwd: e.target.value || undefined }))
-                  scheduleSave({ defaultCwd: e.target.value || undefined })
+              <div className="relative w-full max-w-xs">
+                <input
+                  type="text"
+                  value={defaultCwdInput}
+                  placeholder="e.g. C:\Users\you\projects"
+                  aria-invalid={defaultCwdError ? true : undefined}
+                  onChange={(e) => {
+                    const nextValue = e.target.value
+                    setDefaultCwdInput(nextValue)
+                    setDefaultCwdError(null)
+                    scheduleDefaultCwdValidation(nextValue)
+                  }}
+                  className="w-full h-8 px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border"
+                />
+                {defaultCwdError && (
+                  <span
+                    className="pointer-events-none absolute right-2 -bottom-4 text-[10px] text-destructive"
+                  >
+                    {defaultCwdError}
+                  </span>
+                )}
+              </div>
+            </SettingsRow>
+          </SettingsSection>
+
+          {/* Debugging */}
+          <SettingsSection title="Debugging" description="Debug-level logs and perf instrumentation">
+            <SettingsRow label="Debug logging">
+              <Toggle
+                checked={settings.logging?.debug ?? false}
+                onChange={(checked) => {
+                  dispatch(updateSettingsLocal({ logging: { debug: checked } } as any))
+                  scheduleSave({ logging: { debug: checked } })
                 }}
-                className="w-full max-w-xs h-8 px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border"
               />
             </SettingsRow>
           </SettingsSection>
 
+          {/* Coding CLIs */}
+          <SettingsSection title="Coding CLIs" description="Providers and defaults for coding sessions">
+            {CODING_CLI_PROVIDER_CONFIGS.map((provider) => (
+              <SettingsRow key={`enable-${provider.name}`} label={`Enable ${provider.label}`}>
+                <Toggle
+                  checked={enabledProviders.includes(provider.name)}
+                  onChange={(checked) => setProviderEnabled(provider.name as CodingCliProviderName, checked)}
+                />
+              </SettingsRow>
+            ))}
+
+            {CODING_CLI_PROVIDER_CONFIGS.map((provider) => {
+              const providerSettings = settings.codingCli?.providers?.[provider.name] || {}
+
+              return (
+                <div key={`provider-${provider.name}`} className="space-y-4">
+                  {provider.supportsPermissionMode && (
+                    <SettingsRow label={`${provider.label} permission mode`}>
+                      <select
+                        value={(providerSettings.permissionMode as ClaudePermissionMode) || 'default'}
+                        onChange={(e) => {
+                          const v = e.target.value as ClaudePermissionMode
+                          dispatch(updateSettingsLocal({
+                            codingCli: { providers: { [provider.name]: { permissionMode: v } } },
+                          } as any))
+                          scheduleSave({ codingCli: { providers: { [provider.name]: { permissionMode: v } } } })
+                        }}
+                        className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                      >
+                        <option value="default">Default</option>
+                        <option value="plan">Plan</option>
+                        <option value="acceptEdits">Accept edits</option>
+                        <option value="bypassPermissions">Bypass permissions</option>
+                      </select>
+                    </SettingsRow>
+                  )}
+
+                  {provider.supportsModel && (
+                    <SettingsRow label={`${provider.label} model`}>
+                      <input
+                        type="text"
+                        value={providerSettings.model || ''}
+                        placeholder={provider.name === 'codex' ? 'e.g. gpt-5-codex' : 'e.g. claude-3-5-sonnet'}
+                        onChange={(e) => {
+                          const model = e.target.value.trim()
+                          dispatch(updateSettingsLocal({
+                            codingCli: { providers: { [provider.name]: { model: model || undefined } } },
+                          } as any))
+                          scheduleSave({ codingCli: { providers: { [provider.name]: { model: model || undefined } } } })
+                        }}
+                        className="w-full max-w-xs h-8 px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border"
+                      />
+                    </SettingsRow>
+                  )}
+
+                  {provider.supportsSandbox && (
+                    <SettingsRow label={`${provider.label} sandbox`}>
+                      <select
+                        value={(providerSettings.sandbox as CodexSandboxMode) || ''}
+                        onChange={(e) => {
+                          const v = e.target.value as CodexSandboxMode
+                          const sandbox = v || undefined
+                          dispatch(updateSettingsLocal({
+                            codingCli: { providers: { [provider.name]: { sandbox } } },
+                          } as any))
+                          scheduleSave({ codingCli: { providers: { [provider.name]: { sandbox } } } })
+                        }}
+                        className="h-8 px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border"
+                      >
+                        <option value="">Default</option>
+                        <option value="read-only">Read-only</option>
+                        <option value="workspace-write">Workspace write</option>
+                        <option value="danger-full-access">Danger full access</option>
+                      </select>
+                    </SettingsRow>
+                  )}
+                </div>
+              )
+            })}
+          </SettingsSection>
+
           {/* Keyboard shortcuts */}
-          <SettingsSection title="Keyboard shortcuts" description="Quick navigation">
+          <SettingsSection title="Keyboard shortcuts" description="Tab navigation">
             <div className="space-y-2 text-sm">
-              <ShortcutRow keys={['Ctrl', 'B', 'T']} description="New terminal" />
-              <ShortcutRow keys={['Ctrl', 'B', 'W']} description="Close tab" />
-              <ShortcutRow keys={['Ctrl', 'B', 'S']} description="Sessions view" />
-              <ShortcutRow keys={['Ctrl', 'B', 'O']} description="Overview" />
-              <ShortcutRow keys={['Ctrl', 'B', ',']} description="Settings" />
+              <ShortcutRow keys={['Ctrl', 'Shift', '[']} description="Previous tab" />
+              <ShortcutRow keys={['Ctrl', 'Shift', ']']} description="Next tab" />
             </div>
           </SettingsSection>
 

@@ -9,9 +9,10 @@ import panesReducer, {
   updatePaneContent,
   removeLayout,
   hydratePanes,
+  updatePaneTitle,
   PanesState,
 } from '../../../../src/store/panesSlice'
-import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent } from '../../../../src/store/paneTypes'
+import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent, EditorPaneContent } from '../../../../src/store/paneTypes'
 
 // Mock nanoid to return predictable IDs for testing
 let mockIdCounter = 0
@@ -26,6 +27,7 @@ describe('panesSlice', () => {
     initialState = {
       layouts: {},
       activePane: {},
+      paneTitles: {},
     }
     mockIdCounter = 0
     vi.clearAllMocks()
@@ -608,6 +610,29 @@ describe('panesSlice', () => {
 
       expect(state.layouts['tab-1']).toEqual(originalLayout)
     })
+
+    it('removes pane title when pane is closed', () => {
+      const layout: PaneNode = {
+        type: 'split',
+        id: 'split-1',
+        direction: 'horizontal',
+        sizes: [50, 50],
+        children: [
+          { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+          { type: 'leaf', id: 'pane-2', content: { kind: 'terminal', createRequestId: 'req-2', status: 'running', mode: 'shell' } },
+        ],
+      }
+      const state: PanesState = {
+        layouts: { 'tab-1': layout },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: { 'tab-1': { 'pane-1': 'First', 'pane-2': 'Second' } },
+      }
+
+      const result = panesReducer(state, closePane({ tabId: 'tab-1', paneId: 'pane-1' }))
+
+      expect(result.paneTitles['tab-1']['pane-1']).toBeUndefined()
+      expect(result.paneTitles['tab-1']['pane-2']).toBe('Second')
+    })
   })
 
   describe('setActivePane', () => {
@@ -920,6 +945,36 @@ describe('panesSlice', () => {
       expect(state.layouts).toEqual(originalState.layouts)
       expect(state.activePane).toEqual(originalState.activePane)
     })
+
+    it('removes paneTitles for the tab', () => {
+      const state: PanesState = {
+        layouts: {
+          'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+        },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: { 'tab-1': { 'pane-1': 'My Title' } },
+      }
+
+      const result = panesReducer(state, removeLayout({ tabId: 'tab-1' }))
+
+      expect(result.paneTitles['tab-1']).toBeUndefined()
+    })
+
+    it('preserves paneTitles for other tabs when removing one', () => {
+      const state: PanesState = {
+        layouts: {
+          'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+          'tab-2': { type: 'leaf', id: 'pane-2', content: { kind: 'terminal', createRequestId: 'req-2', status: 'running', mode: 'shell' } },
+        },
+        activePane: { 'tab-1': 'pane-1', 'tab-2': 'pane-2' },
+        paneTitles: { 'tab-1': { 'pane-1': 'Title 1' }, 'tab-2': { 'pane-2': 'Title 2' } },
+      }
+
+      const result = panesReducer(state, removeLayout({ tabId: 'tab-1' }))
+
+      expect(result.paneTitles['tab-1']).toBeUndefined()
+      expect(result.paneTitles['tab-2']).toEqual({ 'pane-2': 'Title 2' })
+    })
   })
 
   describe('hydratePanes', () => {
@@ -946,6 +1001,7 @@ describe('panesSlice', () => {
           'tab-1': 'pane-saved-1',
           'tab-2': 'pane-saved-3',
         },
+        paneTitles: {},
       }
 
       const state = panesReducer(initialState, hydratePanes(savedState))
@@ -957,12 +1013,14 @@ describe('panesSlice', () => {
       const savedState: PanesState = {
         layouts: {},
         activePane: {},
+        paneTitles: {},
       }
 
       const state = panesReducer(initialState, hydratePanes(savedState))
 
       expect(state.layouts).toEqual({})
       expect(state.activePane).toEqual({})
+      expect(state.paneTitles).toEqual({})
     })
 
     it('preserves complex nested structures', () => {
@@ -991,6 +1049,7 @@ describe('panesSlice', () => {
         activePane: {
           'tab-1': 'pane-2',
         },
+        paneTitles: {},
       }
 
       const state = panesReducer(initialState, hydratePanes(savedState))
@@ -1003,6 +1062,32 @@ describe('panesSlice', () => {
       expect(root.children[1].type).toBe('split')
       const nested = root.children[1] as Extract<PaneNode, { type: 'split' }>
       expect(nested.sizes).toEqual([30, 70])
+    })
+
+    it('restores paneTitles from persisted state', () => {
+      const savedState: PanesState = {
+        layouts: {
+          'tab-1': { type: 'leaf', id: 'pane-1', content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' } },
+        },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: { 'tab-1': { 'pane-1': 'My Shell' } },
+      }
+
+      const state = panesReducer(initialState, hydratePanes(savedState))
+
+      expect(state.paneTitles).toEqual({ 'tab-1': { 'pane-1': 'My Shell' } })
+    })
+
+    it('handles missing paneTitles in persisted state', () => {
+      const savedStateWithoutTitles = {
+        layouts: {},
+        activePane: {},
+        // paneTitles is missing
+      } as PanesState
+
+      const state = panesReducer(initialState, hydratePanes(savedStateWithoutTitles))
+
+      expect(state.paneTitles).toEqual({})
     })
   })
 
@@ -1053,6 +1138,45 @@ describe('panesSlice', () => {
       }
       expect(terminal.kind).toBe('terminal')
       expect(browser.kind).toBe('browser')
+    })
+  })
+
+  describe('EditorPaneContent type', () => {
+    it('can be created with required fields', () => {
+      const content: EditorPaneContent = {
+        kind: 'editor',
+        filePath: '/path/to/file.ts',
+        language: 'typescript',
+        readOnly: false,
+        content: 'const x = 1',
+        viewMode: 'source',
+      }
+      expect(content.kind).toBe('editor')
+      expect(content.filePath).toBe('/path/to/file.ts')
+    })
+
+    it('supports scratch pad mode with null filePath', () => {
+      const content: EditorPaneContent = {
+        kind: 'editor',
+        filePath: null,
+        language: null,
+        readOnly: false,
+        content: '',
+        viewMode: 'source',
+      }
+      expect(content.filePath).toBeNull()
+    })
+
+    it('is part of PaneContent union', () => {
+      const editor: PaneContent = {
+        kind: 'editor',
+        filePath: '/test.md',
+        language: 'markdown',
+        readOnly: false,
+        content: '# Hello',
+        viewMode: 'preview',
+      }
+      expect(editor.kind).toBe('editor')
     })
   })
 
@@ -1323,6 +1447,135 @@ describe('panesSlice', () => {
         expect(newPane.content.createRequestId).toBeDefined()
         expect(newPane.content.status).toBe('creating')
       }
+    })
+  })
+
+  describe('updatePaneTitle', () => {
+    it('updates the title for a specific pane', () => {
+      const initialLayout: PaneNode = {
+        type: 'leaf',
+        id: 'pane-1',
+        content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' },
+      }
+      const state: PanesState = {
+        layouts: { 'tab-1': initialLayout },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
+      }
+
+      const result = panesReducer(state, updatePaneTitle({ tabId: 'tab-1', paneId: 'pane-1', title: 'My Terminal' }))
+
+      expect(result.paneTitles['tab-1']).toBeDefined()
+      expect(result.paneTitles['tab-1']['pane-1']).toBe('My Terminal')
+    })
+
+    it('preserves other pane titles when updating one', () => {
+      const state: PanesState = {
+        layouts: {},
+        activePane: {},
+        paneTitles: { 'tab-1': { 'pane-2': 'Other Pane' } },
+      }
+
+      const result = panesReducer(state, updatePaneTitle({ tabId: 'tab-1', paneId: 'pane-1', title: 'First Pane' }))
+
+      expect(result.paneTitles['tab-1']['pane-1']).toBe('First Pane')
+      expect(result.paneTitles['tab-1']['pane-2']).toBe('Other Pane')
+    })
+  })
+
+  describe('splitPane title initialization', () => {
+    it('initializes title for new pane using derivePaneTitle', () => {
+      const leaf: PaneNode = {
+        type: 'leaf',
+        id: 'pane-1',
+        content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' },
+      }
+      const state: PanesState = {
+        layouts: { 'tab-1': leaf },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
+      }
+
+      const result = panesReducer(state, splitPane({
+        tabId: 'tab-1',
+        paneId: 'pane-1',
+        direction: 'horizontal',
+        newContent: { kind: 'terminal', mode: 'claude' },
+      }))
+
+      // Find the new pane ID (it's the active pane after split)
+      const newPaneId = result.activePane['tab-1']
+      expect(result.paneTitles['tab-1'][newPaneId]).toBe('Claude')
+    })
+  })
+
+  describe('addPane title initialization', () => {
+    it('initializes title for new pane using derivePaneTitle', () => {
+      const leaf: PaneNode = {
+        type: 'leaf',
+        id: 'pane-1',
+        content: { kind: 'terminal', createRequestId: 'req-1', status: 'running', mode: 'shell' },
+      }
+      const state: PanesState = {
+        layouts: { 'tab-1': leaf },
+        activePane: { 'tab-1': 'pane-1' },
+        paneTitles: {},
+      }
+
+      const result = panesReducer(state, addPane({
+        tabId: 'tab-1',
+        newContent: { kind: 'terminal', mode: 'codex' },
+      }))
+
+      const newPaneId = result.activePane['tab-1']
+      expect(result.paneTitles['tab-1'][newPaneId]).toBe('Codex')
+    })
+  })
+
+  describe('editor content normalization', () => {
+    it('passes editor content through unchanged', () => {
+      const editorContent: EditorPaneContent = {
+        kind: 'editor',
+        filePath: '/test.ts',
+        language: 'typescript',
+        readOnly: false,
+        content: 'code',
+        viewMode: 'source',
+      }
+
+      const state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: editorContent })
+      )
+
+      const leaf = state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
+      expect(leaf.content).toEqual(editorContent)
+    })
+
+    it('creates editor pane via addPane', () => {
+      let state = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+
+      state = panesReducer(
+        state,
+        addPane({
+          tabId: 'tab-1',
+          newContent: {
+            kind: 'editor',
+            filePath: null,
+            language: null,
+            readOnly: false,
+            content: '',
+            viewMode: 'source',
+          },
+        })
+      )
+
+      const root = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const editorPane = root.children[1] as Extract<PaneNode, { type: 'leaf' }>
+      expect(editorPane.content.kind).toBe('editor')
     })
   })
 })

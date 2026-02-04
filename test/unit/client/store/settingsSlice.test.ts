@@ -4,6 +4,7 @@ import settingsReducer, {
   updateSettingsLocal,
   markSaved,
   defaultSettings,
+  resolveDefaultLoggingDebug,
   SettingsState,
 } from '../../../../src/store/settingsSlice'
 import type { AppSettings } from '../../../../src/store/types'
@@ -25,7 +26,7 @@ describe('settingsSlice', () => {
       expect(state.settings.uiScale).toBe(1.0)
       expect(state.settings.terminal).toEqual({
         fontSize: 16,
-        fontFamily: 'Consolas',
+        fontFamily: 'monospace',
         lineHeight: 1,
         cursorBlink: true,
         scrollback: 5000,
@@ -37,9 +38,30 @@ describe('settingsSlice', () => {
         warnBeforeKillMinutes: 5,
       })
       expect(state.settings.sidebar).toEqual({
-        sortMode: 'hybrid',
+        sortMode: 'recency-pinned',
         showProjectBadges: true,
+        width: 288,
+        collapsed: false,
       })
+      expect(state.settings.codingCli).toEqual({
+        enabledProviders: ['claude', 'codex'],
+        providers: {
+          claude: {
+            permissionMode: 'default',
+          },
+          codex: {},
+        },
+      })
+    })
+  })
+
+  describe('logging defaults', () => {
+    it('enables debug logging in development', () => {
+      expect(resolveDefaultLoggingDebug(true)).toBe(true)
+    })
+
+    it('disables debug logging in production', () => {
+      expect(resolveDefaultLoggingDebug(false)).toBe(false)
     })
   })
 
@@ -53,9 +75,12 @@ describe('settingsSlice', () => {
       const newSettings: AppSettings = {
         theme: 'dark',
         uiScale: 1.5,
+        logging: {
+          debug: true,
+        },
         terminal: {
           fontSize: 16,
-          fontFamily: 'Consolas',
+          fontFamily: 'monospace',
           lineHeight: 1.4,
           cursorBlink: false,
           scrollback: 10000,
@@ -69,12 +94,35 @@ describe('settingsSlice', () => {
         sidebar: {
           sortMode: 'recency',
           showProjectBadges: false,
+          width: 320,
+          collapsed: false,
+        },
+        codingCli: {
+          enabledProviders: ['codex'],
+          providers: {
+            codex: {
+              model: 'gpt-5-codex',
+              sandbox: 'read-only',
+            },
+          },
+        },
+        panes: {
+          defaultNewPane: 'shell',
         },
       }
 
       const state = settingsReducer(initialState, setSettings(newSettings))
 
-      expect(state.settings).toEqual(newSettings)
+      expect(state.settings).toEqual({
+        ...newSettings,
+        codingCli: {
+          ...newSettings.codingCli,
+          providers: {
+            ...defaultSettings.codingCli.providers,
+            ...newSettings.codingCli.providers,
+          },
+        },
+      })
     })
 
     it('sets loaded to true', () => {
@@ -188,6 +236,31 @@ describe('settingsSlice', () => {
 
       expect(state.settings.sidebar.sortMode).toBe('activity')
       expect(state.settings.sidebar.showProjectBadges).toBe(defaultSettings.sidebar.showProjectBadges)
+    })
+
+    it('deep merges coding CLI settings', () => {
+      const initialState: SettingsState = {
+        settings: defaultSettings,
+        loaded: true,
+      }
+
+      const state = settingsReducer(
+        initialState,
+        updateSettingsLocal({
+          codingCli: {
+            enabledProviders: ['claude'],
+            providers: {
+              codex: {
+                model: 'gpt-5-codex',
+              },
+            },
+          },
+        })
+      )
+
+      expect(state.settings.codingCli.enabledProviders).toEqual(['claude'])
+      expect(state.settings.codingCli.providers.codex?.model).toBe('gpt-5-codex')
+      expect(state.settings.codingCli.providers.claude?.permissionMode).toBe('default')
     })
 
     it('handles multiple nested updates simultaneously', () => {
@@ -318,8 +391,31 @@ describe('settingsSlice', () => {
       expect(defaultSettings).toHaveProperty('theme')
       expect(defaultSettings).toHaveProperty('uiScale')
       expect(defaultSettings).toHaveProperty('terminal')
+      expect(defaultSettings).toHaveProperty('logging')
       expect(defaultSettings).toHaveProperty('safety')
       expect(defaultSettings).toHaveProperty('sidebar')
+      expect(defaultSettings).toHaveProperty('codingCli')
     })
+  })
+})
+
+describe('settingsSlice - sortMode migration', () => {
+  it('migrates hybrid to activity', async () => {
+    const { migrateSortMode } = await import('@/store/settingsSlice')
+    expect(migrateSortMode('hybrid')).toBe('activity')
+  })
+
+  it('preserves valid sort modes', async () => {
+    const { migrateSortMode } = await import('@/store/settingsSlice')
+    expect(migrateSortMode('recency')).toBe('recency')
+    expect(migrateSortMode('recency-pinned')).toBe('recency-pinned')
+    expect(migrateSortMode('activity')).toBe('activity')
+    expect(migrateSortMode('project')).toBe('project')
+  })
+
+  it('defaults invalid values to recency-pinned', async () => {
+    const { migrateSortMode } = await import('@/store/settingsSlice')
+    expect(migrateSortMode('invalid' as any)).toBe('recency-pinned')
+    expect(migrateSortMode(undefined as any)).toBe('recency-pinned')
   })
 })
