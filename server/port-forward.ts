@@ -1,5 +1,6 @@
 import * as net from 'net'
 import { logger } from './logger.js'
+import { normalizeIp, type RequesterIdentity } from './request-ip.js'
 
 const log = logger.child({ component: 'port-forward' })
 
@@ -8,6 +9,12 @@ interface ForwardEntry {
   localPort: number
   /** The localhost port being forwarded to */
   targetPort: number
+  /** Requester identity key */
+  requesterKey: string
+  /** Requester IP (for logging) */
+  requesterIp: string
+  /** Allowed client IPs */
+  allowedIps: Set<string>
   /** The TCP server accepting connections */
   server: net.Server
   /** Active client connections (for cleanup) */
@@ -22,7 +29,7 @@ export interface PortForwardOptions {
 }
 
 export class PortForwardManager {
-  private forwards = new Map<number, ForwardEntry>()
+  private forwards = new Map<number, Map<string, ForwardEntry>>()
   private idleTimeoutMs: number
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
 
@@ -35,13 +42,15 @@ export class PortForwardManager {
    * Create (or reuse) a TCP forward from a random OS-assigned port to
    * 127.0.0.1:<targetPort>. Returns the local port the proxy listens on.
    */
-  async forward(targetPort: number): Promise<{ port: number }> {
+  async forward(
+    targetPort: number,
+    requester: RequesterIdentity,
+  ): Promise<{ port: number }> {
     if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
       throw new Error(`Invalid target port: ${targetPort}`)
     }
 
-    // Reuse existing forward
-    const existing = this.forwards.get(targetPort)
+    const existing = this.forwards.get(targetPort)?.get(requester.key)
     if (existing) {
       existing.lastActivity = Date.now()
       return { port: existing.localPort }
@@ -49,11 +58,27 @@ export class PortForwardManager {
 
     return new Promise<{ port: number }>((resolve, reject) => {
       const server = net.createServer((clientSocket) => {
-        const entry = this.forwards.get(targetPort)
-        if (entry) {
-          entry.lastActivity = Date.now()
-          entry.connections.add(clientSocket)
+        const entry =
+          this.forwards.get(targetPort)?.get(requester.key) ?? null
+        const clientIp = normalizeIp(clientSocket.remoteAddress)
+
+        if (!entry || !clientIp || !entry.allowedIps.has(clientIp)) {
+          log.warn(
+            {
+              targetPort,
+              localPort: entry?.localPort,
+              requesterIp: entry?.requesterIp,
+              requesterKey: entry?.requesterKey,
+              clientIp,
+            },
+            'Port forward rejected connection from non-requester',
+          )
+          clientSocket.destroy()
+          return
         }
+
+        entry.lastActivity = Date.now()
+        entry.connections.add(clientSocket)
 
         const targetSocket = net.createConnection(
           { host: '127.0.0.1', port: targetPort },
@@ -66,7 +91,7 @@ export class PortForwardManager {
         const cleanup = () => {
           clientSocket.destroy()
           targetSocket.destroy()
-          if (entry) entry.connections.delete(clientSocket)
+          entry.connections.delete(clientSocket)
         }
 
         clientSocket.on('error', cleanup)
@@ -74,7 +99,7 @@ export class PortForwardManager {
           // Propagate target errors to the client so it sees the failure
           clientSocket.destroy(err)
           targetSocket.destroy()
-          if (entry) entry.connections.delete(clientSocket)
+          entry.connections.delete(clientSocket)
         })
         clientSocket.on('close', cleanup)
         targetSocket.on('close', cleanup)
@@ -91,13 +116,18 @@ export class PortForwardManager {
         const entry: ForwardEntry = {
           localPort: addr.port,
           targetPort,
+          requesterKey: requester.key,
+          requesterIp: requester.ip,
+          allowedIps: new Set(requester.allowedIps),
           server,
           connections: new Set(),
           lastActivity: Date.now(),
         }
-        this.forwards.set(targetPort, entry)
+        const targetMap = this.forwards.get(targetPort) ?? new Map<string, ForwardEntry>()
+        targetMap.set(requester.key, entry)
+        this.forwards.set(targetPort, targetMap)
         log.info(
-          { targetPort, localPort: addr.port },
+          { targetPort, localPort: addr.port, requesterIp: requester.ip },
           'Port forward created',
         )
         resolve({ port: addr.port })
@@ -106,30 +136,37 @@ export class PortForwardManager {
   }
 
   /** Return the forwarded local port for a given target port, or undefined. */
-  getForwardedPort(targetPort: number): number | undefined {
-    return this.forwards.get(targetPort)?.localPort
+  getForwardedPort(targetPort: number, requesterKey: string): number | undefined {
+    return this.forwards.get(targetPort)?.get(requesterKey)?.localPort
   }
 
-  /** Close a single forward by target port. */
-  close(targetPort: number): void {
-    const entry = this.forwards.get(targetPort)
-    if (!entry) return
+  /** Close a single forward by target port and requester key. */
+  close(targetPort: number, requesterKey?: string): void {
+    const targetMap = this.forwards.get(targetPort)
+    if (!targetMap) return
 
-    for (const conn of entry.connections) {
-      conn.destroy()
+    if (requesterKey) {
+      const entry = targetMap.get(requesterKey)
+      if (!entry) return
+      this.closeEntry(targetPort, entry, targetMap)
+      return
     }
-    entry.server.close()
-    this.forwards.delete(targetPort)
-    log.info(
-      { targetPort, localPort: entry.localPort },
-      'Port forward closed',
-    )
+
+    for (const entry of [...targetMap.values()]) {
+      this.closeEntry(targetPort, entry, targetMap)
+    }
+    if (targetMap.size === 0) {
+      this.forwards.delete(targetPort)
+    }
   }
 
   /** Close all active forwards and stop the idle-cleanup timer. */
   closeAll(): void {
-    for (const targetPort of [...this.forwards.keys()]) {
-      this.close(targetPort)
+    for (const [targetPort, targetMap] of [...this.forwards.entries()]) {
+      for (const entry of [...targetMap.values()]) {
+        this.closeEntry(targetPort, entry, targetMap)
+      }
+      this.forwards.delete(targetPort)
     }
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
@@ -140,15 +177,20 @@ export class PortForwardManager {
   private startIdleCleanup(): void {
     this.cleanupTimer = setInterval(() => {
       const now = Date.now()
-      for (const [targetPort, entry] of this.forwards) {
-        const idle = now - entry.lastActivity > this.idleTimeoutMs
-        const noConnections = entry.connections.size === 0
-        if (idle && noConnections) {
-          log.info(
-            { targetPort, localPort: entry.localPort },
-            'Port forward idle-closed',
-          )
-          this.close(targetPort)
+      for (const [targetPort, targetMap] of this.forwards) {
+        for (const entry of [...targetMap.values()]) {
+          const idle = now - entry.lastActivity > this.idleTimeoutMs
+          const noConnections = entry.connections.size === 0
+          if (idle && noConnections) {
+            log.info(
+              { targetPort, localPort: entry.localPort, requesterIp: entry.requesterIp },
+              'Port forward idle-closed',
+            )
+            this.closeEntry(targetPort, entry, targetMap)
+          }
+        }
+        if (targetMap.size === 0) {
+          this.forwards.delete(targetPort)
         }
       }
     }, 60_000)
@@ -157,5 +199,25 @@ export class PortForwardManager {
     if (this.cleanupTimer.unref) {
       this.cleanupTimer.unref()
     }
+  }
+
+  private closeEntry(
+    targetPort: number,
+    entry: ForwardEntry,
+    targetMap: Map<string, ForwardEntry>,
+  ): void {
+    for (const conn of entry.connections) {
+      conn.destroy()
+    }
+    entry.server.close()
+    targetMap.delete(entry.requesterKey)
+    log.info(
+      {
+        targetPort,
+        localPort: entry.localPort,
+        requesterIp: entry.requesterIp,
+      },
+      'Port forward closed',
+    )
   }
 }

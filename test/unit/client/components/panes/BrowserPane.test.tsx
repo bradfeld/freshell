@@ -273,6 +273,26 @@ describe('BrowserPane', () => {
       })
     })
 
+    it('clears forwarding state when navigating to a non-forward URL', async () => {
+      setWindowHostname('192.168.1.100')
+      vi.mocked(api.post).mockReturnValue(new Promise(() => {}))
+
+      renderBrowserPane({ url: 'http://localhost:3000' })
+
+      expect(screen.getByText(/Connecting/i)).toBeInTheDocument()
+
+      const input = screen.getByPlaceholderText('Enter URL...')
+      fireEvent.change(input, { target: { value: 'https://example.com' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+
+      await waitFor(() => {
+        expect(screen.queryByText(/Connecting/i)).not.toBeInTheDocument()
+        const iframe = document.querySelector('iframe')
+        expect(iframe).toBeTruthy()
+        expect(iframe!.getAttribute('src')).toBe('https://example.com')
+      })
+    })
+
     it('shows error when port forwarding fails', async () => {
       setWindowHostname('192.168.1.100')
       vi.mocked(api.post).mockRejectedValue(

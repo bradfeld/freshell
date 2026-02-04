@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
 import * as net from 'net'
 import { PortForwardManager } from '../../../server/port-forward.js'
+import { createRequesterIdentity } from '../../../server/request-ip.js'
 
 // Helper: create a TCP server on localhost that echoes data back
 function createEchoServer(): Promise<{ server: net.Server; port: number }> {
@@ -88,7 +89,10 @@ describe('PortForwardManager', () => {
       const echo = await createEchoServer()
       echoServer = echo.server
 
-      const result = await manager.forward(echo.port)
+      const result = await manager.forward(
+        echo.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
       expect(result.port).toBeGreaterThan(0)
       expect(result.port).not.toBe(echo.port)
 
@@ -101,8 +105,14 @@ describe('PortForwardManager', () => {
       const echo = await createEchoServer()
       echoServer = echo.server
 
-      const first = await manager.forward(echo.port)
-      const second = await manager.forward(echo.port)
+      const first = await manager.forward(
+        echo.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
+      const second = await manager.forward(
+        echo.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
 
       expect(first.port).toBe(second.port)
     })
@@ -111,8 +121,14 @@ describe('PortForwardManager', () => {
       const echo1 = await createEchoServer()
       const echo2 = await createEchoServer()
 
-      const forward1 = await manager.forward(echo1.port)
-      const forward2 = await manager.forward(echo2.port)
+      const forward1 = await manager.forward(
+        echo1.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
+      const forward2 = await manager.forward(
+        echo2.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
 
       expect(forward1.port).not.toBe(forward2.port)
 
@@ -121,20 +137,59 @@ describe('PortForwardManager', () => {
     })
 
     it('rejects invalid port numbers', async () => {
-      await expect(manager.forward(0)).rejects.toThrow()
-      await expect(manager.forward(70000)).rejects.toThrow()
-      await expect(manager.forward(-1)).rejects.toThrow()
+      await expect(
+        manager.forward(0, createRequesterIdentity('127.0.0.1')),
+      ).rejects.toThrow()
+      await expect(
+        manager.forward(70000, createRequesterIdentity('127.0.0.1')),
+      ).rejects.toThrow()
+      await expect(
+        manager.forward(-1, createRequesterIdentity('127.0.0.1')),
+      ).rejects.toThrow()
     })
 
     it('handles connection errors when target is not listening', async () => {
       // Forward to a port nothing is listening on
       const unusedPort = await findUnusedPort()
-      const result = await manager.forward(unusedPort)
+      const result = await manager.forward(
+        unusedPort,
+        createRequesterIdentity('127.0.0.1'),
+      )
 
       // The forward itself succeeds (TCP server starts)
       expect(result.port).toBeGreaterThan(0)
 
       // But connecting through it should fail (ECONNREFUSED from target)
+      await expect(
+        tcpExchange('127.0.0.1', result.port, 'hello'),
+      ).rejects.toThrow()
+    })
+
+    it('creates separate forwards for the same target port and different requesters', async () => {
+      const echo = await createEchoServer()
+      echoServer = echo.server
+
+      const forwardA = await manager.forward(
+        echo.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
+      const forwardB = await manager.forward(
+        echo.port,
+        createRequesterIdentity('10.0.0.5'),
+      )
+
+      expect(forwardA.port).not.toBe(forwardB.port)
+    })
+
+    it('drops connections from other IPs', async () => {
+      const echo = await createEchoServer()
+      echoServer = echo.server
+
+      const result = await manager.forward(
+        echo.port,
+        createRequesterIdentity('10.0.0.1'),
+      )
+
       await expect(
         tcpExchange('127.0.0.1', result.port, 'hello'),
       ).rejects.toThrow()
@@ -146,14 +201,17 @@ describe('PortForwardManager', () => {
       const echo = await createEchoServer()
       echoServer = echo.server
 
-      const result = await manager.forward(echo.port)
+      const result = await manager.forward(
+        echo.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
 
       // Verify forward works
       const response = await tcpExchange('127.0.0.1', result.port, 'test')
       expect(response).toBe('test')
 
       // Close the forward
-      manager.close(echo.port)
+      manager.close(echo.port, createRequesterIdentity('127.0.0.1').key)
 
       // Verify forward is gone (connection should fail)
       await expect(
@@ -170,10 +228,16 @@ describe('PortForwardManager', () => {
       const echo = await createEchoServer()
       echoServer = echo.server
 
-      const first = await manager.forward(echo.port)
-      manager.close(echo.port)
+      const first = await manager.forward(
+        echo.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
+      manager.close(echo.port, createRequesterIdentity('127.0.0.1').key)
 
-      const second = await manager.forward(echo.port)
+      const second = await manager.forward(
+        echo.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
       // May or may not get the same port, but it should work
       const response = await tcpExchange('127.0.0.1', second.port, 'again')
       expect(response).toBe('again')
@@ -185,8 +249,14 @@ describe('PortForwardManager', () => {
       const echo1 = await createEchoServer()
       const echo2 = await createEchoServer()
 
-      const f1 = await manager.forward(echo1.port)
-      const f2 = await manager.forward(echo2.port)
+      const f1 = await manager.forward(
+        echo1.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
+      const f2 = await manager.forward(
+        echo2.port,
+        createRequesterIdentity('127.0.0.1'),
+      )
 
       manager.closeAll()
 
@@ -207,12 +277,15 @@ describe('PortForwardManager', () => {
       const echo = await createEchoServer()
       echoServer = echo.server
 
-      const result = await manager.forward(echo.port)
-      expect(manager.getForwardedPort(echo.port)).toBe(result.port)
+      const requester = createRequesterIdentity('127.0.0.1')
+      const result = await manager.forward(echo.port, requester)
+      expect(manager.getForwardedPort(echo.port, requester.key)).toBe(result.port)
     })
 
     it('returns undefined for non-existent forwards', () => {
-      expect(manager.getForwardedPort(12345)).toBeUndefined()
+      expect(
+        manager.getForwardedPort(12345, createRequesterIdentity('127.0.0.1').key),
+      ).toBeUndefined()
     })
   })
 
@@ -224,13 +297,14 @@ describe('PortForwardManager', () => {
       const echo = await createEchoServer()
       echoServer = echo.server
 
-      await shortManager.forward(echo.port)
-      expect(shortManager.getForwardedPort(echo.port)).toBeDefined()
+      const requester = createRequesterIdentity('127.0.0.1')
+      await shortManager.forward(echo.port, requester)
+      expect(shortManager.getForwardedPort(echo.port, requester.key)).toBeDefined()
 
       // Advance past idle timeout + cleanup interval
       vi.advanceTimersByTime(70_000)
 
-      expect(shortManager.getForwardedPort(echo.port)).toBeUndefined()
+      expect(shortManager.getForwardedPort(echo.port, requester.key)).toBeUndefined()
 
       shortManager.closeAll()
       vi.useRealTimers()

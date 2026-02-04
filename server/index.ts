@@ -31,6 +31,7 @@ import { getPerfConfig, initPerfLogging, setPerfLoggingEnabled, startPerfTimer, 
 import { detectPlatform, detectAvailableClis } from './platform.js'
 import { resolveVisitPort } from './startup-url.js'
 import { PortForwardManager } from './port-forward.js'
+import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -69,6 +70,7 @@ async function main() {
 
   const app = express()
   app.disable('x-powered-by')
+  app.set('trust proxy', parseTrustProxyEnv(process.env.FRESHELL_TRUST_PROXY))
 
   app.use(express.json({ limit: '1mb' }))
   app.use(requestLogger)
@@ -490,7 +492,8 @@ async function main() {
     }
 
     try {
-      const result = await portForwardManager.forward(targetPort)
+      const requester = getRequesterIdentity(req)
+      const result = await portForwardManager.forward(targetPort, requester)
       res.json({ forwardedPort: result.port })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -504,8 +507,15 @@ async function main() {
     if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
       return res.status(400).json({ error: 'Invalid port number' })
     }
-    portForwardManager.close(targetPort)
-    res.json({ ok: true })
+    try {
+      const requester = getRequesterIdentity(req)
+      portForwardManager.close(targetPort, requester.key)
+      res.json({ ok: true })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error({ err, targetPort }, 'Port forward close failed')
+      res.status(500).json({ error: `Failed to close port forward: ${msg}` })
+    }
   })
 
   // --- Static client in production ---

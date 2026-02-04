@@ -89,6 +89,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
     if (!currentUrl) {
       setResolvedSrc(null)
       setForwardError(null)
+      setIsForwarding(false)
       return
     }
 
@@ -97,6 +98,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
       // No forwarding needed - use the URL directly (with file:// conversion)
       setResolvedSrc(toIframeSrc(currentUrl))
       setForwardError(null)
+      setIsForwarding(false)
       return
     }
 

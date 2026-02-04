@@ -3,6 +3,7 @@ import express, { type Express } from 'express'
 import request from 'supertest'
 import * as net from 'net'
 import { PortForwardManager } from '../../../server/port-forward.js'
+import { getRequesterIdentity, parseTrustProxyEnv } from '../../../server/request-ip.js'
 
 const TEST_AUTH_TOKEN = 'test-auth-token-12345678'
 
@@ -26,10 +27,12 @@ describe('Port Forward API Integration', () => {
 
   beforeAll(() => {
     process.env.AUTH_TOKEN = TEST_AUTH_TOKEN
+    process.env.FRESHELL_TRUST_PROXY = 'loopback'
     manager = new PortForwardManager({ idleTimeoutMs: 60_000 })
 
     app = express()
     app.use(express.json({ limit: '1mb' }))
+    app.set('trust proxy', parseTrustProxyEnv(process.env.FRESHELL_TRUST_PROXY))
 
     // Auth middleware (matches server/auth.ts)
     app.use('/api', (req, res, next) => {
@@ -50,7 +53,8 @@ describe('Port Forward API Integration', () => {
       }
 
       try {
-        const result = await manager.forward(port)
+        const requester = getRequesterIdentity(req)
+        const result = await manager.forward(port, requester)
         res.json({ forwardedPort: result.port })
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -63,7 +67,8 @@ describe('Port Forward API Integration', () => {
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         return res.status(400).json({ error: 'Invalid port number' })
       }
-      manager.close(port)
+      const requester = getRequesterIdentity(req)
+      manager.close(port, requester.key)
       res.json({ ok: true })
     })
   })
@@ -77,6 +82,7 @@ describe('Port Forward API Integration', () => {
 
   afterAll(() => {
     manager.closeAll()
+    delete process.env.FRESHELL_TRUST_PROXY
   })
 
   describe('POST /api/proxy/forward', () => {
@@ -144,6 +150,69 @@ describe('Port Forward API Integration', () => {
         .expect(200)
 
       expect(res1.body.forwardedPort).toBe(res2.body.forwardedPort)
+    })
+
+    it('creates separate forwards for different requester IPs', async () => {
+      echoServer = await createEchoServer()
+
+      const res1 = await request(app)
+        .post('/api/proxy/forward')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .set('x-forwarded-for', '203.0.113.5')
+        .send({ port: echoServer.port })
+        .expect(200)
+
+      const res2 = await request(app)
+        .post('/api/proxy/forward')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .set('x-forwarded-for', '203.0.113.6')
+        .send({ port: echoServer.port })
+        .expect(200)
+
+      expect(res1.body.forwardedPort).not.toBe(res2.body.forwardedPort)
+    })
+
+    it('drops connections from non-requester IPs when X-Forwarded-For is trusted', async () => {
+      echoServer = await createEchoServer()
+
+      const res = await request(app)
+        .post('/api/proxy/forward')
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .set('x-forwarded-for', '203.0.113.10')
+        .send({ port: echoServer.port })
+        .expect(200)
+
+      const forwardedPort = res.body.forwardedPort
+
+      await expect(
+        new Promise((resolve, reject) => {
+          const socket = net.createConnection(
+            { host: '127.0.0.1', port: forwardedPort },
+            () => {
+              socket.write('ping')
+            },
+          )
+          const chunks: Buffer[] = []
+          socket.on('data', (chunk) => chunks.push(chunk))
+          socket.on('error', reject)
+          socket.on('close', () => {
+            if (chunks.length === 0) {
+              reject(new Error('Connection closed without data'))
+            } else {
+              resolve(Buffer.concat(chunks).toString())
+            }
+          })
+          socket.setTimeout(2000, () => {
+            socket.destroy(new Error('timeout'))
+          })
+        }),
+      ).rejects.toThrow()
+
+      await request(app)
+        .delete(`/api/proxy/forward/${echoServer.port}`)
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+        .set('x-forwarded-for', '203.0.113.10')
+        .expect(200)
     })
   })
 
