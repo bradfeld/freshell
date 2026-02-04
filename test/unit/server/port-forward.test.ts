@@ -148,6 +148,28 @@ describe('PortForwardManager', () => {
       ).rejects.toThrow()
     })
 
+    it('rejects when max forwards limit is reached', async () => {
+      const limitedManager = new PortForwardManager({
+        idleTimeoutMs: 60_000,
+        maxForwards: 2,
+      })
+      const echo1 = await createEchoServer()
+      const echo2 = await createEchoServer()
+      const echo3 = await createEchoServer()
+
+      await limitedManager.forward(echo1.port, createRequesterIdentity('127.0.0.1'))
+      await limitedManager.forward(echo2.port, createRequesterIdentity('127.0.0.1'))
+
+      await expect(
+        limitedManager.forward(echo3.port, createRequesterIdentity('127.0.0.1')),
+      ).rejects.toThrow(/Maximum port forwards/)
+
+      limitedManager.closeAll()
+      echo1.server.close()
+      echo2.server.close()
+      echo3.server.close()
+    })
+
     it('handles connection errors when target is not listening', async () => {
       // Forward to a port nothing is listening on
       const unusedPort = await findUnusedPort()
@@ -179,6 +201,24 @@ describe('PortForwardManager', () => {
       )
 
       expect(forwardA.port).not.toBe(forwardB.port)
+    })
+
+    it('deduplicates concurrent forward requests for the same target and requester', async () => {
+      const echo = await createEchoServer()
+      echoServer = echo.server
+
+      const requester = createRequesterIdentity('127.0.0.1')
+      const [a, b] = await Promise.all([
+        manager.forward(echo.port, requester),
+        manager.forward(echo.port, requester),
+      ])
+
+      // Both should get the same port (not two separate servers)
+      expect(a.port).toBe(b.port)
+
+      // Verify it works
+      const response = await tcpExchange('127.0.0.1', a.port, 'hello')
+      expect(response).toBe('hello')
     })
 
     it('drops connections from other IPs', async () => {

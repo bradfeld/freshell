@@ -72,6 +72,6 @@ export function parseTrustProxyEnv(
   if (normalized === '0') return false
   if (/^\d+$/.test(normalized)) return Number(normalized)
   if (['true', 'yes', 'on', 'all'].includes(normalized)) return true
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  if (['false', 'no', 'off'].includes(normalized)) return false
   return value
 }

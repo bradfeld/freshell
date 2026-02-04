@@ -56,12 +56,14 @@ function needsPortForward(url: string): { parsed: URL; targetPort: number } | nu
 /**
  * Build the forwarded iframe URL: replace hostname and port with the host's
  * address and the forwarded port, preserving the original path/query/hash.
+ * Forces http: because the TCP proxy is a raw pipe and does not terminate TLS.
  */
 function buildForwardedUrl(
   parsed: URL,
   forwardedPort: number,
 ): string {
   const forwarded = new URL(parsed.toString())
+  forwarded.protocol = 'http:'
   forwarded.hostname = window.location.hostname
   forwarded.port = String(forwardedPort)
   return forwarded.toString()
@@ -81,6 +83,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(null)
   const [isForwarding, setIsForwarding] = useState(false)
   const [forwardError, setForwardError] = useState<string | null>(null)
+  const [forwardRetryKey, setForwardRetryKey] = useState(0)
 
   const currentUrl = history[historyIndex] || ''
 
@@ -128,7 +131,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
     return () => {
       cancelled = true
     }
-  }, [currentUrl])
+  }, [currentUrl, forwardRetryKey])
 
   const navigate = useCallback((newUrl: string) => {
     if (!newUrl.trim()) return
@@ -332,6 +335,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
                 onClick={() => {
                   setForwardError(null)
                   setResolvedSrc(null)
+                  setForwardRetryKey((k) => k + 1)
                 }}
                 className="mt-2 px-4 py-2 rounded bg-muted hover:bg-muted/80 text-sm"
               >

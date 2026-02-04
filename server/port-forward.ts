@@ -26,15 +26,20 @@ interface ForwardEntry {
 export interface PortForwardOptions {
   /** How long (ms) a forward can be idle before auto-cleanup. Default: 5 minutes. */
   idleTimeoutMs?: number
+  /** Maximum number of active port forwards. Default: 100. */
+  maxForwards?: number
 }
 
 export class PortForwardManager {
   private forwards = new Map<number, Map<string, ForwardEntry>>()
+  private inflight = new Map<string, Promise<{ port: number }>>()
   private idleTimeoutMs: number
+  private maxForwards: number
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(opts: PortForwardOptions = {}) {
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 5 * 60 * 1000
+    this.maxForwards = opts.maxForwards ?? 100
     this.startIdleCleanup()
   }
 
@@ -56,7 +61,19 @@ export class PortForwardManager {
       return { port: existing.localPort }
     }
 
-    return new Promise<{ port: number }>((resolve, reject) => {
+    // Deduplicate concurrent requests for the same (targetPort, requesterKey)
+    const inflightKey = `${targetPort}:${requester.key}`
+    const pending = this.inflight.get(inflightKey)
+    if (pending) return pending
+
+    // Enforce maximum forwards limit
+    if (this.activeForwardCount() >= this.maxForwards) {
+      throw new Error(
+        `Maximum port forwards (${this.maxForwards}) reached. Close unused forwards first.`,
+      )
+    }
+
+    const promise = new Promise<{ port: number }>((resolve, reject) => {
       const server = net.createServer((clientSocket) => {
         const entry =
           this.forwards.get(targetPort)?.get(requester.key) ?? null
@@ -105,13 +122,19 @@ export class PortForwardManager {
         targetSocket.on('close', cleanup)
       })
 
+      let resolved = false
       server.on('error', (err) => {
-        reject(err)
+        if (!resolved) {
+          reject(err)
+        } else {
+          log.error({ err, targetPort }, 'Port forward server error after listen')
+        }
       })
 
       // Listen on port 0 → OS assigns an available port.
       // Bind to 0.0.0.0 so remote clients can reach it.
       server.listen(0, '0.0.0.0', () => {
+        resolved = true
         const addr = server.address() as net.AddressInfo
         const entry: ForwardEntry = {
           localPort: addr.port,
@@ -132,12 +155,26 @@ export class PortForwardManager {
         )
         resolve({ port: addr.port })
       })
+    }).finally(() => {
+      this.inflight.delete(inflightKey)
     })
+
+    this.inflight.set(inflightKey, promise)
+    return promise
   }
 
   /** Return the forwarded local port for a given target port, or undefined. */
   getForwardedPort(targetPort: number, requesterKey: string): number | undefined {
     return this.forwards.get(targetPort)?.get(requesterKey)?.localPort
+  }
+
+  /** Count total active forward entries across all target ports. */
+  private activeForwardCount(): number {
+    let count = 0
+    for (const targetMap of this.forwards.values()) {
+      count += targetMap.size
+    }
+    return count
   }
 
   /** Close a single forward by target port and requester key. */
@@ -149,6 +186,9 @@ export class PortForwardManager {
       const entry = targetMap.get(requesterKey)
       if (!entry) return
       this.closeEntry(targetPort, entry, targetMap)
+      if (targetMap.size === 0) {
+        this.forwards.delete(targetPort)
+      }
       return
     }
 

@@ -209,6 +209,24 @@ describe('BrowserPane', () => {
       })
     })
 
+    it('forces http: protocol for forwarded https: localhost URLs', async () => {
+      setWindowHostname('192.168.1.100')
+      vi.mocked(api.post).mockResolvedValue({ forwardedPort: 45678 })
+
+      await act(async () => {
+        renderBrowserPane({ url: 'https://localhost:3000/app' })
+      })
+
+      expect(api.post).toHaveBeenCalledWith('/api/proxy/forward', { port: 3000 })
+
+      await waitFor(() => {
+        const iframe = document.querySelector('iframe')
+        expect(iframe).toBeTruthy()
+        // Should be http:, not https:, because the TCP proxy doesn't terminate TLS
+        expect(iframe!.getAttribute('src')).toBe('http://192.168.1.100:45678/app')
+      })
+    })
+
     it('does not request port forwarding when accessing locally', () => {
       setWindowHostname('localhost')
       renderBrowserPane({ url: 'http://localhost:3000' })
@@ -306,6 +324,40 @@ describe('BrowserPane', () => {
       await waitFor(() => {
         // Use exact string to avoid matching the description which also contains "Failed to connect"
         expect(screen.getByText('Failed to connect')).toBeInTheDocument()
+      })
+    })
+
+    it('retries port forwarding when Try Again is clicked after failure', async () => {
+      setWindowHostname('192.168.1.100')
+      vi.mocked(api.post)
+        .mockRejectedValueOnce(new Error('Connection refused'))
+        .mockResolvedValueOnce({ forwardedPort: 45678 })
+
+      await act(async () => {
+        renderBrowserPane({ url: 'http://localhost:3000' })
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to connect')).toBeInTheDocument()
+      })
+
+      expect(api.post).toHaveBeenCalledTimes(1)
+
+      // Click Try Again
+      await act(async () => {
+        fireEvent.click(screen.getByText('Try Again'))
+      })
+
+      // Should have made a second API call
+      await waitFor(() => {
+        expect(api.post).toHaveBeenCalledTimes(2)
+      })
+
+      // Should now show the iframe
+      await waitFor(() => {
+        const iframe = document.querySelector('iframe')
+        expect(iframe).toBeTruthy()
+        expect(iframe!.getAttribute('src')).toBe('http://192.168.1.100:45678/')
       })
     })
   })
