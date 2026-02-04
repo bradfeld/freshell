@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
 import panesReducer from '@/store/panesSlice'
@@ -15,6 +15,16 @@ vi.mock('@/lib/clipboard', () => ({
 vi.mock('@/lib/pane-action-registry', () => ({
   registerBrowserActions: vi.fn(() => () => {}),
 }))
+
+// Mock API for port forwarding
+vi.mock('@/lib/api', () => ({
+  api: {
+    post: vi.fn().mockResolvedValue({ forwardedPort: 45678 }),
+    delete: vi.fn().mockResolvedValue({ ok: true }),
+  },
+}))
+
+import { api } from '@/lib/api'
 
 const createMockStore = () =>
   configureStore({
@@ -46,13 +56,29 @@ function renderBrowserPane(
 }
 
 describe('BrowserPane', () => {
+  const originalLocation = window.location
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   afterEach(() => {
+    // Restore original location
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    })
     cleanup()
   })
+
+  function setWindowHostname(hostname: string) {
+    Object.defineProperty(window, 'location', {
+      value: { ...originalLocation, hostname },
+      writable: true,
+      configurable: true,
+    })
+  }
 
   describe('rendering', () => {
     it('renders URL input and navigation buttons', () => {
@@ -105,6 +131,7 @@ describe('BrowserPane', () => {
     })
 
     it('preserves http:// protocol when specified', () => {
+      setWindowHostname('localhost')
       renderBrowserPane()
 
       const input = screen.getByPlaceholderText('Enter URL...')
@@ -130,74 +157,85 @@ describe('BrowserPane', () => {
     })
   })
 
-  describe('localhost rewriting for remote access', () => {
-    const originalLocation = window.location
+  describe('port forwarding for remote access', () => {
+    it('requests a port forward for localhost URLs when accessing remotely', async () => {
+      setWindowHostname('192.168.1.100')
+      vi.mocked(api.post).mockResolvedValue({ forwardedPort: 45678 })
 
-    afterEach(() => {
-      // Restore original location
-      Object.defineProperty(window, 'location', {
-        value: originalLocation,
-        writable: true,
-        configurable: true,
+      await act(async () => {
+        renderBrowserPane({ url: 'http://localhost:3000' })
+      })
+
+      expect(api.post).toHaveBeenCalledWith('/api/proxy/forward', { port: 3000 })
+
+      await waitFor(() => {
+        const iframe = document.querySelector('iframe')
+        expect(iframe).toBeTruthy()
+        expect(iframe!.getAttribute('src')).toBe('http://192.168.1.100:45678/')
       })
     })
 
-    function setWindowHostname(hostname: string) {
-      Object.defineProperty(window, 'location', {
-        value: { ...originalLocation, hostname },
-        writable: true,
-        configurable: true,
+    it('requests a port forward for 127.0.0.1 URLs when accessing remotely', async () => {
+      setWindowHostname('192.168.1.100')
+      vi.mocked(api.post).mockResolvedValue({ forwardedPort: 45679 })
+
+      await act(async () => {
+        renderBrowserPane({ url: 'http://127.0.0.1:8080' })
       })
-    }
 
-    it('rewrites localhost URL to host IP when accessing remotely', () => {
-      setWindowHostname('192.168.1.100')
-      renderBrowserPane({ url: 'http://localhost:3000' })
+      expect(api.post).toHaveBeenCalledWith('/api/proxy/forward', { port: 8080 })
 
-      const iframe = document.querySelector('iframe')
-      expect(iframe).toBeTruthy()
-      expect(iframe!.getAttribute('src')).toBe('http://192.168.1.100:3000/')
+      await waitFor(() => {
+        const iframe = document.querySelector('iframe')
+        expect(iframe).toBeTruthy()
+        expect(iframe!.getAttribute('src')).toBe('http://192.168.1.100:45679/')
+      })
     })
 
-    it('rewrites 127.0.0.1 URL to host IP when accessing remotely', () => {
-      setWindowHostname('192.168.1.100')
-      renderBrowserPane({ url: 'http://127.0.0.1:8080' })
-
-      const iframe = document.querySelector('iframe')
-      expect(iframe).toBeTruthy()
-      expect(iframe!.getAttribute('src')).toBe('http://192.168.1.100:8080/')
-    })
-
-    it('preserves path and query when rewriting localhost', () => {
+    it('preserves path and query when port forwarding', async () => {
       setWindowHostname('10.0.0.5')
-      renderBrowserPane({ url: 'http://localhost:3000/api/data?q=test' })
+      vi.mocked(api.post).mockResolvedValue({ forwardedPort: 55555 })
 
-      const iframe = document.querySelector('iframe')
-      expect(iframe).toBeTruthy()
-      expect(iframe!.getAttribute('src')).toBe('http://10.0.0.5:3000/api/data?q=test')
+      await act(async () => {
+        renderBrowserPane({ url: 'http://localhost:3000/api/data?q=test' })
+      })
+
+      expect(api.post).toHaveBeenCalledWith('/api/proxy/forward', { port: 3000 })
+
+      await waitFor(() => {
+        const iframe = document.querySelector('iframe')
+        expect(iframe).toBeTruthy()
+        expect(iframe!.getAttribute('src')).toBe('http://10.0.0.5:55555/api/data?q=test')
+      })
     })
 
-    it('does not rewrite localhost when accessing locally', () => {
+    it('does not request port forwarding when accessing locally', () => {
       setWindowHostname('localhost')
       renderBrowserPane({ url: 'http://localhost:3000' })
+
+      expect(api.post).not.toHaveBeenCalled()
 
       const iframe = document.querySelector('iframe')
       expect(iframe).toBeTruthy()
       expect(iframe!.getAttribute('src')).toBe('http://localhost:3000')
     })
 
-    it('does not rewrite non-localhost URLs when remote', () => {
+    it('does not request port forwarding for non-localhost URLs', () => {
       setWindowHostname('192.168.1.100')
       renderBrowserPane({ url: 'https://example.com' })
+
+      expect(api.post).not.toHaveBeenCalled()
 
       const iframe = document.querySelector('iframe')
       expect(iframe).toBeTruthy()
       expect(iframe!.getAttribute('src')).toBe('https://example.com')
     })
 
-    it('does not rewrite file:// URLs when remote', () => {
+    it('does not request port forwarding for file:// URLs when remote', () => {
       setWindowHostname('192.168.1.100')
       renderBrowserPane({ url: 'file:///home/user/index.html' })
+
+      expect(api.post).not.toHaveBeenCalled()
 
       const iframe = document.querySelector('iframe')
       expect(iframe).toBeTruthy()
@@ -205,6 +243,50 @@ describe('BrowserPane', () => {
       expect(iframe!.getAttribute('src')).toBe(
         '/local-file?path=' + encodeURIComponent('home/user/index.html'),
       )
+    })
+
+    it('shows connecting state while port forward is pending', async () => {
+      setWindowHostname('192.168.1.100')
+      let resolveForward!: (value: { forwardedPort: number }) => void
+      vi.mocked(api.post).mockReturnValue(
+        new Promise((resolve) => {
+          resolveForward = resolve
+        }),
+      )
+
+      renderBrowserPane({ url: 'http://localhost:3000' })
+
+      // Should show connecting state (no iframe yet)
+      expect(screen.getByText(/Connecting/i)).toBeInTheDocument()
+      expect(document.querySelector('iframe')).toBeNull()
+
+      // Resolve the forward
+      await act(async () => {
+        resolveForward({ forwardedPort: 45678 })
+      })
+
+      // Now the iframe should appear
+      await waitFor(() => {
+        const iframe = document.querySelector('iframe')
+        expect(iframe).toBeTruthy()
+        expect(iframe!.getAttribute('src')).toBe('http://192.168.1.100:45678/')
+      })
+    })
+
+    it('shows error when port forwarding fails', async () => {
+      setWindowHostname('192.168.1.100')
+      vi.mocked(api.post).mockRejectedValue(
+        new Error('Failed to create port forward'),
+      )
+
+      await act(async () => {
+        renderBrowserPane({ url: 'http://localhost:3000' })
+      })
+
+      await waitFor(() => {
+        // Use exact string to avoid matching the description which also contains "Failed to connect"
+        expect(screen.getByText('Failed to connect')).toBeInTheDocument()
+      })
     })
   })
 })

@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { ArrowLeft, ArrowRight, RotateCcw, X, Wrench } from 'lucide-react'
+import { ArrowLeft, ArrowRight, RotateCcw, X, Wrench, Loader2 } from 'lucide-react'
 import { useAppDispatch } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
 import { cn } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { rewriteLocalhostUrl } from '@/lib/url-rewrite'
+import { isLoopbackHostname } from '@/lib/url-rewrite'
+import { api } from '@/lib/api'
 import { registerBrowserActions } from '@/lib/pane-action-registry'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
@@ -17,16 +18,53 @@ interface BrowserPaneProps {
 
 const MAX_HISTORY_SIZE = 50
 
-// Convert URLs for iframe loading:
-// - file:// URLs → /local-file API endpoint
-// - localhost/127.0.0.1 URLs → rewritten to use host machine's address when accessing remotely
+// Convert file:// URLs to the /local-file API endpoint for iframe loading
 function toIframeSrc(url: string): string {
   if (url.startsWith('file://')) {
-    // Extract path from file:// URL (handle both file:/// and file://)
     const filePath = url.replace(/^file:\/\/\/?/, '')
     return `/local-file?path=${encodeURIComponent(filePath)}`
   }
-  return rewriteLocalhostUrl(url, window.location.hostname)
+  return url
+}
+
+/**
+ * Determine whether a URL needs port forwarding (localhost URL + remote access).
+ * Returns the parsed URL and target port, or null if no forwarding needed.
+ */
+function needsPortForward(url: string): { parsed: URL; targetPort: number } | null {
+  if (isLoopbackHostname(window.location.hostname)) return null
+
+  try {
+    const parsed = new URL(url)
+    if (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      isLoopbackHostname(parsed.hostname)
+    ) {
+      const targetPort = parsed.port
+        ? parseInt(parsed.port, 10)
+        : parsed.protocol === 'https:'
+          ? 443
+          : 80
+      return { parsed, targetPort }
+    }
+  } catch {
+    // Not a valid URL
+  }
+  return null
+}
+
+/**
+ * Build the forwarded iframe URL: replace hostname and port with the host's
+ * address and the forwarded port, preserving the original path/query/hash.
+ */
+function buildForwardedUrl(
+  parsed: URL,
+  forwardedPort: number,
+): string {
+  const forwarded = new URL(parsed.toString())
+  forwarded.hostname = window.location.hostname
+  forwarded.port = String(forwardedPort)
+  return forwarded.toString()
 }
 
 export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: BrowserPaneProps) {
@@ -37,6 +75,57 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
   const [loadError, setLoadError] = useState<string | null>(null)
   const [history, setHistory] = useState<string[]>(url ? [url] : [])
   const [historyIndex, setHistoryIndex] = useState(url ? 0 : -1)
+
+  // Port forwarding state
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(null)
+  const [isForwarding, setIsForwarding] = useState(false)
+  const [forwardError, setForwardError] = useState<string | null>(null)
+
+  const currentUrl = history[historyIndex] || ''
+
+  // Resolve the iframe src: port-forward localhost URLs when remote, else direct
+  useEffect(() => {
+    if (!currentUrl) {
+      setResolvedSrc(null)
+      setForwardError(null)
+      return
+    }
+
+    const forward = needsPortForward(currentUrl)
+    if (!forward) {
+      // No forwarding needed - use the URL directly (with file:// conversion)
+      setResolvedSrc(toIframeSrc(currentUrl))
+      setForwardError(null)
+      return
+    }
+
+    // Request a port forward from the server
+    let cancelled = false
+    setIsForwarding(true)
+    setForwardError(null)
+    setResolvedSrc(null)
+
+    api
+      .post<{ forwardedPort: number }>('/api/proxy/forward', {
+        port: forward.targetPort,
+      })
+      .then((result) => {
+        if (cancelled) return
+        setResolvedSrc(buildForwardedUrl(forward.parsed, result.forwardedPort))
+      })
+      .catch((err) => {
+        if (cancelled) return
+        const msg = err instanceof Error ? err.message : String(err)
+        setForwardError(`Failed to connect to localhost:${forward.targetPort} — ${msg}`)
+      })
+      .finally(() => {
+        if (!cancelled) setIsForwarding(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentUrl])
 
   const navigate = useCallback((newUrl: string) => {
     if (!newUrl.trim()) return
@@ -129,8 +218,6 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
     }
   }
 
-  const currentUrl = history[historyIndex] || ''
-
   useEffect(() => {
     return registerBrowserActions(paneId, {
       back: goBack,
@@ -141,14 +228,16 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
         if (currentUrl) await copyText(currentUrl)
       },
       openExternal: () => {
-        if (currentUrl) {
-          const resolved = rewriteLocalhostUrl(currentUrl, window.location.hostname)
-          window.open(resolved, '_blank', 'noopener,noreferrer')
+        // Open the resolved URL (with port forwarding) so it works for remote users
+        if (resolvedSrc) {
+          window.open(resolvedSrc, '_blank', 'noopener,noreferrer')
+        } else if (currentUrl) {
+          window.open(currentUrl, '_blank', 'noopener,noreferrer')
         }
       },
       toggleDevTools,
     })
-  }, [paneId, goBack, goForward, refresh, stop, toggleDevTools, currentUrl])
+  }, [paneId, goBack, goForward, refresh, stop, toggleDevTools, currentUrl, resolvedSrc])
 
   return (
     <div
@@ -211,7 +300,21 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
       <div className="flex-1 flex min-h-0">
         {/* iframe */}
         <div className={cn('flex-1 min-w-0', devToolsOpen && 'border-r border-border')}>
-          {loadError ? (
+          {forwardError ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 p-4">
+              <div className="text-destructive font-medium">Failed to connect</div>
+              <div className="text-sm text-center max-w-md">{forwardError}</div>
+              <button
+                onClick={() => {
+                  setForwardError(null)
+                  setResolvedSrc(null)
+                }}
+                className="mt-2 px-4 py-2 rounded bg-muted hover:bg-muted/80 text-sm"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : loadError ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 p-4">
               <div className="text-destructive font-medium">Failed to load page</div>
               <div className="text-sm text-center max-w-md">{loadError}</div>
@@ -225,10 +328,15 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
                 Try Again
               </button>
             </div>
-          ) : currentUrl ? (
+          ) : isForwarding ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 p-4">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <div className="text-sm">Connecting to {currentUrl}...</div>
+            </div>
+          ) : resolvedSrc ? (
             <iframe
               ref={iframeRef}
-              src={toIframeSrc(currentUrl)}
+              src={resolvedSrc}
               className="w-full h-full border-0 bg-white"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
               onLoad={() => setIsLoading(false)}
@@ -238,11 +346,11 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
               }}
               title="Browser content"
             />
-          ) : (
+          ) : !currentUrl ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               Enter a URL to browse
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Dev tools panel */}
