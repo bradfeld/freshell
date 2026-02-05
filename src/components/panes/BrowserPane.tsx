@@ -55,15 +55,16 @@ function needsPortForward(url: string): { parsed: URL; targetPort: number } | nu
 
 /**
  * Build the forwarded iframe URL: replace hostname and port with the host's
- * address and the forwarded port, preserving the original path/query/hash.
- * Forces http: because the TCP proxy is a raw pipe and does not terminate TLS.
+ * address and the forwarded port, preserving the original protocol/path/query/hash.
+ * The TCP proxy is a raw pipe — it passes bytes verbatim, so the original
+ * protocol must be preserved: https: URLs need the browser to perform TLS
+ * with the local service through the proxy, http: URLs stay plaintext.
  */
 function buildForwardedUrl(
   parsed: URL,
   forwardedPort: number,
 ): string {
-  const forwarded = new URL(parsed.toString())
-  forwarded.protocol = 'http:'
+  const forwarded = new URL(parsed.href)
   forwarded.hostname = window.location.hostname
   forwarded.port = String(forwardedPort)
   return forwarded.toString()
@@ -107,9 +108,11 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
 
     // Request a port forward from the server
     let cancelled = false
+    let forwardedTargetPort: number | null = null
     setIsForwarding(true)
     setForwardError(null)
     setResolvedSrc(null)
+    setIsLoading(false)
 
     api
       .post<{ forwardedPort: number }>('/api/proxy/forward', {
@@ -117,6 +120,7 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
       })
       .then((result) => {
         if (cancelled) return
+        forwardedTargetPort = forward.targetPort
         setResolvedSrc(buildForwardedUrl(forward.parsed, result.forwardedPort))
       })
       .catch((err) => {
@@ -130,6 +134,9 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
 
     return () => {
       cancelled = true
+      if (forwardedTargetPort !== null) {
+        api.delete(`/api/proxy/forward/${forwardedTargetPort}`).catch(() => {})
+      }
     }
   }, [currentUrl, forwardRetryKey])
 

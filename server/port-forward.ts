@@ -208,6 +208,7 @@ export class PortForwardManager {
       }
       this.forwards.delete(targetPort)
     }
+    this.inflight.clear()
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
       this.cleanupTimer = null
@@ -217,7 +218,7 @@ export class PortForwardManager {
   private startIdleCleanup(): void {
     this.cleanupTimer = setInterval(() => {
       const now = Date.now()
-      for (const [targetPort, targetMap] of this.forwards) {
+      for (const [targetPort, targetMap] of [...this.forwards]) {
         for (const entry of [...targetMap.values()]) {
           const idle = now - entry.lastActivity > this.idleTimeoutMs
           const noConnections = entry.connections.size === 0
