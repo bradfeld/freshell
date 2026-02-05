@@ -9,6 +9,11 @@ import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
 
+// Ensure DOM is clean even if another test file forgot cleanup.
+beforeEach(() => {
+  cleanup()
+})
+
 // Mock the WebSocket client
 const mockSend = vi.fn()
 const mockOnMessage = vi.fn(() => () => {})
