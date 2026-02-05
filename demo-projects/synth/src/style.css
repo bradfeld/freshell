@@ -99,7 +99,7 @@ body {
 /* ===== CONTROLS ROW ===== */
 .controls-row {
   display: grid;
-  grid-template-columns: 130px 1fr 260px;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -345,7 +345,6 @@ body {
   position: relative;
   display: flex;
   width: 100%;
-  max-width: 604px;
   height: clamp(90px, 18vw, 136px);
   user-select: none;
   touch-action: none;
@@ -548,49 +547,16 @@ body {
    ================================================================ */
 
 @media (max-width: 900px) {
-  .controls-row {
-    grid-template-columns: 120px 1fr;
-  }
-  .controls-row > :nth-child(3) {
-    grid-column: 1 / -1;
-  }
-  .envelope-inner { gap: 8px; }
-  #adsr-canvas { height: 88px; }
   #visualizer-canvas { height: clamp(50px, 10vw, 100px); }
+  .envelope-inner { gap: 8px; }
 }
 
 @media (max-width: 680px) {
   #app { padding: 8px 8px 16px; }
-
   .header { gap: 6px; }
   .header h1 { font-size: 16px; letter-spacing: 4px; }
   .header .subtitle { font-size: 9px; letter-spacing: 2px; }
-
-  .controls-row {
-    grid-template-columns: 1fr 1fr;
-  }
-  .controls-row > :nth-child(2) { grid-column: 1 / -1; }
-  .controls-row > :nth-child(3) { grid-column: 1 / -1; }
-
-  /* Oscillator: 4-across */
-  .waveform-selector { grid-template-columns: repeat(4, 1fr); }
-  .wave-btn { height: 38px; }
-  .wave-btn svg { width: 26px; height: 15px; }
-
-  /* Envelope: stack canvas below sliders */
-  .envelope-inner {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-  .adsr-sliders { justify-content: center; }
-  #adsr-canvas { height: 70px; flex: none; }
-  .slider-track { height: 70px; }
-
-  /* Keyboard labels hide on narrow widths to keep keys usable */
   .key.white .key-note { display: none; }
-
-  /* Sequencer tighter */
   :root { --seq-row: 18px; }
   .seq-header { flex-direction: column; align-items: flex-start; }
   .panel { padding: 8px 10px; }
@@ -599,23 +565,9 @@ body {
 @media (max-width: 480px) {
   .header h1 { font-size: 14px; letter-spacing: 3px; }
   .header .subtitle { display: none; }
-
-  .controls-row { grid-template-columns: 1fr; gap: 6px; }
-  .controls-row > :nth-child(2) { grid-column: auto; }
-  .controls-row > :nth-child(3) { grid-column: auto; }
-
   .wave-btn .wave-name { display: none; }
-  .wave-btn { height: 34px; }
-
-  .knob-ring { width: 42px; height: 42px; }
-  .knob-body { width: 26px; height: 26px; }
-  .knob-indicator { height: 8px; top: 2px; }
-  .effects-inner { gap: 8px; }
-  .fx-group .knobs-row { gap: 6px; }
-
   .key.white .key-label { font-size: 8px; padding-bottom: 3px; }
   .key.black .key-label { font-size: 7px; padding-bottom: 3px; }
-
   :root { --seq-row: 16px; }
   .seq-label { font-size: 7px; }
   .seq-grid-wrapper { min-width: 340px; }
@@ -651,24 +603,6 @@ body {
   .seq-grid-wrapper { gap: 0; }
 }
 
-/* Wide + short: controls and keyboard side-by-side */
-@media (max-height: 700px) and (min-width: 768px) {
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 46%;
-    gap: 6px;
-  }
-  .header { grid-column: 1 / -1; margin-bottom: 0; }
-  .controls-row { grid-column: 1; margin-bottom: 0; }
-  .keyboard-section {
-    grid-column: 2;
-    margin-bottom: 0;
-    display: flex;
-    align-items: center;
-  }
-  .keyboard { max-width: none; height: 100%; max-height: 130px; }
-  .seq-panel { grid-column: 1 / -1; }
-}
 
 /* Very short viewport */
 @media (max-height: 550px) {
