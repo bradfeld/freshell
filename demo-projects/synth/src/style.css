@@ -621,3 +621,67 @@ body {
   .seq-grid-wrapper { min-width: 340px; }
   .step-numbers { min-width: 310px; margin-left: 30px; }
 }
+
+/* ================================================================
+   HEIGHT-BASED (landscape / short viewport)
+   ================================================================ */
+
+/* Short viewport: compress vertically, hide visualizer */
+@media (max-height: 700px) {
+  .visualizer-panel { display: none; }
+  #app { padding: 6px 12px 10px; }
+  .header { margin-bottom: 4px; padding-bottom: 4px; }
+  .panel { padding: 8px 10px; }
+  .panel h2 { margin-bottom: 6px; }
+  .controls-row { margin-bottom: 6px; gap: 6px; }
+  .keyboard-section { margin-bottom: 6px; }
+  .keyboard { height: clamp(110px, 20vw, 136px); }
+  .slider-track { height: 60px; }
+  #adsr-canvas { height: 72px; }
+  .wave-btn { height: 36px; }
+  .wave-btn .wave-name { display: none; }
+  :root { --seq-row: 13px; }
+  .seq-header { margin-bottom: 3px; }
+  .seq-panel { padding: 5px 10px; }
+  .seq-panel h2 { margin-bottom: 4px; }
+  .step-numbers { margin-bottom: 1px; display: none; }
+  .seq-label { font-size: 7px; }
+  .seq-grid { gap: 1px; }
+  .seq-labels { gap: 1px; }
+  .seq-grid-wrapper { gap: 0; }
+}
+
+/* Wide + short: controls and keyboard side-by-side */
+@media (max-height: 700px) and (min-width: 768px) {
+  #app {
+    display: grid;
+    grid-template-columns: 1fr 46%;
+    gap: 6px;
+  }
+  .header { grid-column: 1 / -1; margin-bottom: 0; }
+  .controls-row { grid-column: 1; margin-bottom: 0; }
+  .keyboard-section {
+    grid-column: 2;
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+  }
+  .keyboard { max-width: none; height: 100%; max-height: 130px; }
+  .seq-panel { grid-column: 1 / -1; }
+}
+
+/* Very short viewport */
+@media (max-height: 550px) {
+  .header h1 { font-size: 14px; letter-spacing: 3px; }
+  .header .subtitle { display: none; }
+  .keyboard { height: clamp(90px, 16vw, 110px); }
+  :root { --seq-row: 11px; }
+  .seq-label { font-size: 6px; }
+  .seq-grid-wrapper { min-width: 340px; grid-template-columns: 22px 1fr; }
+  .slider-track { height: 48px; }
+  #adsr-canvas { height: 56px; }
+  .controls-row { gap: 4px; }
+  .knob-ring { width: 40px; height: 40px; }
+  .knob-body { width: 24px; height: 24px; }
+  .knob-indicator { height: 7px; top: 2px; }
+}
