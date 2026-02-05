@@ -99,11 +99,24 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
     }
   }, [dispatch, tabId, paneId, devToolsOpen, history, historyIndex])
 
+  const currentUrl = history[historyIndex] || ''
+
   const refresh = useCallback(() => {
-    if (iframeRef.current) {
-      iframeRef.current.src = iframeRef.current.src
+    const iframe = iframeRef.current
+    if (!iframe) return
+
+    // Prefer reloading the current document (handles in-iframe navigations when allowed).
+    try {
+      iframe.contentWindow?.location.reload()
       setIsLoading(true)
+      return
+    } catch {
+      // cross-origin or unavailable; fall back to resetting src
     }
+
+    const src = iframe.src
+    iframe.src = src
+    setIsLoading(true)
   }, [])
 
   const stop = useCallback(() => {
@@ -126,8 +139,6 @@ export default function BrowserPane({ paneId, tabId, url, devToolsOpen }: Browse
       navigate(inputUrl)
     }
   }
-
-  const currentUrl = history[historyIndex] || ''
 
   useEffect(() => {
     // Focus the URL input only when there's no initial URL (user just created a new browser pane)

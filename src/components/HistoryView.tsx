@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { addTab } from '@/store/tabsSlice'
 import { cn } from '@/lib/utils'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
-import { Search, ChevronRight, MoreHorizontal, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
+import { Search, ChevronRight, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 function formatTime(ts: number) {
@@ -281,7 +281,6 @@ function SessionRow({
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(session.title || '')
   const [summary, setSummary] = useState(session.summary || '')
-  const [showActions, setShowActions] = useState(false)
 
   if (editing) {
     return (
@@ -326,17 +325,19 @@ function SessionRow({
   }
 
   return (
-    <button
-      className="group w-full text-left px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer rounded-md"
-      onClick={onOpen}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
+    <div
+      className="group w-full px-4 py-3 hover:bg-muted/30 transition-colors rounded-md"
       data-context={ContextIds.HistorySession}
       data-session-id={session.sessionId}
       data-provider={session.provider}
     >
       <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
+        <button
+          type="button"
+          className="flex-1 min-w-0 text-left cursor-pointer"
+          onClick={onOpen}
+          aria-label={`Open session ${session.title || session.sessionId.slice(0, 8)}`}
+        >
           <div className="flex items-center gap-2">
             <span className="font-medium text-sm truncate">
               {session.title || session.sessionId.slice(0, 8)}
@@ -358,18 +359,17 @@ function SessionRow({
               {session.cwd}
             </p>
           )}
-        </div>
+        </button>
 
         {/* Actions */}
         <div
           className={cn(
-            'flex items-center gap-1 transition-opacity',
-            showActions ? 'opacity-100' : 'opacity-0'
+            'flex items-center gap-1 transition-opacity opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
           )}
-          onClick={(e) => e.stopPropagation()}
           role="presentation"
         >
           <button
+            type="button"
             onClick={onOpen}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             aria-label="Open session"
@@ -377,6 +377,7 @@ function SessionRow({
             <Play className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
+            type="button"
             onClick={() => setEditing(true)}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             aria-label="Edit session"
@@ -384,6 +385,7 @@ function SessionRow({
             <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
+            type="button"
             onClick={onDelete}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             aria-label="Delete session"
@@ -392,6 +394,6 @@ function SessionRow({
           </button>
         </div>
       </div>
-    </button>
+    </div>
   )
 }

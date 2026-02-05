@@ -1,7 +1,9 @@
 import jsPlugin from '@eslint/js';
 import globals from 'globals';
 import reactPlugin from 'eslint-plugin-react';
+import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 
 export default [
@@ -16,7 +18,6 @@ export default [
       sourceType: 'module',
       globals: {
         ...globals.browser,
-        ...globals.node,
         ...globals.es2021
       },
       parserOptions: {
@@ -26,12 +27,26 @@ export default [
       }
     },
     plugins: {
+      '@typescript-eslint': tsPlugin,
       react: reactPlugin,
+      'react-hooks': reactHooksPlugin,
       'jsx-a11y': jsxA11yPlugin
     },
     rules: {
       ...jsPlugin.configs.recommended.rules,
+      // Base JS rules don't fully understand TypeScript.
+      'no-undef': 'off',
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_'
+        }
+      ],
       ...reactPlugin.configs.recommended.rules,
+      ...reactHooksPlugin.configs.recommended.rules,
       ...jsxA11yPlugin.configs.recommended.rules,
       'react/react-in-jsx-scope': 'off',
       'react/prop-types': 'off',

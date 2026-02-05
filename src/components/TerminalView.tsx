@@ -307,8 +307,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // Create or attach to backend terminal
   useEffect(() => {
     if (!isTerminal || !terminalContent) return
-    const term = termRef.current
-    if (!term) return
+    const termCandidate = termRef.current
+    if (!termCandidate) return
+    const term = termCandidate
 
     // NOTE: We intentionally don't destructure terminalId here.
     // We read it from terminalIdRef.current to avoid stale closures.
@@ -326,7 +327,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     async function ensure() {
       try {
         await ws.connect()
-      } catch { /* handled elsewhere */ }
+      } catch {
+        // handled elsewhere
+      }
 
       unsub = ws.onMessage((msg) => {
         const tid = terminalIdRef.current
@@ -337,9 +340,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {
-          try { term.clear() } catch {}
+          try { term.clear() } catch { /* disposed */ }
           if (msg.snapshot) {
-            try { term.write(msg.snapshot) } catch {}
+            try { term.write(msg.snapshot) } catch { /* disposed */ }
           }
         }
 
@@ -353,7 +356,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             dispatch(updateTab({ id: currentTab.id, updates: { terminalId: newId, status: 'running' } }))
           }
           if (msg.snapshot) {
-            try { term.clear(); term.write(msg.snapshot) } catch {}
+            try { term.clear(); term.write(msg.snapshot) } catch { /* disposed */ }
           }
           attach(newId)
         }
@@ -361,7 +364,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.attached' && msg.terminalId === tid) {
           setIsAttaching(false)
           if (msg.snapshot) {
-            try { term.clear(); term.write(msg.snapshot) } catch {}
+            try { term.clear(); term.write(msg.snapshot) } catch { /* disposed */ }
           }
           updateContent({ status: 'running' })
         }

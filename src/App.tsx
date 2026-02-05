@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
 import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
-import { addTab, removeTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
+import { addTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
@@ -43,6 +43,7 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const mainContentRef = useRef<HTMLDivElement>(null)
+  const userOpenedSidebarOnMobileRef = useRef(false)
 
   // Sidebar width from settings (or local state during drag)
   const sidebarWidth = settings.sidebar?.width ?? 288
@@ -60,10 +61,14 @@ export default function App() {
 
   // Auto-collapse sidebar on mobile
   useEffect(() => {
-    if (isMobile && !sidebarCollapsed) {
+    if (!isMobile) {
+      userOpenedSidebarOnMobileRef.current = false
+      return
+    }
+    if (!sidebarCollapsed && !userOpenedSidebarOnMobileRef.current) {
       dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: true } }))
     }
-  }, [isMobile])
+  }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
 
   const handleSidebarResize = useCallback((delta: number) => {
     const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth + delta))
@@ -74,17 +79,24 @@ export default function App() {
     try {
       await api.patch('/api/settings', { sidebar: settings.sidebar })
       dispatch(markSaved())
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to save sidebar settings', err)
+    }
   }, [settings.sidebar, dispatch])
 
   const toggleSidebarCollapse = useCallback(async () => {
     const newCollapsed = !sidebarCollapsed
+    if (isMobile && !newCollapsed) {
+      userOpenedSidebarOnMobileRef.current = true
+    }
     dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: newCollapsed } }))
     try {
       await api.patch('/api/settings', { sidebar: { ...settings.sidebar, collapsed: newCollapsed } })
       dispatch(markSaved())
-    } catch {}
-  }, [sidebarCollapsed, settings.sidebar, dispatch])
+    } catch (err) {
+      console.warn('Failed to save sidebar settings', err)
+    }
+  }, [isMobile, sidebarCollapsed, settings.sidebar, dispatch])
 
   const toggleTheme = async () => {
     const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
@@ -92,7 +104,9 @@ export default function App() {
     try {
       await api.patch('/api/settings', { theme: newTheme })
       dispatch(markSaved())
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to save theme setting', err)
+    }
   }
 
   const handleShare = async () => {

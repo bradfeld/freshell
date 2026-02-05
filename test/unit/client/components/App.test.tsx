@@ -558,6 +558,49 @@ describe('App Component - Share Button', () => {
   })
 })
 
+describe('App Component - Mobile Sidebar', () => {
+  const originalInnerWidth = window.innerWidth
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      return Promise.resolve({})
+    })
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', {
+      value: originalInnerWidth,
+      writable: true,
+    })
+  })
+
+  it('auto-collapses on mobile but does not re-collapse after user opens it', async () => {
+    Object.defineProperty(window, 'innerWidth', { value: 500, writable: true })
+
+    renderApp()
+
+    // After effects settle, it should be collapsed on mobile.
+    await waitFor(() => {
+      expect(screen.getByTitle('Show sidebar')).toBeInTheDocument()
+      expect(screen.queryByTestId('mock-sidebar')).not.toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTitle('Show sidebar'))
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Hide sidebar')).toBeInTheDocument()
+      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
+    })
+
+    // Give effects a chance to run; sidebar should remain open.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
+  })
+})
+
 describe('App Bootstrap', () => {
   const originalSessionStorage = global.sessionStorage
 

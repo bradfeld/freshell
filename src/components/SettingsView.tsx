@@ -45,7 +45,7 @@ type PreviewToken = {
 const terminalPreviewWidth = 40
 const terminalPreviewHeight = 8
 
-const terminalPreviewLines: PreviewToken[][] = [
+const terminalPreviewLinesRaw: PreviewToken[][] = [
   [{ text: '// terminal preview: syntax demo', kind: 'comment' }],
   [
     { text: 'const ', kind: 'keyword' },
@@ -108,7 +108,11 @@ const terminalPreviewLines: PreviewToken[][] = [
     { text: ' === ', kind: 'operator' },
     { text: '0', kind: 'number' },
   ],
-].map((tokens) => normalizePreviewLine(tokens, terminalPreviewWidth))
+]
+
+const terminalPreviewLines: PreviewToken[][] = terminalPreviewLinesRaw.map((tokens) =>
+  normalizePreviewLine(tokens, terminalPreviewWidth)
+)
 
 function normalizePreviewLine(tokens: PreviewToken[], width: number): PreviewToken[] {
   let remaining = width
