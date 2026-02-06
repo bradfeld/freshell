@@ -10,6 +10,7 @@ import sessionsReducer from '@/store/sessionsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
+import TabBar from '@/components/TabBar'
 
 vi.mock('@/lib/ws-client', () => ({
   getWsClient: () => ({
@@ -66,6 +67,7 @@ function createTestStore(options?: { platform?: string | null }) {
           },
         ],
         activeTabId: 'tab-1',
+        renameRequestTabId: null,
       },
       panes: {
         layouts: {},
@@ -124,6 +126,7 @@ function createStoreWithSession() {
           },
         ],
         activeTabId: 'tab-1',
+        renameRequestTabId: null,
       },
       panes: {
         layouts: {
@@ -240,6 +243,36 @@ describe('ContextMenuProvider', () => {
     fireEvent.keyDown(document, { key: 'F10', shiftKey: true })
 
     expect(screen.getByRole('menu')).toBeInTheDocument()
+  })
+
+  it('Rename tab from context menu enters inline rename mode (no prompt)', async () => {
+    const user = userEvent.setup()
+    const promptSpy = vi.spyOn(window, 'prompt')
+
+    const store = createTestStore()
+    render(
+      <Provider store={store}>
+        <ContextMenuProvider
+          view="terminal"
+          onViewChange={() => {}}
+          onToggleSidebar={() => {}}
+          sidebarCollapsed={false}
+        >
+          <TabBar />
+        </ContextMenuProvider>
+      </Provider>
+    )
+
+    await user.pointer({ target: screen.getByText('Tab One'), keys: '[MouseRight]' })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    await user.click(screen.getByText('Rename tab'))
+
+    // Inline rename input should appear with the current display title
+    const input = await screen.findByRole('textbox')
+    expect(input.tagName).toBe('INPUT')
+    expect((input as HTMLInputElement).value).toBe('Tab One')
+    expect(promptSpy).not.toHaveBeenCalled()
+    promptSpy.mockRestore()
   })
 
   it('open in this tab splits the pane instead of replacing the layout', async () => {

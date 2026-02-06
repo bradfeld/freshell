@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, closeTab, reorderTabs, updateTab, setActiveTab, openSessionTab } from '@/store/tabsSlice'
+import { addTab, closeTab, reorderTabs, updateTab, setActiveTab, openSessionTab, requestTabRename } from '@/store/tabsSlice'
 import { addPane, closePane, initLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { getWsClient } from '@/lib/ws-client'
@@ -80,11 +80,21 @@ export function ContextMenuProvider({
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const suppressNextFocusRestoreRef = useRef(false)
 
   const ws = useMemo(() => getWsClient(), [])
 
   const closeMenu = useCallback(() => {
     setMenuState(null)
+
+    if (suppressNextFocusRestoreRef.current) {
+      suppressNextFocusRestoreRef.current = false
+      // Some effects call closeMenu() in cleanup after the menu is already closed.
+      // Ensure we don't "restore focus" on a follow-up close and accidentally blur the rename input.
+      previousFocusRef.current = null
+      return
+    }
+
     if (previousFocusRef.current) {
       const el = previousFocusRef.current
       previousFocusRef.current = null
@@ -169,9 +179,11 @@ export function ContextMenuProvider({
   const renameTab = useCallback((tabId: string) => {
     const tab = tabsState.tabs.find((t) => t.id === tabId)
     if (!tab) return
-    const next = window.prompt('Rename tab', tab.title)
-    if (!next) return
-    dispatch(updateTab({ id: tabId, updates: { title: next, titleSetByUser: true } }))
+    // Avoid modal prompts (they break automation and are harder to use).
+    // Trigger the same inline rename UI used by TabBar double-click.
+    suppressNextFocusRestoreRef.current = true
+    dispatch(setActiveTab(tabId))
+    dispatch(requestTabRename(tabId))
   }, [dispatch, tabsState.tabs])
 
   const renamePane = useCallback((tabId: string, paneId: string) => {
