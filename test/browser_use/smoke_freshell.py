@@ -228,18 +228,21 @@ Requirements:
    - IMPORTANT: This is ONLY a pane-count stress. Do not create any actual Terminal/Editor/Browser content on this tab.
      - If the UI prompts you to choose a pane type for a new pane, do NOT select any option. Dismiss the chooser (Escape / click outside) so the new pane remains an empty "picker" pane.
      - Specifically: do not click CMD/WSL/PowerShell during pane stress, since that creates real terminal sessions and can hit terminal limits.
-5) Create a new shell tab (click the plus button in the tab bar with the tooltip/title "New shell tab"). Do not open new windows.
-6) On that new tab, create a few panes and set up EXACTLY one of each type: Editor, Terminal, Browser (keep this tab multi-pane for quick review).
+5) Create a new *Freshell shell tab* using the in-app tab bar (NOT a new browser tab):
+   - In the Freshell UI at the top, there is an in-app tab bar with tabs like "New Tab".
+   - Click the plus button with tooltip/title "New shell tab".
+   - This stays in the same browser tab/window. Do NOT open a new browser tab/window and do NOT expect the browser's tab list to change.
+6) On that new Freshell tab, create a few panes and set up EXACTLY one of each type: Editor, Terminal, Browser (keep this tab multi-pane for quick review).
    - In the Editor pane: open this file path: {known_text_file}. Verify visually the editor shows content (not an empty placeholder).
    - In the Terminal pane: run `node -v` (or `git --version` if node is unavailable). Verify visually the output looks like a version string.
    - In the Browser pane: open the standard "Example Domain" website (IANA Example Domains) and verify visually it shows "Example Domain".
    - Keep terminal creation minimal: do not create extra terminal panes beyond this one.
-7) Create one more new shell tab for Settings verification.
+7) Create one more *Freshell shell tab* for Settings verification (again: in-app tab, not a browser tab).
 8) On that tab, open the sidebar (if it is collapsed) using the top-left toggle button.
 9) Click "Settings" in the sidebar.
 10) On the Settings page, confirm "Terminal preview" is visible (use `find_text`).
 11) Navigate back to the terminal view.
-12) Click through the tabs in the tab bar to confirm they still render (stress, multi-pane, settings).
+12) Click through the *Freshell in-app tabs* in the top tab bar to confirm they still render (stress, multi-pane, settings).
 
 Output:
 At the end, output exactly one line:
