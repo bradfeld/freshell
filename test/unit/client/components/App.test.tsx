@@ -129,28 +129,12 @@ function renderApp(store = createTestStore()) {
 
 describe('App Component - Share Button', () => {
   const originalNavigator = global.navigator
-  const originalSessionStorage = global.sessionStorage
 
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    // Reset sessionStorage mock - key must be 'auth-token' to match ws-client.ts
-    const sessionStorageMock: Record<string, string> = {
-      'auth-token': 'test-token-abc123',
-    }
-    Object.defineProperty(global, 'sessionStorage', {
-      value: {
-        getItem: vi.fn((key: string) => sessionStorageMock[key] || null),
-        setItem: vi.fn((key: string, value: string) => {
-          sessionStorageMock[key] = value
-        }),
-        removeItem: vi.fn((key: string) => {
-          delete sessionStorageMock[key]
-        }),
-        clear: vi.fn(),
-      },
-      writable: true,
-    })
+    // Auth token is now stored in localStorage via @/lib/auth
+    localStorage.setItem('freshell.auth-token', 'test-token-abc123')
     // Mock API responses
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/settings') return Promise.resolve(defaultSettings)
@@ -167,10 +151,6 @@ describe('App Component - Share Button', () => {
     cleanup()
     Object.defineProperty(global, 'navigator', {
       value: originalNavigator,
-      writable: true,
-    })
-    Object.defineProperty(global, 'sessionStorage', {
-      value: originalSessionStorage,
       writable: true,
     })
   })
@@ -262,16 +242,8 @@ describe('App Component - Share Button', () => {
   })
 
   it('handles missing auth token gracefully (non-Windows)', async () => {
-    // Override sessionStorage to return null for auth-token
-    Object.defineProperty(global, 'sessionStorage', {
-      value: {
-        getItem: vi.fn().mockReturnValue(null),
-        setItem: vi.fn(),
-        removeItem: vi.fn(),
-        clear: vi.fn(),
-      },
-      writable: true,
-    })
+    // Remove auth token from localStorage
+    localStorage.removeItem('freshell.auth-token')
 
     const mockShare = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(global, 'navigator', {

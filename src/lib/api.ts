@@ -1,14 +1,11 @@
 import type { CodingCliProviderName } from './coding-cli-types'
 import { getClientPerfConfig, isClientPerfLoggingEnabled, logClientPerf } from '@/lib/perf-logger'
+import { getAuthToken } from '@/lib/auth'
 
 export type ApiError = {
   status: number
   message: string
   details?: unknown
-}
-
-function getAuthToken(): string | undefined {
-  return sessionStorage.getItem('auth-token') || undefined
 }
 
 async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {

@@ -1,4 +1,5 @@
 import { getClientPerfConfig, isClientPerfLoggingEnabled, logClientPerf } from '@/lib/perf-logger'
+import { getAuthToken } from '@/lib/auth'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'ready'
 type MessageHandler = (msg: any) => void
@@ -7,28 +8,6 @@ type HelloExtensionProvider = () => { sessions?: { active?: string; visible?: st
 
 const CONNECTION_TIMEOUT_MS = 10_000
 const perfConfig = getClientPerfConfig()
-
-// Single source of auth token: sessionStorage only.
-function getAuthToken(): string | undefined {
-  return sessionStorage.getItem('auth-token') || undefined
-}
-
-/**
- * Called ONCE on app bootstrap. If the URL contains ?token=..., stores it in sessionStorage
- * and removes it from the URL to avoid leaking via browser history / logs / Referer headers.
- */
-export function initializeAuthToken(): void {
-  const params = new URLSearchParams(window.location.search)
-  const urlToken = params.get('token')
-  if (urlToken) {
-    sessionStorage.setItem('auth-token', urlToken)
-    params.delete('token')
-    const newUrl = params.toString()
-      ? `${window.location.pathname}?${params.toString()}`
-      : window.location.pathname
-    window.history.replaceState({}, '', newUrl)
-  }
-}
 
 export class WsClient {
   private ws: WebSocket | null = null

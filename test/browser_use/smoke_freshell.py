@@ -276,7 +276,7 @@ async def _run(args: argparse.Namespace) -> int:
       pass
     # Wait for the SPA to fully bootstrap auth:
     # - token removed from URL
-    # - auth-token stored in sessionStorage
+    # - auth-token stored in localStorage
     # - terminal view rendered (Add Pane button present)
     #
     # Without this, the agent may refresh/navigate and lose auth, causing flaky failures.
@@ -285,7 +285,7 @@ async def _run(args: argparse.Namespace) -> int:
     while time.monotonic() < deadline:
       try:
         # These checks intentionally avoid reading the token value to keep it out of any debug logs.
-        auth_present = await page.evaluate("() => !!sessionStorage.getItem('auth-token')")
+        auth_present = await page.evaluate("() => !!localStorage.getItem('freshell.auth-token')")
         token_removed = await page.evaluate("() => !new URLSearchParams(window.location.search).has('token')")
         has_add_pane = await page.evaluate("() => !!document.querySelector('button[aria-label=\"Add pane\"]')")
         has_connected = await page.evaluate("() => !!document.querySelector('[title=\"Connected\"]')")

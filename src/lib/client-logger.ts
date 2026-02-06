@@ -61,12 +61,10 @@ const METHOD_TO_SEVERITY: Record<ConsoleMethod, ClientLogSeverity> = {
   dir: 'info',
 }
 
+import { getAuthToken } from '@/lib/auth'
+
 function nowIso() {
   return new Date().toISOString()
-}
-
-function getAuthToken(): string | undefined {
-  return sessionStorage.getItem('auth-token') || undefined
 }
 
 function getClientId(): string {

@@ -4,7 +4,7 @@ import { Provider } from 'react-redux'
 import { store } from '@/store/store'
 import App from '@/App'
 import '@/index.css'
-import { initializeAuthToken } from '@/lib/ws-client'
+import { initializeAuthToken } from '@/lib/auth'
 import { createClientLogger } from '@/lib/client-logger'
 import { initClientPerfLogging } from '@/lib/perf-logger'
 

@@ -231,7 +231,7 @@ describe('Editor Pane Integration', () => {
 
   it('loads file when path is entered', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-    sessionStorage.setItem('auth-token', 'test-token')
+    localStorage.setItem('freshell.auth-token', 'test-token')
 
     mockFetch.mockImplementation(
       createRoutedFetch({
@@ -286,7 +286,7 @@ describe('Editor Pane Integration', () => {
 
   it('shows Monaco editor when content is loaded', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-    sessionStorage.setItem('auth-token', 'test-token')
+    localStorage.setItem('freshell.auth-token', 'test-token')
 
     mockFetch.mockImplementation(
       createRoutedFetch({
@@ -337,7 +337,7 @@ describe('Editor Pane Integration', () => {
 
   it('shows view toggle for markdown files after loading', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-    sessionStorage.setItem('auth-token', 'test-token')
+    localStorage.setItem('freshell.auth-token', 'test-token')
 
     mockFetch.mockImplementation(
       createRoutedFetch({
@@ -389,7 +389,7 @@ describe('Editor Pane Integration', () => {
 
   it('can toggle between source and preview modes', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-    sessionStorage.setItem('auth-token', 'test-token')
+    localStorage.setItem('freshell.auth-token', 'test-token')
 
     mockFetch.mockImplementation(
       createRoutedFetch({

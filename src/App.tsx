@@ -5,6 +5,7 @@ import { setSettings } from '@/store/settingsSlice'
 import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
 import { addTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
+import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { getSessionsForHello } from '@/lib/session-utils'
@@ -19,6 +20,7 @@ import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
 import PaneDivider from '@/components/panes/PaneDivider'
+import { AuthRequiredModal } from '@/components/AuthRequiredModal'
 import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
@@ -125,7 +127,7 @@ export default function App() {
       // Fall back to current host if LAN info unavailable
     }
 
-    const token = sessionStorage.getItem('auth-token')
+    const token = getAuthToken() ?? null
     const shareUrl = buildShareUrl({
       currentUrl: window.location.href,
       lanIp,
@@ -514,6 +516,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <AuthRequiredModal />
       </div>
     </ContextMenuProvider>
   )
