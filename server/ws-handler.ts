@@ -722,6 +722,7 @@ export class WsHandler {
                 effectiveResumeSessionId: existing.resumeSessionId,
               })
               setImmediate(() => this.registry.finishAttachSnapshot(existingId, ws))
+              this.broadcast({ type: 'terminal.list.updated' })
               return
             }
             // If it no longer exists, fall through and create a new one.
@@ -752,7 +753,7 @@ export class WsHandler {
           if (m.mode === 'claude' && effectiveResumeSessionId) {
             const existing = this.registry.findRunningClaudeTerminalBySession(effectiveResumeSessionId)
             if (existing) {
-              this.registry.attach(existing.terminalId, ws)
+              this.registry.attach(existing.terminalId, ws, { pendingSnapshot: true })
               state.attachedTerminalIds.add(existing.terminalId)
               state.createdByRequestId.set(m.requestId, existing.terminalId)
               terminalId = existing.terminalId
@@ -765,6 +766,8 @@ export class WsHandler {
                 createdAt: existing.createdAt,
                 effectiveResumeSessionId: existing.resumeSessionId,
               })
+              setImmediate(() => this.registry.finishAttachSnapshot(existing.terminalId, ws))
+              this.broadcast({ type: 'terminal.list.updated' })
               return
             }
           }
