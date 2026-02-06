@@ -212,7 +212,8 @@ export class WsClient {
 
         if (event.code === 4008) {
           // Backpressure close - surface as warning, but don't reconnect aggressively.
-          finishReject(new Error('Connection too slow (backpressure)'))
+          const extra = event.reason ? `: ${event.reason}` : ''
+          finishReject(new Error(`Connection too slow (backpressure)${extra}`))
           if (!this.intentionalClose) this.scheduleReconnect({ minDelayMs: 5000 })
           return
         }

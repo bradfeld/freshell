@@ -178,6 +178,8 @@ export default function App() {
   // Bootstrap: load settings, sessions, and connect websocket.
   useEffect(() => {
     let cancelled = false
+    let cleanedUp = false
+    let cleanup: (() => void) | null = null
     async function bootstrap() {
       try {
         const settings = await api.get('/api/settings')
@@ -207,21 +209,14 @@ export default function App() {
         sessions: getSessionsForHello(store.getState()),
       }))
 
-      dispatch(setError(undefined))
-      dispatch(setStatus('connecting'))
-      try {
-        await ws.connect()
-        if (!cancelled) dispatch(setStatus('ready'))
-      } catch (err: any) {
-        if (!cancelled) {
-          dispatch(setStatus('disconnected'))
-          dispatch(setError(err?.message || 'WebSocket connection failed'))
-        }
-        return
-      }
-
       const unsubscribe = ws.onMessage((msg) => {
         if (!msg?.type) return
+        if (msg.type === 'ready') {
+          // If the initial connect attempt failed before ready, WsClient may still auto-reconnect.
+          // Treat 'ready' as the source of truth for connection status.
+          dispatch(setError(undefined))
+          dispatch(setStatus('ready'))
+        }
         if (msg.type === 'sessions.updated') {
           // Support chunked sessions for mobile browsers with limited WebSocket buffers
           if (msg.clear) {
@@ -269,8 +264,21 @@ export default function App() {
         }
       })
 
-      return () => {
+      cleanup = () => {
         unsubscribe()
+      }
+      if (cleanedUp) cleanup()
+
+      dispatch(setError(undefined))
+      dispatch(setStatus('connecting'))
+      try {
+        await ws.connect()
+        if (!cancelled) dispatch(setStatus('ready'))
+      } catch (err: any) {
+        if (!cancelled) {
+          dispatch(setStatus('disconnected'))
+          dispatch(setError(err?.message || 'WebSocket connection failed'))
+        }
       }
     }
 
@@ -278,6 +286,8 @@ export default function App() {
 
     return () => {
       cancelled = true
+      cleanedUp = true
+      cleanup?.()
       void cleanupPromise
     }
   }, [dispatch])

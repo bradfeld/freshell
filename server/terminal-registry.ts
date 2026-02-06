@@ -765,19 +765,21 @@ export class TerminalRegistry extends EventEmitter {
       for (const client of record.clients) {
         const pending = record.pendingSnapshotClients.get(client)
         if (pending) {
-          pending.chunks.push(data)
-          pending.queuedChars += data.length
-          if (pending.queuedChars > this.maxPendingSnapshotChars) {
+          const nextChars = pending.queuedChars + data.length
+          if (data.length > this.maxPendingSnapshotChars || nextChars > this.maxPendingSnapshotChars) {
             // If a terminal spews output while we're sending a snapshot, queueing unboundedly can OOM the server.
             // Prefer explicit resync: drop the client and let it reconnect/reattach for a fresh snapshot.
             try {
-              ;(client as any).close?.(4008, 'Backpressure')
+              ;(client as any).close?.(4008, 'Attach snapshot queue overflow')
             } catch {
               // ignore
             }
             record.pendingSnapshotClients.delete(client)
             record.clients.delete(client)
+            continue
           }
+          pending.chunks.push(data)
+          pending.queuedChars = nextChars
           continue
         }
         this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf: record.perf })

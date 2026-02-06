@@ -459,5 +459,18 @@ describe('sessionsSlice', () => {
       expect(state.projects).toEqual([])
       expect(state.expandedProjects.size).toBe(0)
     })
+
+    it('filters non-object session entries to prevent downstream crashes', () => {
+      const bad: ProjectGroup[] = [
+        {
+          projectPath: '/project/one',
+          sessions: [1, 'x', null, [], { sessionId: 's1', projectPath: '/project/one', updatedAt: 1 }] as any,
+        },
+      ]
+
+      const state = sessionsReducer(initialState, setProjects(bad))
+      expect(state.projects).toHaveLength(1)
+      expect(state.projects[0].sessions).toHaveLength(1)
+    })
   })
 })

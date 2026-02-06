@@ -6,15 +6,23 @@ enableMapSet()
 
 let errorSpy: ReturnType<typeof vi.spyOn> | null = null
 let consoleErrorCalls: Array<{ args: unknown[]; stack?: string }> = []
+let hasCapturedErrorStack = false
 
 beforeEach(() => {
   consoleErrorCalls = []
+  hasCapturedErrorStack = false
   const impl = (...args: unknown[]) => {
-    const err = new Error('console.error captured')
-    // Exclude this helper from the captured stack for better signal.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(Error as any).captureStackTrace?.(err, impl)
-    consoleErrorCalls.push({ args, stack: err.stack })
+    // Capturing stacks for every console.error can be expensive; keep the first one for debugging.
+    let stack: string | undefined
+    if (!hasCapturedErrorStack) {
+      hasCapturedErrorStack = true
+      const err = new Error('console.error captured')
+      // Exclude this helper from the captured stack for better signal.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(Error as any).captureStackTrace?.(err, impl)
+      stack = err.stack
+    }
+    consoleErrorCalls.push({ args, stack })
   }
   errorSpy = vi.spyOn(console, 'error').mockImplementation(impl)
 })

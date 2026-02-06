@@ -8,7 +8,10 @@ function normalizeProjects(payload: unknown): ProjectGroup[] {
     if (!raw || typeof raw !== 'object') continue
     const projectPath = (raw as any).projectPath
     if (typeof projectPath !== 'string' || projectPath.length === 0) continue
-    const sessions = Array.isArray((raw as any).sessions) ? (raw as any).sessions : []
+    const sessionsRaw = (raw as any).sessions
+    const sessions = Array.isArray(sessionsRaw)
+      ? sessionsRaw.filter((s) => !!s && typeof s === 'object' && !Array.isArray(s))
+      : []
     const color = typeof (raw as any).color === 'string' ? (raw as any).color : undefined
     out.push({ projectPath, sessions, ...(color ? { color } : {}) } as ProjectGroup)
   }
