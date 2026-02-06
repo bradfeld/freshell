@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, closeTab, setActiveTab, updateTab, reorderTabs } from '@/store/tabsSlice'
+import { addTab, closeTab, setActiveTab, updateTab, reorderTabs, clearTabRenameRequest } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTabDisplayTitle } from '@/lib/tab-title'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -100,9 +100,12 @@ const EMPTY_LAYOUTS: Record<string, never> = {}
 
 export default function TabBar() {
   const dispatch = useAppDispatch()
-  const tabsState = useAppSelector((s) => s.tabs as any) as { tabs?: Tab[]; activeTabId?: string | null } | undefined
+  const tabsState = useAppSelector((s) => s.tabs as any) as
+    | { tabs?: Tab[]; activeTabId?: string | null; renameRequestTabId?: string | null }
+    | undefined
   const tabs = useMemo(() => tabsState?.tabs ?? [], [tabsState?.tabs])
   const activeTabId = tabsState?.activeTabId ?? null
+  const renameRequestTabId = tabsState?.renameRequestTabId ?? null
   const paneLayouts = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
 
   const ws = useMemo(() => getWsClient(), [])
@@ -117,6 +120,19 @@ export default function TabBar() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [activeId, setActiveId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!renameRequestTabId) return
+    const tab = tabs.find((t: Tab) => t.id === renameRequestTabId)
+    if (!tab) {
+      dispatch(clearTabRenameRequest())
+      return
+    }
+
+    setRenamingId(tab.id)
+    setRenameValue(getDisplayTitle(tab))
+    dispatch(clearTabRenameRequest())
+  }, [dispatch, getDisplayTitle, renameRequestTabId, tabs])
 
   const sensors = useSensors(
     useSensor(PointerSensor, {

@@ -8,6 +8,9 @@ import type { RootState } from './store'
 export interface TabsState {
   tabs: Tab[]
   activeTabId: string | null
+  // Ephemeral UI signal: request TabBar to enter inline rename mode for a tab.
+  // This must never be persisted.
+  renameRequestTabId: string | null
 }
 
 // Load persisted tabs state directly at module initialization time
@@ -16,6 +19,7 @@ function loadInitialTabsState(): TabsState {
   const defaultState: TabsState = {
     tabs: [],
     activeTabId: null,
+    renameRequestTabId: null,
   }
 
   try {
@@ -23,11 +27,11 @@ function loadInitialTabsState(): TabsState {
     if (!raw) return defaultState
     const parsed = JSON.parse(raw)
     // The persisted format is { tabs: TabsState }
-    const tabsState = parsed?.tabs as TabsState | undefined
-    if (!tabsState?.tabs) return defaultState
+    const tabsState = parsed?.tabs as Partial<TabsState> | undefined
+    if (!Array.isArray(tabsState?.tabs)) return defaultState
 
     if (import.meta.env.MODE === 'development') {
-      console.log('[TabsSlice] Loaded initial state from localStorage:', tabsState.tabs.map(t => t.id))
+      console.log('[TabsSlice] Loaded initial state from localStorage:', tabsState.tabs.map((t) => t.id))
     }
 
     // Apply same transformations as hydrateTabs to ensure consistency
@@ -51,6 +55,7 @@ function loadInitialTabsState(): TabsState {
     return {
       tabs: mappedTabs,
       activeTabId: has ? desired! : (mappedTabs[0]?.id ?? null),
+      renameRequestTabId: null,
     }
   } catch (err) {
     if (import.meta.env.MODE === 'development') {
@@ -115,6 +120,12 @@ export const tabsSlice = createSlice({
     setActiveTab: (state, action: PayloadAction<string>) => {
       state.activeTabId = action.payload
     },
+    requestTabRename: (state, action: PayloadAction<string>) => {
+      state.renameRequestTabId = action.payload
+    },
+    clearTabRenameRequest: (state) => {
+      state.renameRequestTabId = null
+    },
     updateTab: (state, action: PayloadAction<{ id: string; updates: Partial<Tab> }>) => {
       const tab = state.tabs.find((t) => t.id === action.payload.id)
       if (tab) Object.assign(tab, action.payload.updates)
@@ -143,6 +154,7 @@ export const tabsSlice = createSlice({
       const desired = action.payload.activeTabId
       const has = desired && state.tabs.some((t) => t.id === desired)
       state.activeTabId = has ? desired! : (state.tabs[0]?.id ?? null)
+      state.renameRequestTabId = null
     },
     reorderTabs: (
       state,
@@ -168,7 +180,18 @@ export const tabsSlice = createSlice({
   },
 })
 
-export const { addTab, setActiveTab, updateTab, removeTab, hydrateTabs, reorderTabs, switchToNextTab, switchToPrevTab } = tabsSlice.actions
+export const {
+  addTab,
+  setActiveTab,
+  requestTabRename,
+  clearTabRenameRequest,
+  updateTab,
+  removeTab,
+  hydrateTabs,
+  reorderTabs,
+  switchToNextTab,
+  switchToPrevTab,
+} = tabsSlice.actions
 
 export const closeTab = createAsyncThunk(
   'tabs/closeTab',
