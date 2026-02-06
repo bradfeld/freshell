@@ -345,6 +345,13 @@ export class SessionRepairQueue extends EventEmitter {
   }
 
   /**
+   * Check if a session is queued, processing, or already processed.
+   */
+  has(sessionId: string): boolean {
+    return this.queuedBySessionId.has(sessionId) || this.processing.has(sessionId) || this.processed.has(sessionId)
+  }
+
+  /**
    * Get the last processed result for a session, if any.
    */
   getResult(sessionId: string): SessionScanResult | undefined {

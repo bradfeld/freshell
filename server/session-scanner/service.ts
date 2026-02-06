@@ -11,6 +11,7 @@ import os from 'os'
 import { glob } from 'glob'
 import { EventEmitter } from 'events'
 import { logger } from '../logger.js'
+import { getClaudeProjectsDir } from '../claude-home.js'
 import { createSessionScanner } from './scanner.js'
 import { SessionCache } from './cache.js'
 import { SessionRepairQueue, type Priority, ACTIVE_CACHE_GRACE_MS } from './queue.js'
@@ -24,6 +25,8 @@ export interface SessionRepairServiceOptions {
   cacheDir?: string
   /** Scanner implementation (for testing) */
   scanner?: SessionScanner
+  /** Optional resolver for canonical session IDs */
+  getFilePathForSession?: (sessionId: string) => string | undefined
 }
 
 /**
@@ -38,6 +41,7 @@ export class SessionRepairService extends EventEmitter {
   private claudeBase: string
   private sessionPathIndex = new Map<string, string>()
   private indexInitialized = false
+  private filePathResolver?: (sessionId: string) => string | undefined
 
   constructor(options: SessionRepairServiceOptions = {}) {
     super()
@@ -45,7 +49,8 @@ export class SessionRepairService extends EventEmitter {
     this.scanner = options.scanner || createSessionScanner()
     this.cache = new SessionCache(path.join(this.cacheDir, CACHE_FILENAME))
     this.queue = new SessionRepairQueue(this.scanner, this.cache)
-    this.claudeBase = path.join(os.homedir(), '.claude', 'projects')
+    this.claudeBase = getClaudeProjectsDir()
+    this.filePathResolver = options.getFilePathForSession
 
     // Forward queue events
     this.queue.on('scanned', (result: SessionScanResult) => {
@@ -92,6 +97,10 @@ export class SessionRepairService extends EventEmitter {
     await this.queue.stop()
     await this.cache.persist()
     logger.info('Session repair service stopped')
+  }
+
+  setFilePathResolver(resolver: (sessionId: string) => string | undefined): void {
+    this.filePathResolver = resolver
   }
 
   /**
@@ -141,8 +150,7 @@ export class SessionRepairService extends EventEmitter {
       return existing
     }
 
-    // Check if already enqueued or processing - if so, just wait for it
-    if (this.queue.isQueued(sessionId) || this.queue.isProcessing(sessionId)) {
+    if (this.queue.has(sessionId)) {
       return this.queue.waitFor(sessionId, timeoutMs)
     }
 
@@ -151,6 +159,20 @@ export class SessionRepairService extends EventEmitter {
     if (!filePath) {
       // Session file doesn't exist - reject rather than returning 'missing'
       throw new Error(`Session ${sessionId} not in queue and file not found`)
+    }
+
+    const fileSessionId = path.basename(filePath, '.jsonl')
+    const legacyResult = this.queue.getResult(fileSessionId)
+    if (legacyResult) {
+      if (fileSessionId !== sessionId) {
+        this.queue.seedResult(sessionId, legacyResult)
+      }
+      return legacyResult
+    }
+    if (fileSessionId !== sessionId && this.queue.has(fileSessionId)) {
+      const result = await this.queue.waitFor(fileSessionId, timeoutMs)
+      this.queue.seedResult(sessionId, result)
+      return result
     }
 
     // Check cache for recent result
@@ -163,8 +185,10 @@ export class SessionRepairService extends EventEmitter {
       return cached
     }
 
-    // Enqueue and wait
-    this.queue.enqueue([{ sessionId, filePath, priority: 'active' }])
+    // Enqueue and wait (avoid duplicate work if legacy ID is already queued)
+    if (!this.queue.has(sessionId) && !this.queue.has(fileSessionId)) {
+      this.queue.enqueue([{ sessionId, filePath, priority: 'active' }])
+    }
     return this.queue.waitFor(sessionId, timeoutMs)
   }
 
@@ -230,6 +254,14 @@ export class SessionRepairService extends EventEmitter {
   }
 
   private async resolveFilePath(sessionId: string): Promise<string | null> {
+    if (this.filePathResolver) {
+      const resolved = this.filePathResolver(sessionId)
+      if (resolved) {
+        this.sessionPathIndex.set(sessionId, resolved)
+        return resolved
+      }
+    }
+
     const cached = this.resolveCachedPath(sessionId)
     if (cached) return cached
 
@@ -265,6 +297,8 @@ export class SessionRepairService extends EventEmitter {
     for (const item of items) {
       const cached = this.resolveCachedPath(item.sessionId)
       if (cached) {
+        const fileSessionId = path.basename(cached, '.jsonl')
+        if (this.queue.has(item.sessionId) || this.queue.has(fileSessionId)) continue
         immediate.push({ ...item, filePath: cached })
       } else {
         pending.push(item)
@@ -281,6 +315,8 @@ export class SessionRepairService extends EventEmitter {
         for (const item of pending) {
           const filePath = await this.resolveFilePath(item.sessionId)
           if (filePath) {
+            const fileSessionId = path.basename(filePath, '.jsonl')
+            if (this.queue.has(item.sessionId) || this.queue.has(fileSessionId)) continue
             resolved.push({ ...item, filePath })
           }
         }

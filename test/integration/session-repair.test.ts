@@ -112,6 +112,72 @@ describe('SessionRepairService Integration', () => {
         service.waitForSession('nonexistent', 100)
       ).rejects.toThrow(/not in queue/)
     })
+
+    it('uses CLAUDE_HOME when resolving session files', async () => {
+      const originalClaudeHome = process.env.CLAUDE_HOME
+      const customClaudeHome = path.join(tempDir, 'custom-claude')
+      const projectsDir = path.join(customClaudeHome, 'projects', 'custom-project')
+      await fs.mkdir(projectsDir, { recursive: true })
+
+      const sessionId = '550e8400-e29b-41d4-a716-446655440000'
+      const sessionFile = path.join(projectsDir, `${sessionId}.jsonl`)
+      await fs.copyFile(path.join(FIXTURES_DIR, 'healthy.jsonl'), sessionFile)
+
+      process.env.CLAUDE_HOME = customClaudeHome
+
+      const service2 = new SessionRepairService({
+        cacheDir: tempDir,
+        scanner: createSessionScanner(),
+      })
+
+      try {
+        await service2.start()
+        const result = await service2.waitForSession(sessionId, 5000)
+        expect(result.status).toBe('healthy')
+        expect(result.filePath).toBe(sessionFile)
+      } finally {
+        await service2.stop()
+        if (originalClaudeHome === undefined) {
+          delete process.env.CLAUDE_HOME
+        } else {
+          process.env.CLAUDE_HOME = originalClaudeHome
+        }
+      }
+    })
+
+    it('resolves canonical sessionId via file path resolver', async () => {
+      const canonicalId = '6f1c2b3a-4d5e-6f70-8a9b-0c1d2e3f4a5b'
+      const legacyId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+      const sessionFile = path.join(mockClaudeDir, `${legacyId}.jsonl`)
+      await fs.copyFile(path.join(FIXTURES_DIR, 'healthy.jsonl'), sessionFile)
+
+      service.setFilePathResolver((sessionId) => (sessionId === canonicalId ? sessionFile : undefined))
+      const queue = (service as any).queue
+      queue.start()
+
+      const result = await service.waitForSession(canonicalId, 5000)
+      expect(result.status).toBe('healthy')
+      expect(result.filePath).toBe(sessionFile)
+    })
+
+    it('seeds canonical sessionId when legacy session is queued', async () => {
+      const canonicalId = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+      const legacyId = 'e4eaaaf2-d142-11e1-b3e4-080027620cdd'
+      const sessionFile = path.join(mockClaudeDir, `${legacyId}.jsonl`)
+      await fs.copyFile(path.join(FIXTURES_DIR, 'healthy.jsonl'), sessionFile)
+
+      service.setFilePathResolver((sessionId) => (sessionId === canonicalId ? sessionFile : undefined))
+      const queue = (service as any).queue
+      queue.enqueue([{ sessionId: legacyId, filePath: sessionFile, priority: 'active' }])
+      queue.start()
+
+      const result = await service.waitForSession(canonicalId, 5000)
+      expect(result.status).toBe('healthy')
+
+      const cached = service.getResult(canonicalId)
+      expect(cached?.filePath).toBe(sessionFile)
+      expect(cached?.status).toBe('healthy')
+    })
   })
 
   describe('prioritizeSessions', () => {

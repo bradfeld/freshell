@@ -10,6 +10,7 @@ import { isValidClaudeSessionId } from '@/lib/claude-session-id'
 function normalizeContent(input: PaneContentInput): PaneContent {
   if (input.kind === 'terminal') {
     const mode = input.mode || 'shell'
+    // Only validate Claude resume IDs; other providers pass through unchanged.
     const resumeSessionId =
       mode === 'claude' && isValidClaudeSessionId(input.resumeSessionId)
         ? input.resumeSessionId
@@ -48,7 +49,7 @@ function applyLegacyResumeSessionIds(state: PanesState): PanesState {
 
   const resumeByTabId = new Map<string, string>()
   for (const tab of tabsState.tabs) {
-    if (tab?.mode !== 'claude') continue
+    // Legacy tabs may not have mode persisted; resumeSessionId is the signal.
     if (isValidClaudeSessionId(tab?.resumeSessionId)) {
       resumeByTabId.set(tab.id, tab.resumeSessionId)
     }

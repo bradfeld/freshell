@@ -4,7 +4,7 @@
 
 **Goal:** Ensure Claude terminal panes resume deterministically using only known, valid session IDs discovered from Claude sessions, while keeping legacy paths and session repair aligned.
 
-**Architecture:** New Claude panes start without a resume ID; pane content stores `resumeSessionId` only when known (legacy tab seed or indexer association), and tab-level IDs are compatibility-only. The server validates UUIDs before storing or passing `--resume` (TerminalRegistry + ClaudeSession), skips resume entirely when scans are missing to avoid CLI errors, and echoes the effective ID in `terminal.created`. The indexer canonicalizes **valid UUID** session IDs from JSONL (fallback to filename when valid) and maintains filePath<->sessionId mapping so refresh/incremental/remove and session repair (via `CLAUDE_HOME`) stay consistent.
+**Architecture:** New Claude panes start without a resume ID; pane content stores `resumeSessionId` only when known (legacy tab seed or indexer association), and tab-level IDs are compatibility-only. The client derives session refs (provider + sessionId) from panes for sidebar state, session dedupe, and hello payloads. The server validates UUIDs before storing or passing `--resume` (TerminalRegistry + coding-cli `claude` provider), skips resume entirely when scans are missing or IDs are invalid, reuses running Claude terminals for identical resume IDs, and echoes the effective ID in `terminal.created`. The indexer canonicalizes **valid UUID** session IDs from JSONL (fallback to filename when valid) and maintains filePath<->sessionId mapping so refresh/incremental/remove and session repair (via `CLAUDE_HOME`) stay consistent.
 
 **Tech Stack:** TypeScript, React/Redux Toolkit, Node/Express, WebSocket (ws), Vitest
 
@@ -39,9 +39,9 @@
 **Files:**
 - Create: `server/claude-session-id.ts`
 - Modify: `server/terminal-registry.ts`
-- Modify: `server/claude-session.ts`
+- Modify: `server/coding-cli/providers/claude.ts`
 - Test: `test/unit/server/terminal-registry.test.ts`
-- Test: `test/unit/server/claude-session.test.ts`
+- Test: `test/unit/server/coding-cli/claude-provider.test.ts`
 
 **Step 1: Write the failing tests**
 
@@ -109,21 +109,17 @@ describe('buildSpawnSpec resume validation on Windows shells', () => {
 })
 ```
 
-Add tests in `test/unit/server/claude-session.test.ts`:
+Add tests in `test/unit/server/coding-cli/claude-provider.test.ts`:
 
 ```ts
 it('skips --resume when resumeSessionId is invalid', () => {
-  const spawn = vi.fn(() => ({ stdout: null, stderr: null, on: vi.fn() }))
-  new ClaudeSession({ prompt: 'ping', resumeSessionId: 'not-a-uuid', _spawn: spawn })
-  const args = spawn.mock.calls[0][1]
+  const args = claudeProvider.getStreamArgs({ prompt: 'ping', resumeSessionId: 'not-a-uuid' })
   expect(args).not.toContain('--resume')
 })
 
 it('includes --resume when resumeSessionId is valid', () => {
-  const spawn = vi.fn(() => ({ stdout: null, stderr: null, on: vi.fn() }))
   const id = '550e8400-e29b-41d4-a716-446655440000'
-  new ClaudeSession({ prompt: 'ping', resumeSessionId: id, _spawn: spawn })
-  const args = spawn.mock.calls[0][1]
+  const args = claudeProvider.getStreamArgs({ prompt: 'ping', resumeSessionId: id })
   expect(args).toContain('--resume')
   expect(args).toContain(id)
 })
@@ -133,7 +129,7 @@ it('includes --resume when resumeSessionId is valid', () => {
 
 Run:
 - `CI=true npm test -- test/unit/server/terminal-registry.test.ts -t "resume"`
-- `CI=true npm test -- test/unit/server/claude-session.test.ts -t "resumeSessionId"`
+- `CI=true npm test -- test/unit/server/coding-cli/claude-provider.test.ts -t "resumeSessionId"`
 Expected: FAIL (missing helper + invalid resume still included in command paths)
 
 **Step 3: Write minimal implementation**
@@ -171,14 +167,12 @@ const normalizedResume = validResume ? resumeSessionId : undefined
 resumeSessionId: normalizedResume,
 ```
 
-Update `server/claude-session.ts` to guard resume there as well:
+Update `server/coding-cli/providers/claude.ts` to guard resume there as well (use `getStreamArgs` / `getResumeArgs`):
 
 ```ts
-import { isValidClaudeSessionId } from './claude-session-id.js'
+import { isValidClaudeSessionId } from '../../claude-session-id.js'
 
-if (options.resumeSessionId && !isValidClaudeSessionId(options.resumeSessionId)) {
-  logger.warn({ resumeSessionId: options.resumeSessionId }, 'Ignoring invalid Claude resumeSessionId')
-} else if (options.resumeSessionId) {
+if (options.resumeSessionId && isValidClaudeSessionId(options.resumeSessionId)) {
   args.push('--resume', options.resumeSessionId)
 }
 ```
@@ -187,13 +181,13 @@ if (options.resumeSessionId && !isValidClaudeSessionId(options.resumeSessionId))
 
 Run:
 - `CI=true npm test -- test/unit/server/terminal-registry.test.ts -t "resume"`
-- `CI=true npm test -- test/unit/server/claude-session.test.ts -t "resumeSessionId"`
+- `CI=true npm test -- test/unit/server/coding-cli/claude-provider.test.ts -t "resumeSessionId"`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git add server/claude-session-id.ts server/terminal-registry.ts server/claude-session.ts test/unit/server/terminal-registry.test.ts test/unit/server/claude-session.test.ts
+git add server/claude-session-id.ts server/terminal-registry.ts server/coding-cli/providers/claude.ts test/unit/server/terminal-registry.test.ts test/unit/server/coding-cli/claude-provider.test.ts
 git commit -m "fix(server): validate claude resume session ids"
 ```
 
@@ -658,30 +652,32 @@ Expected: FAIL (session-utils + sidebar still use tab.resumeSessionId / unfilter
 
 **Step 3: Add pane-based helpers**
 
-Update `src/lib/session-utils.ts` to export pane-level helpers and filter invalid IDs:
+Update `src/lib/session-utils.ts` to export pane-level helpers and filter invalid IDs, using session refs (provider + sessionId):
 
 ```ts
 import { isValidClaudeSessionId } from '@/lib/claude-session-id'
 
-export function collectSessionIdsFromNode(node: PaneNode): string[] {
+function extractSessionRef(content: PaneContent): { provider: CodingCliProviderName; sessionId: string } | undefined {
+  if (content.kind !== 'terminal') return undefined
+  if (content.mode === 'shell') return undefined
+  const sessionId = content.resumeSessionId
+  if (!sessionId) return undefined
+  if (content.mode === 'claude' && !isValidClaudeSessionId(sessionId)) return undefined
+  return { provider: content.mode as CodingCliProviderName, sessionId }
+}
+
+export function collectSessionRefsFromNode(node: PaneNode): Array<{ provider: CodingCliProviderName; sessionId: string }> {
   if (node.type === 'leaf') {
-    const content = node.content
-    if (
-      content.kind === 'terminal' &&
-      content.mode === 'claude' &&
-      isValidClaudeSessionId(content.resumeSessionId)
-    ) {
-      return [content.resumeSessionId]
-    }
-    return []
+    const sessionRef = extractSessionRef(node.content)
+    return sessionRef ? [sessionRef] : []
   }
   return [
-    ...collectSessionIdsFromNode(node.children[0]),
-    ...collectSessionIdsFromNode(node.children[1]),
+    ...collectSessionRefsFromNode(node.children[0]),
+    ...collectSessionRefsFromNode(node.children[1]),
   ]
 }
 
-export function getActiveSessionIdForTab(state: RootState, tabId: string): string | undefined {
+export function getActiveSessionRefForTab(state: RootState, tabId: string): { provider: CodingCliProviderName; sessionId: string } | undefined {
   const layout = state.panes.layouts[tabId]
   if (!layout) return undefined
   const activePaneId = state.panes.activePane[tabId]
@@ -693,28 +689,30 @@ export function getActiveSessionIdForTab(state: RootState, tabId: string): strin
   }
 
   const leaf = findLeaf(layout)
-  if (leaf?.type === 'leaf' && leaf.content.kind === 'terminal' && leaf.content.mode === 'claude') {
-    return isValidClaudeSessionId(leaf.content.resumeSessionId) ? leaf.content.resumeSessionId : undefined
+  if (leaf?.type === 'leaf') {
+    return extractSessionRef(leaf.content)
   }
   return undefined
 }
 
-export function getTabSessionIds(state: RootState, tabId: string): string[] {
+export function getTabSessionRefs(state: RootState, tabId: string): Array<{ provider: CodingCliProviderName; sessionId: string }> {
   const layout = state.panes.layouts[tabId]
   if (!layout) return []
-  return collectSessionIdsFromNode(layout)
+  return collectSessionRefsFromNode(layout)
 }
 
-export function findTabIdForSession(state: RootState, sessionId: string): string | undefined {
+export function findTabIdForSession(state: RootState, provider: CodingCliProviderName, sessionId: string): string | undefined {
   for (const tab of state.tabs.tabs) {
-    const ids = getTabSessionIds(state, tab.id)
-    if (ids.includes(sessionId)) return tab.id
+    const refs = getTabSessionRefs(state, tab.id)
+    if (refs.some((ref) => ref.provider === provider && ref.sessionId === sessionId)) {
+      return tab.id
+    }
   }
   return undefined
 }
 ```
 
-Update `getSessionsForHello` in the same file to use `collectSessionIdsFromNode` + `getActiveSessionIdForTab`, so it only emits valid UUIDs from Claude panes.
+Update `getSessionsForHello` in the same file to use `collectSessionRefsFromNode` + `getActiveSessionRefForTab`, filtering to provider `claude` so it only emits valid UUIDs from Claude panes.
 
 **Step 4: Update sidebar selectors to use panes and session activity**
 
@@ -741,9 +739,10 @@ function buildSessionItems(
   for (const tab of tabs || []) {
     const layout = panes.layouts[tab.id]
     if (!layout) continue
-    const sessionIds = collectSessionIdsFromNode(layout)
-    for (const sessionId of sessionIds) {
-      tabSessionMap.set(sessionId, { hasTab: true })
+    const sessionRefs = collectSessionRefsFromNode(layout)
+    for (const ref of sessionRefs) {
+      const key = `${ref.provider}:${ref.sessionId}`
+      tabSessionMap.set(key, { hasTab: true })
     }
   }
   ...
@@ -790,7 +789,7 @@ git commit -m "refactor(client): derive sidebar session state from panes"
 
 **Step 1: Write failing tests**
 
-Add tests to `test/unit/client/store/tabsSlice.test.ts` to cover a new thunk `openClaudeSessionTab`:
+Add tests to `test/unit/client/store/tabsSlice.test.ts` to cover a new thunk `openSessionTab`:
 - When a pane already owns the sessionId, it dispatches `setActiveTab` without creating a new tab.
 - When no pane owns the sessionId, it dispatches `addTab` with `resumeSessionId`.
 
@@ -802,7 +801,7 @@ Update Sidebar tests to assert:
 
 Run:
 - `CI=true npm test -- test/unit/client/components/Sidebar.test.tsx -t "activates existing tab"`
-- `CI=true npm test -- test/unit/client/store/tabsSlice.test.ts -t "openClaudeSessionTab"`
+- `CI=true npm test -- test/unit/client/store/tabsSlice.test.ts -t "openSessionTab"`
 Expected: FAIL
 
 **Step 3: Add a shared thunk in tabsSlice**
@@ -813,24 +812,25 @@ In `src/store/tabsSlice.ts`, add a thunk that consults pane state and reuses exi
 import { findTabIdForSession } from '@/lib/session-utils'
 import type { RootState } from './store'
 
-export const openClaudeSessionTab = createAsyncThunk(
-  'tabs/openClaudeSessionTab',
+export const openSessionTab = createAsyncThunk(
+  'tabs/openSessionTab',
   async (
-    { sessionId, title, cwd }: { sessionId: string; title?: string; cwd?: string },
+    { sessionId, title, cwd, provider }: { sessionId: string; title?: string; cwd?: string; provider?: CodingCliProviderName },
     { dispatch, getState }
   ) => {
     const state = getState() as RootState
-    const existingTabId = findTabIdForSession(state, sessionId)
+    const resolvedProvider = provider || 'claude'
+    const existingTabId = findTabIdForSession(state, resolvedProvider, sessionId)
     if (existingTabId) {
       dispatch(setActiveTab(existingTabId))
       return
     }
-    dispatch(addTab({ title: title || 'Claude', mode: 'claude', initialCwd: cwd, resumeSessionId: sessionId }))
+    dispatch(addTab({ title: title || (resolvedProvider === 'claude' ? 'Claude' : resolvedProvider), mode: resolvedProvider, codingCliProvider: resolvedProvider, initialCwd: cwd, resumeSessionId: sessionId }))
   }
 )
 ```
 
-Remove reducer-level dedupe in `addTab` (the block that early-returns on `payload.resumeSessionId`) and add a comment noting dedupe happens in `openClaudeSessionTab` using pane state.
+Remove reducer-level dedupe in `addTab` (the block that early-returns on `payload.resumeSessionId`) and add a comment noting dedupe happens in `openSessionTab` using pane state.
 
 Update `Tab` comment in `src/store/types.ts`:
 
@@ -841,17 +841,21 @@ resumeSessionId?: string // Compatibility-only seed for the initial pane; pane c
 **Step 4: Update Sidebar + HistoryView to use the thunk**
 
 In `src/components/Sidebar.tsx`:
-- Replace direct `addTab` calls with `dispatch(openClaudeSessionTab({ sessionId: item.sessionId, title: item.title, cwd: item.cwd }))`.
-- Use `getActiveSessionIdForTab` for active-session highlighting rather than `activeTab.resumeSessionId`.
+- Replace direct `addTab` calls with `dispatch(openSessionTab({ sessionId: item.sessionId, title: item.title, cwd: item.cwd, provider: item.provider }))`.
+- Use `getActiveSessionRefForTab` for active-session highlighting rather than `activeTab.resumeSessionId`.
 
 In `src/components/HistoryView.tsx`:
-- Replace `dispatch(addTab({ ... resumeSessionId }))` with the same `openClaudeSessionTab` thunk.
+- Replace `dispatch(addTab({ ... resumeSessionId }))` with the same `openSessionTab` thunk.
+
+In `src/components/context-menu/ContextMenuProvider.tsx` (and menu defs):
+- Use `openSessionTab` for “open in new tab” / “open all sessions” flows.
+- Use pane-derived session refs for `isOpen` checks and session metadata.
 
 **Step 5: Run tests to verify pass**
 
 Run:
 - `CI=true npm test -- test/unit/client/components/Sidebar.test.tsx -t "activates existing tab"`
-- `CI=true npm test -- test/unit/client/store/tabsSlice.test.ts -t "openClaudeSessionTab"`
+- `CI=true npm test -- test/unit/client/store/tabsSlice.test.ts -t "openSessionTab"`
 Expected: PASS
 
 **Step 6: Commit**
@@ -926,7 +930,7 @@ git commit -m "fix(client): treat pane resumeSessionId as authoritative"
 
 ---
 
-### Task 7: Clear effectiveResumeSessionId on missing scans and skip resume at spawn
+### Task 7: Skip resume when invalid or cached-missing (non-blocking repair)
 
 **Files:**
 - Modify: `server/ws-handler.ts`
@@ -937,7 +941,7 @@ git commit -m "fix(client): treat pane resumeSessionId as authoritative"
 
 Add tests to ensure:
 - `terminal.created` includes `effectiveResumeSessionId` equal to the resumeSessionId used to spawn or reuse.
-- When session repair returns `missing`, the server clears `effectiveResumeSessionId` (undefined) **and** spawns without `--resume`.
+- When cached session repair result is `missing`, the server clears `effectiveResumeSessionId` (undefined) **and** spawns without `--resume`.
 - When `resumeSessionId` is invalid (non-UUID), `effectiveResumeSessionId` is cleared and the spawn omits `--resume`.
 - When `resumeSessionId` is invalid, `sessionRepairService.waitForSession` is **not** called.
 
@@ -955,10 +959,10 @@ Expected: FAIL
 In `server/ws-handler.ts`:
 - Compute `effectiveResumeSessionId` before calling `registry.create` and pass **only** that value to `create`.
 - Validate `m.resumeSessionId` with `isValidClaudeSessionId`; if invalid, log and set `effectiveResumeSessionId = undefined`.
-- If scan status is `missing`, log and set `effectiveResumeSessionId = undefined`.
+- If cached scan status is `missing`, log and set `effectiveResumeSessionId = undefined` (do not enqueue).
 - Include `effectiveResumeSessionId` in `terminal.created` payload when present.
  - Import `isValidClaudeSessionId` from `./claude-session-id.js`.
-- Only call `sessionRepairService.waitForSession` when `effectiveResumeSessionId` is still defined (valid).
+- Only call `sessionRepairService.waitForSession` when `effectiveResumeSessionId` is still defined (valid); the wait runs **non-blocking** and logs if missing later.
 
 Example:
 
@@ -1020,7 +1024,8 @@ git commit -m "fix(server): skip resume on missing scans"
 - Create: `server/claude-home.ts`
 - Modify: `server/claude-indexer.ts`
 - Modify: `server/session-scanner/service.ts`
-- Test: `test/unit/server/claude-indexer.test.ts`
+- Modify: `server/coding-cli/providers/claude.ts`
+- Test: `test/unit/server/coding-cli/claude-provider.test.ts`
 - Test: `test/integration/session-repair.test.ts`
 
 **Step 1: Write failing tests**
@@ -1049,13 +1054,13 @@ it('uses CLAUDE_HOME when discovering sessions', async () => {
 })
 ```
 
-Update `claude-indexer` tests to reference `getClaudeHome()` (new function) instead of `defaultClaudeHome()`.
+Update `claude` provider tests to cover `getClaudeHome()` behavior (CLAUDE_HOME override + default path).
 
 **Step 2: Run tests to verify they fail**
 
 Run:
 - `CI=true npm test -- test/integration/session-repair.test.ts -t "CLAUDE_HOME"`
-- `CI=true npm test -- test/unit/server/claude-indexer.test.ts -t "CLAUDE_HOME"`
+- `CI=true npm test -- test/unit/server/coding-cli/claude-provider.test.ts -t "getClaudeHome"`
 Expected: FAIL
 
 **Step 3: Implement shared CLAUDE_HOME helpers**
@@ -1087,7 +1092,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add server/claude-home.ts server/claude-indexer.ts server/session-scanner/service.ts test/integration/session-repair.test.ts test/unit/server/claude-indexer.test.ts
+git add server/claude-home.ts server/claude-indexer.ts server/session-scanner/service.ts server/coding-cli/providers/claude.ts test/integration/session-repair.test.ts test/unit/server/coding-cli/claude-provider.test.ts
 git commit -m "fix(server): share CLAUDE_HOME resolution"
 ```
 
@@ -1097,11 +1102,13 @@ git commit -m "fix(server): share CLAUDE_HOME resolution"
 
 **Files:**
 - Modify: `server/claude-indexer.ts`
-- Test: `test/unit/server/claude-indexer.test.ts`
+- Test: `test/unit/server/claude-indexer-jsonl-meta.test.ts`
+- Test: `test/integration/server/claude-indexer-refresh.test.ts`
+- Test: `test/unit/server/claude-indexer-incremental.test.ts`
 
 **Step 1: Write failing tests**
 
-Add to `test/unit/server/claude-indexer.test.ts`:
+Add to `test/unit/server/claude-indexer-jsonl-meta.test.ts`:
 
 ```ts
 it('extracts sessionId from content when present', () => {
@@ -1125,13 +1132,13 @@ it('ignores non-UUID sessionId candidates', () => {
 })
 ```
 
-Add integration-style tests using temp directories to validate refresh/upsert/remove paths use the canonical ID (embedded sessionId is a valid UUID that differs from a **different valid UUID** filename). Use `process.env.CLAUDE_HOME` to point at a temp dir and call `indexer.refresh()`.
+Add integration-style tests using temp directories to validate refresh/upsert/remove paths use the canonical ID (embedded sessionId is a valid UUID that differs from a **different valid UUID** filename). Use `process.env.CLAUDE_HOME` to point at a temp dir and call `indexer.refresh()`. (File: `test/integration/server/claude-indexer-refresh.test.ts`.)
 
 Add a test where both the embedded sessionId and filename are **invalid** (non-UUID); assert the session is skipped (not indexed) and a warning is logged.
 
 **Step 2: Run tests to verify they fail**
 
-Run: `CI=true npm test -- test/unit/server/claude-indexer.test.ts -t "sessionId"`
+Run: `CI=true npm test -- test/unit/server/claude-indexer-jsonl-meta.test.ts -t "sessionId"`
 Expected: FAIL (meta.sessionId undefined)
 
 **Step 3: Implement canonical sessionId extraction and mapping**
@@ -1219,7 +1226,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add server/claude-indexer.ts test/unit/server/claude-indexer.test.ts
+git add server/claude-indexer.ts test/unit/server/claude-indexer-jsonl-meta.test.ts test/integration/server/claude-indexer-refresh.test.ts test/unit/server/claude-indexer-incremental.test.ts
 git commit -m "feat(server): canonicalize claude sessionId from JSONL"
 ```
 
@@ -1257,7 +1264,7 @@ In `server/session-scanner/service.ts`:
 - Add optional `getFilePathForSession?: (sessionId: string) => string | undefined` to `SessionRepairServiceOptions`.
 - Store it on the instance, and add a `setFilePathResolver` method so `server/index.ts` can attach the indexer after startup.
 - In `prioritizeSessions`, resolve file paths using the resolver first; fall back to `glob` if needed.
-- In `waitForSession`, if `queue.waitFor(sessionId)` rejects with "not in queue", try to resolve filePath and enqueue using the **file-based ID** (`path.basename(filePath, '.jsonl')`), then wait for that ID instead.
+- In `waitForSession`, resolve the canonical ID via the resolver first; if the legacy file-based ID is already processed/queued, wait for that, otherwise enqueue once and wait for the canonical ID.
 - Before enqueuing, call `queue.has()` for both the canonical ID and the file-based ID to avoid duplicate queue entries.
 
 In `server/index.ts`:
@@ -1391,6 +1398,7 @@ git commit -m "fix(server): reuse claude terminal for identical session"
   - Set `process.env.CLAUDE_HOME` to a temp dir (restore after) to avoid polluting real sessions
   - Seed a session JSONL file with a **known UUID** in `CLAUDE_HOME/projects/...`
   - Call `await claudeIndexer.refresh()` (or poll until `indexer.getFilePathForSession(uuid)` returns) before creating the terminal to avoid race conditions
+  - Wire a `SessionRepairService` with `setFilePathResolver((id) => claudeIndexer.getFilePathForSession(id))` into the WsHandler for this test
   - Create a `terminal.create` in claude mode with that resumeSessionId
   - Assert `terminal.created.effectiveResumeSessionId` equals the requested UUID
   - Assert the JSONL remains present and the embedded `sessionId` matches the requested UUID
@@ -1427,7 +1435,7 @@ git commit -m "fix(server): reuse claude terminal for identical session"
 ## Notes / Design Guarantees
 
 - New Claude panes start **without** a `resumeSessionId`; IDs are set only when known/associated.
-- Client and server both validate UUIDs; invalid IDs are dropped or ignored (including `effectiveResumeSessionId` and non-terminal ClaudeSession resumes).
+- Client and server both validate UUIDs; invalid IDs are dropped or ignored (including `effectiveResumeSessionId` and coding-cli resume args).
 - Migration only applies to Claude panes (active Claude pane if available, else first Claude pane).
 - Pane content is authoritative; tab `resumeSessionId` is a compatibility seed only and is not mutated/cleared after panes take over.
 - `claude-indexer` treats embedded `sessionId` as canonical **only when valid UUID**; invalid IDs are logged and skipped.
@@ -1436,3 +1444,4 @@ git commit -m "fix(server): reuse claude terminal for identical session"
 - Duplicate Claude terminals for the same session are prevented by reusing the running terminal.
 - Legacy cwd-based association remains only for terminals lacking a sessionId.
 - Sidebar activity sorting uses per-session activity (ratcheted) instead of `tab.lastInputAt`.
+- Session tracking uses provider-scoped refs (`provider:sessionId`) derived from panes.

@@ -8,10 +8,13 @@ import tabsReducer, {
   hydrateTabs,
   closeTab,
   reorderTabs,
+  openSessionTab,
   TabsState,
 } from '../../../../src/store/tabsSlice'
 import panesReducer, { initLayout } from '../../../../src/store/panesSlice'
 import type { Tab } from '../../../../src/store/types'
+
+const VALID_CLAUDE_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000'
 
 // Mock nanoid to return predictable IDs for testing
 vi.mock('nanoid', () => ({
@@ -513,6 +516,85 @@ describe('tabsSlice', () => {
 
       // activeTabId should be unchanged
       expect(state.activeTabId).toBe(activeId)
+    })
+  })
+
+  describe('openSessionTab', () => {
+    it('activates existing tab when a pane already owns the session', async () => {
+      const store = configureStore({
+        reducer: {
+          tabs: tabsReducer,
+          panes: panesReducer,
+        },
+      })
+
+      store.dispatch(addTab({ id: 'tab-1', mode: 'claude', resumeSessionId: VALID_CLAUDE_SESSION_ID }))
+      store.dispatch(initLayout({
+        tabId: 'tab-1',
+        content: { kind: 'terminal', mode: 'claude', resumeSessionId: VALID_CLAUDE_SESSION_ID },
+      }))
+
+      store.dispatch(addTab({ id: 'tab-2', mode: 'shell' }))
+
+      await store.dispatch(openSessionTab({ sessionId: VALID_CLAUDE_SESSION_ID, provider: 'claude' }))
+
+      expect(store.getState().tabs.activeTabId).toBe('tab-1')
+      expect(store.getState().tabs.tabs).toHaveLength(2)
+    })
+
+    it('creates a new tab when no pane owns the session', async () => {
+      const store = configureStore({
+        reducer: {
+          tabs: tabsReducer,
+          panes: panesReducer,
+        },
+      })
+
+      await store.dispatch(openSessionTab({ sessionId: VALID_CLAUDE_SESSION_ID, provider: 'claude', title: 'Claude Session' }))
+
+      const tabs = store.getState().tabs.tabs
+      expect(tabs).toHaveLength(1)
+      expect(tabs[0].resumeSessionId).toBe(VALID_CLAUDE_SESSION_ID)
+      expect(tabs[0].mode).toBe('claude')
+    })
+
+    it('activates existing tab when terminalId is already attached', async () => {
+      const store = configureStore({
+        reducer: {
+          tabs: tabsReducer,
+          panes: panesReducer,
+        },
+      })
+
+      store.dispatch(addTab({ id: 'tab-1', mode: 'claude', terminalId: 'term-1', status: 'running' }))
+      store.dispatch(addTab({ id: 'tab-2', mode: 'shell' }))
+
+      await store.dispatch(openSessionTab({ sessionId: VALID_CLAUDE_SESSION_ID, provider: 'claude', terminalId: 'term-1' }))
+
+      expect(store.getState().tabs.activeTabId).toBe('tab-1')
+      expect(store.getState().tabs.tabs).toHaveLength(2)
+    })
+
+    it('creates a running tab when terminalId is provided and no existing tab matches', async () => {
+      const store = configureStore({
+        reducer: {
+          tabs: tabsReducer,
+          panes: panesReducer,
+        },
+      })
+
+      await store.dispatch(openSessionTab({
+        sessionId: VALID_CLAUDE_SESSION_ID,
+        provider: 'claude',
+        terminalId: 'term-2',
+        title: 'Running Claude',
+      }))
+
+      const tabs = store.getState().tabs.tabs
+      expect(tabs).toHaveLength(1)
+      expect(tabs[0].terminalId).toBe('term-2')
+      expect(tabs[0].status).toBe('running')
+      expect(tabs[0].resumeSessionId).toBe(VALID_CLAUDE_SESSION_ID)
     })
   })
 

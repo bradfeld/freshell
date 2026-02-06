@@ -11,6 +11,7 @@ import type { CodingCliSessionManager } from './coding-cli/session-manager.js'
 import type { ProjectGroup } from './coding-cli/types.js'
 import type { SessionRepairService } from './session-scanner/service.js'
 import type { SessionScanResult, SessionRepairResult } from './session-scanner/types.js'
+import { isValidClaudeSessionId } from './claude-session-id.js'
 
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS || 10)
 const HELLO_TIMEOUT_MS = Number(process.env.HELLO_TIMEOUT_MS || 5_000)
@@ -712,7 +713,14 @@ export class WsHandler {
               state.attachedTerminalIds.add(existingId)
               terminalId = existingId
               reused = true
-              this.send(ws, { type: 'terminal.created', requestId: m.requestId, terminalId: existingId, snapshot: existing.buffer.snapshot(), createdAt: existing.createdAt })
+              this.send(ws, {
+                type: 'terminal.created',
+                requestId: m.requestId,
+                terminalId: existingId,
+                snapshot: existing.buffer.snapshot(),
+                createdAt: existing.createdAt,
+                effectiveResumeSessionId: existing.resumeSessionId,
+              })
               setImmediate(() => this.registry.finishAttachSnapshot(existingId, ws))
               return
             }
@@ -734,11 +742,36 @@ export class WsHandler {
             }
             state.terminalCreateTimestamps.push(now)
           }
-
           // Kick off session repair without blocking terminal creation.
           let effectiveResumeSessionId = m.resumeSessionId
-          if (m.mode === 'claude' && m.resumeSessionId && this.sessionRepairService) {
-            const sessionId = m.resumeSessionId
+          if (m.mode === 'claude' && effectiveResumeSessionId && !isValidClaudeSessionId(effectiveResumeSessionId)) {
+            log.warn({ resumeSessionId: effectiveResumeSessionId, connectionId: ws.connectionId }, 'Ignoring invalid Claude resumeSessionId')
+            effectiveResumeSessionId = undefined
+          }
+
+          if (m.mode === 'claude' && effectiveResumeSessionId) {
+            const existing = this.registry.findRunningClaudeTerminalBySession(effectiveResumeSessionId)
+            if (existing) {
+              this.registry.attach(existing.terminalId, ws)
+              state.attachedTerminalIds.add(existing.terminalId)
+              state.createdByRequestId.set(m.requestId, existing.terminalId)
+              terminalId = existing.terminalId
+              reused = true
+              this.send(ws, {
+                type: 'terminal.created',
+                requestId: m.requestId,
+                terminalId: existing.terminalId,
+                snapshot: existing.buffer.snapshot(),
+                createdAt: existing.createdAt,
+                effectiveResumeSessionId: existing.resumeSessionId,
+              })
+              return
+            }
+          }
+
+          // Kick off session repair without blocking terminal creation.
+          if (m.mode === 'claude' && effectiveResumeSessionId && this.sessionRepairService) {
+            const sessionId = effectiveResumeSessionId
             const cached = this.sessionRepairService.getResult(sessionId)
             if (cached?.status === 'missing') {
               log.info({ sessionId, connectionId: ws.connectionId }, 'Session previously marked missing; resume will start fresh')
@@ -783,6 +816,7 @@ export class WsHandler {
             terminalId: record.terminalId,
             snapshot: record.buffer.snapshot(),
             createdAt: record.createdAt,
+            effectiveResumeSessionId,
           })
           setImmediate(() => this.registry.finishAttachSnapshot(record.terminalId, ws))
 

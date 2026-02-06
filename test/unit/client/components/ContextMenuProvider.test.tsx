@@ -31,6 +31,8 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
+const VALID_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000'
+
 function createTestStore(options?: { platform?: string | null }) {
   return configureStore({
     reducer: {
@@ -145,7 +147,7 @@ function createStoreWithSession() {
             projectPath: '/test/project',
             sessions: [
               {
-                sessionId: 'session-123',
+                sessionId: VALID_SESSION_ID,
                 provider: 'claude',
                 title: 'Test Session',
                 cwd: '/test/project',
@@ -253,7 +255,7 @@ describe('ContextMenuProvider', () => {
         >
           <div
             data-context={ContextIds.SidebarSession}
-            data-session-id="session-123"
+            data-session-id={VALID_SESSION_ID}
             data-provider="claude"
           >
             Test Session
@@ -290,7 +292,7 @@ describe('ContextMenuProvider', () => {
         expect(newPane.content.kind).toBe('terminal')
         if (newPane.content.kind === 'terminal') {
           expect(newPane.content.mode).toBe('claude')
-          expect(newPane.content.resumeSessionId).toBe('session-123')
+          expect(newPane.content.resumeSessionId).toBe(VALID_SESSION_ID)
         }
       }
     }

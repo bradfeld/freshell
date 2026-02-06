@@ -66,6 +66,8 @@ describe('TerminalView - lastInputAt updates', () => {
     vi.useRealTimers()
   })
 
+  const VALID_CLAUDE_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000'
+
   function createStore(opts?: { resumeSessionId?: string; provider?: 'claude' | 'codex' }) {
     const provider = opts?.provider || (opts?.resumeSessionId ? 'claude' : undefined)
     return configureStore({
@@ -86,7 +88,6 @@ describe('TerminalView - lastInputAt updates', () => {
             mode: (provider || 'shell') as const,
             createdAt: Date.now(),
             terminalId: 'term-1',
-            resumeSessionId: opts?.resumeSessionId,
             codingCliProvider: provider,
           }],
           activeTabId: 'tab-1',
@@ -141,7 +142,7 @@ describe('TerminalView - lastInputAt updates', () => {
   })
 
   it('updates sessionActivity for Claude sessions with resumeSessionId', async () => {
-    const store = createStore({ resumeSessionId: 'claude-session-123' })
+    const store = createStore({ resumeSessionId: VALID_CLAUDE_SESSION_ID })
     const paneContent: TerminalPaneContent = {
       kind: 'terminal',
       createRequestId: 'req-1',
@@ -149,6 +150,7 @@ describe('TerminalView - lastInputAt updates', () => {
       mode: 'claude',
       shell: 'system',
       status: 'running',
+      resumeSessionId: VALID_CLAUDE_SESSION_ID,
     }
 
     render(
@@ -166,13 +168,13 @@ describe('TerminalView - lastInputAt updates', () => {
     onDataCallback!('hello')
     const afterInput = Date.now()
 
-    const sessionTime = store.getState().sessionActivity.sessions['claude:claude-session-123']
+    const sessionTime = store.getState().sessionActivity.sessions[`claude:${VALID_CLAUDE_SESSION_ID}`]
     expect(sessionTime).toBeGreaterThanOrEqual(beforeInput)
     expect(sessionTime).toBeLessThanOrEqual(afterInput)
   })
 
   it('throttles sessionActivity updates to avoid per-keystroke dispatch', async () => {
-    const store = createStore({ resumeSessionId: 'claude-session-123' })
+    const store = createStore({ resumeSessionId: VALID_CLAUDE_SESSION_ID })
     const paneContent: TerminalPaneContent = {
       kind: 'terminal',
       createRequestId: 'req-1',
@@ -180,6 +182,7 @@ describe('TerminalView - lastInputAt updates', () => {
       mode: 'claude',
       shell: 'system',
       status: 'running',
+      resumeSessionId: VALID_CLAUDE_SESSION_ID,
     }
 
     render(
@@ -195,17 +198,17 @@ describe('TerminalView - lastInputAt updates', () => {
     expect(onDataCallback).not.toBeNull()
 
     onDataCallback!('first')
-    const firstTime = store.getState().sessionActivity.sessions['claude:claude-session-123']
+    const firstTime = store.getState().sessionActivity.sessions[`claude:${VALID_CLAUDE_SESSION_ID}`]
 
     vi.advanceTimersByTime(1000)
     onDataCallback!('second')
-    const secondTime = store.getState().sessionActivity.sessions['claude:claude-session-123']
+    const secondTime = store.getState().sessionActivity.sessions[`claude:${VALID_CLAUDE_SESSION_ID}`]
 
     expect(secondTime).toBe(firstTime)
 
     vi.advanceTimersByTime(5000)
     onDataCallback!('third')
-    const thirdTime = store.getState().sessionActivity.sessions['claude:claude-session-123']
+    const thirdTime = store.getState().sessionActivity.sessions[`claude:${VALID_CLAUDE_SESSION_ID}`]
 
     expect(thirdTime).toBeGreaterThan(firstTime)
   })

@@ -16,7 +16,7 @@ describe('ClaudeSessionIndexer refresh caching', () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-indexer-cache-'))
     claudeHome = path.join(tempDir, '.claude')
     projectDir = path.join(claudeHome, 'projects', 'project-a')
-    sessionFile = path.join(projectDir, 'session-1.jsonl')
+    sessionFile = path.join(projectDir, '550e8400-e29b-41d4-a716-446655440000.jsonl')
     await fs.mkdir(projectDir, { recursive: true })
 
     process.env.CLAUDE_HOME = claudeHome

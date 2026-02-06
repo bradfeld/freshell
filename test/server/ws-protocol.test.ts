@@ -83,6 +83,8 @@ class FakeRegistry {
       title: opts.mode === 'claude' ? 'Claude' : 'Shell',
       mode: opts.mode || 'shell',
       shell: opts.shell || 'system',
+      status: 'running',
+      resumeSessionId: opts.resumeSessionId,
       clients: new Set(),
     }
     this.records.set(terminalId, rec)
@@ -141,6 +143,15 @@ class FakeRegistry {
       status: 'running',
       hasClients: r.clients.size > 0,
     }))
+  }
+
+  findRunningClaudeTerminalBySession(sessionId: string) {
+    for (const rec of this.records.values()) {
+      if (rec.mode !== 'claude') continue
+      if (rec.status !== 'running') continue
+      if (rec.resumeSessionId === sessionId) return rec
+    }
+    return undefined
   }
 }
 

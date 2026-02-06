@@ -5,6 +5,7 @@ import { EventEmitter } from 'events'
 import type { SessionScanResult } from '../../server/session-scanner/types.js'
 
 const HOOK_TIMEOUT_MS = 30000
+const VALID_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000'
 
 vi.mock('../../server/config-store', () => ({
   configStore: {
@@ -99,6 +100,8 @@ class FakeRegistry {
       title: opts.mode === 'claude' ? 'Claude' : 'Shell',
       mode: opts.mode || 'shell',
       shell: opts.shell || 'system',
+      status: 'running',
+      resumeSessionId: opts.resumeSessionId,
       clients: new Set(),
     }
     this.records.set(terminalId, rec)
@@ -135,6 +138,15 @@ class FakeRegistry {
       status: 'running',
       hasClients: r.clients.size > 0,
     }))
+  }
+
+  findRunningClaudeTerminalBySession(sessionId: string) {
+    for (const rec of this.records.values()) {
+      if (rec.mode !== 'claude') continue
+      if (rec.status !== 'running') continue
+      if (rec.resumeSessionId === sessionId) return rec
+    }
+    return undefined
   }
 }
 
@@ -204,7 +216,7 @@ describe('terminal.create session repair wait', () => {
         type: 'terminal.create',
         requestId,
         mode: 'claude',
-        resumeSessionId: 'session-1',
+        resumeSessionId: VALID_SESSION_ID,
       }))
 
       const created = await waitForMessage(
@@ -213,7 +225,8 @@ describe('terminal.create session repair wait', () => {
       )
 
       expect(created.terminalId).toMatch(/^term_/)
-      expect(sessionRepairService.waitForSessionCalls).toContain('session-1')
+      expect(created.effectiveResumeSessionId).toBe(VALID_SESSION_ID)
+      expect(sessionRepairService.waitForSessionCalls).toContain(VALID_SESSION_ID)
     } finally {
       await closeWebSocket(ws)
     }
@@ -221,8 +234,8 @@ describe('terminal.create session repair wait', () => {
 
   it('drops resumeSessionId when cached result is missing', async () => {
     sessionRepairService.result = {
-      sessionId: 'session-1',
-      filePath: '/tmp/session-1.jsonl',
+      sessionId: VALID_SESSION_ID,
+      filePath: `/tmp/${VALID_SESSION_ID}.jsonl`,
       status: 'missing',
       chainDepth: 0,
       orphanCount: 0,
@@ -242,19 +255,49 @@ describe('terminal.create session repair wait', () => {
         type: 'terminal.create',
         requestId,
         mode: 'claude',
-        resumeSessionId: 'session-1',
+        resumeSessionId: VALID_SESSION_ID,
       }))
 
-      await waitForMessage(
+      const created = await waitForMessage(
         ws,
         (m) => m.type === 'terminal.created' && m.requestId === requestId,
       )
 
       expect(registry.lastCreateOpts?.resumeSessionId).toBeUndefined()
-      expect(sessionRepairService.waitForSessionCalls).not.toContain('session-1')
+      expect(created.effectiveResumeSessionId).toBeUndefined()
+      expect(sessionRepairService.waitForSessionCalls).not.toContain(VALID_SESSION_ID)
     } finally {
       await closeWebSocket(ws)
       sessionRepairService.result = undefined
+    }
+  })
+
+  it('ignores invalid resumeSessionId and skips session repair wait', async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+
+    try {
+      await new Promise<void>((resolve) => ws.on('open', () => resolve()))
+      ws.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
+      await waitForMessage(ws, (m) => m.type === 'ready')
+
+      const requestId = 'resume-invalid-1'
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId,
+        mode: 'claude',
+        resumeSessionId: 'not-a-uuid',
+      }))
+
+      const created = await waitForMessage(
+        ws,
+        (m) => m.type === 'terminal.created' && m.requestId === requestId,
+      )
+
+      expect(registry.lastCreateOpts?.resumeSessionId).toBeUndefined()
+      expect(created.effectiveResumeSessionId).toBeUndefined()
+      expect(sessionRepairService.waitForSessionCalls).not.toContain('not-a-uuid')
+    } finally {
+      await closeWebSocket(ws)
     }
   })
 })

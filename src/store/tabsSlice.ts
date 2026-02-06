@@ -2,6 +2,8 @@ import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit'
 import type { Tab, TerminalStatus, TabMode, ShellType, CodingCliProviderName } from './types'
 import { nanoid } from 'nanoid'
 import { removeLayout } from './panesSlice'
+import { findTabIdForSession } from '@/lib/session-utils'
+import type { RootState } from './store'
 
 export interface TabsState {
   tabs: Tab[]
@@ -82,21 +84,8 @@ export const tabsSlice = createSlice({
   initialState,
   reducers: {
     addTab: (state, action: PayloadAction<AddTabPayload | undefined>) => {
+      // Dedupe by session is handled in openSessionTab using pane state.
       const payload = action.payload || {}
-
-      // Deduplicate: if resuming a session that already has a tab, switch to it instead
-      // Use provider + sessionId to prevent collisions across different CLIs
-      if (payload.resumeSessionId && !payload.forceNew) {
-        const provider = payload.codingCliProvider || payload.mode || 'claude'
-        const existingTab = state.tabs.find((t) =>
-          t.resumeSessionId === payload.resumeSessionId &&
-          (t.codingCliProvider || t.mode || 'claude') === provider
-        )
-        if (existingTab) {
-          state.activeTabId = existingTab.id
-          return
-        }
-      }
 
       const id = payload.id || nanoid()
       const legacyClaudeSessionId = payload.claudeSessionId
@@ -186,6 +175,52 @@ export const closeTab = createAsyncThunk(
   async (tabId: string, { dispatch }) => {
     dispatch(removeTab(tabId))
     dispatch(removeLayout({ tabId }))
+  }
+)
+
+export const openSessionTab = createAsyncThunk(
+  'tabs/openSessionTab',
+  async (
+    { sessionId, title, cwd, provider, terminalId, forceNew }: { sessionId: string; title?: string; cwd?: string; provider?: CodingCliProviderName; terminalId?: string; forceNew?: boolean },
+    { dispatch, getState }
+  ) => {
+    const resolvedProvider = provider || 'claude'
+    const state = getState() as RootState
+
+    if (terminalId) {
+      if (!forceNew) {
+        const existingTab = state.tabs.tabs.find((t) => t.terminalId === terminalId)
+        if (existingTab) {
+          dispatch(setActiveTab(existingTab.id))
+          return
+        }
+      }
+      dispatch(addTab({
+        title: title || (resolvedProvider === 'claude' ? 'Claude' : resolvedProvider),
+        terminalId,
+        status: 'running',
+        mode: resolvedProvider,
+        codingCliProvider: resolvedProvider,
+        initialCwd: cwd,
+        resumeSessionId: sessionId,
+      }))
+      return
+    }
+
+    if (!forceNew) {
+      const existingTabId = findTabIdForSession(state, resolvedProvider, sessionId)
+      if (existingTabId) {
+        dispatch(setActiveTab(existingTabId))
+        return
+      }
+    }
+    dispatch(addTab({
+      title: title || (resolvedProvider === 'claude' ? 'Claude' : resolvedProvider),
+      mode: resolvedProvider,
+      codingCliProvider: resolvedProvider,
+      initialCwd: cwd,
+      resumeSessionId: sessionId,
+    }))
   }
 )
 

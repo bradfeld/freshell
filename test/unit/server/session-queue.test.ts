@@ -141,6 +141,29 @@ describe('SessionRepairQueue', () => {
     })
   })
 
+  describe('has()', () => {
+    it('returns true for queued or processed sessions', () => {
+      queue.enqueue([
+        { sessionId: 'queued', filePath: '/path/queued.jsonl', priority: 'disk' },
+      ])
+
+      expect(queue.has('queued')).toBe(true)
+      expect(queue.has('missing')).toBe(false)
+
+      queue.seedResult('processed', {
+        sessionId: 'processed',
+        filePath: '/path/processed.jsonl',
+        status: 'healthy',
+        chainDepth: 0,
+        orphanCount: 0,
+        fileSize: 0,
+        messageCount: 0,
+      })
+
+      expect(queue.has('processed')).toBe(true)
+    })
+  })
+
   describe('start() and processing', () => {
     it('emits scanned event for each processed item', async () => {
       const scanned: SessionScanResult[] = []

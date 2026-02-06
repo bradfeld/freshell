@@ -153,6 +153,17 @@ describe('sidebarSelectors', () => {
 
         expect(sorted.map((i) => i.id)).toEqual(['2', '1'])
       })
+
+      it('sorts pinned sessions by ratchetedActivity', () => {
+        const items = [
+          createSessionItem({ id: '1', timestamp: 1000, hasTab: true, ratchetedActivity: 5000 }),
+          createSessionItem({ id: '2', timestamp: 3000, hasTab: true, ratchetedActivity: 1000 }),
+        ]
+
+        const sorted = sortSessionItems(items, 'activity')
+
+        expect(sorted.map((i) => i.id)).toEqual(['1', '2'])
+      })
     })
 
     describe('project mode', () => {

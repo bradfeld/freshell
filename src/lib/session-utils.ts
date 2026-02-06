@@ -4,25 +4,77 @@
 
 import type { PaneContent, PaneNode } from '@/store/paneTypes'
 import type { RootState } from '@/store/store'
+import type { CodingCliProviderName } from '@/store/types'
+import { isValidClaudeSessionId } from '@/lib/claude-session-id'
 
 /**
  * Extract all session IDs from a pane tree.
  */
-function extractClaudeSessionId(content: PaneContent): string | undefined {
+function extractSessionRef(content: PaneContent): { provider: CodingCliProviderName; sessionId: string } | undefined {
   if (content.kind !== 'terminal') return undefined
-  if (content.mode !== 'claude') return undefined
-  return content.resumeSessionId
+  if (content.mode === 'shell') return undefined
+  const sessionId = content.resumeSessionId
+  if (!sessionId) return undefined
+  if (content.mode === 'claude' && !isValidClaudeSessionId(sessionId)) return undefined
+  return { provider: content.mode as CodingCliProviderName, sessionId }
 }
 
-function collectSessionIds(node: PaneNode): string[] {
+export function collectSessionRefsFromNode(node: PaneNode): Array<{ provider: CodingCliProviderName; sessionId: string }> {
   if (node.type === 'leaf') {
-    const sessionId = extractClaudeSessionId(node.content)
-    return sessionId ? [sessionId] : []
+    const sessionRef = extractSessionRef(node.content)
+    return sessionRef ? [sessionRef] : []
   }
   return [
-    ...collectSessionIds(node.children[0]),
-    ...collectSessionIds(node.children[1]),
+    ...collectSessionRefsFromNode(node.children[0]),
+    ...collectSessionRefsFromNode(node.children[1]),
   ]
+}
+
+export function getActiveSessionRefForTab(state: RootState, tabId: string): { provider: CodingCliProviderName; sessionId: string } | undefined {
+  const layout = state.panes.layouts[tabId]
+  if (!layout) return undefined
+  const activePaneId = state.panes.activePane[tabId]
+  if (!activePaneId) return undefined
+
+  const findLeaf = (node: PaneNode): PaneNode | null => {
+    if (node.type === 'leaf') return node.id === activePaneId ? node : null
+    return findLeaf(node.children[0]) || findLeaf(node.children[1])
+  }
+
+  const leaf = findLeaf(layout)
+  if (leaf?.type === 'leaf') {
+    return extractSessionRef(leaf.content)
+  }
+  return undefined
+}
+
+export function getTabSessionRefs(state: RootState, tabId: string): Array<{ provider: CodingCliProviderName; sessionId: string }> {
+  const layout = state.panes.layouts[tabId]
+  if (!layout) return []
+  return collectSessionRefsFromNode(layout)
+}
+
+export function findTabIdForSession(state: RootState, provider: CodingCliProviderName, sessionId: string): string | undefined {
+  if (provider === 'claude' && !isValidClaudeSessionId(sessionId)) return undefined
+  for (const tab of state.tabs.tabs) {
+    const layout = state.panes.layouts[tab.id]
+    if (layout) {
+      const refs = getTabSessionRefs(state, tab.id)
+      if (refs.some((ref) => ref.provider === provider && ref.sessionId === sessionId)) {
+        return tab.id
+      }
+      continue
+    }
+
+    // Fallback for tabs without pane layout yet (e.g., early boot).
+    const tabProvider = tab.codingCliProvider || (tab.mode !== 'shell' ? tab.mode : undefined)
+    if (tabProvider !== provider) continue
+    const tabSessionId = tab.resumeSessionId
+    if (!tabSessionId) continue
+    if (provider === 'claude' && !isValidClaudeSessionId(tabSessionId)) continue
+    if (tabSessionId === sessionId) return tab.id
+  }
+  return undefined
 }
 
 /**
@@ -50,23 +102,13 @@ export function getSessionsForHello(state: RootState): {
   // Get active tab's sessions
   if (activeTabId && panes.layouts[activeTabId]) {
     const layout = panes.layouts[activeTabId]
-    const activePane = panes.activePane[activeTabId]
+    const allSessions = collectSessionRefsFromNode(layout)
+      .filter((ref) => ref.provider === 'claude')
+      .map((ref) => ref.sessionId)
 
-    const allSessions = collectSessionIds(layout)
-
-    // Find the active pane's session
-    if (activePane) {
-      const findLeaf = (node: PaneNode): PaneNode | null => {
-        if (node.type === 'leaf') {
-          return node.id === activePane ? node : null
-        }
-        return findLeaf(node.children[0]) || findLeaf(node.children[1])
-      }
-
-      const activeLeaf = findLeaf(layout)
-      if (activeLeaf?.type === 'leaf') {
-        result.active = extractClaudeSessionId(activeLeaf.content)
-      }
+    const activeRef = getActiveSessionRefForTab(state, activeTabId)
+    if (activeRef?.provider === 'claude') {
+      result.active = activeRef.sessionId
     }
 
     // Other sessions in the active tab are "visible"
@@ -79,7 +121,11 @@ export function getSessionsForHello(state: RootState): {
     if (tab.id === activeTabId) continue
     const layout = panes.layouts[tab.id]
     if (layout) {
-      backgroundSessions.push(...collectSessionIds(layout))
+      backgroundSessions.push(
+        ...collectSessionRefsFromNode(layout)
+          .filter((ref) => ref.provider === 'claude')
+          .map((ref) => ref.sessionId)
+      )
     }
   }
 

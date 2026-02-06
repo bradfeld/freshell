@@ -1,20 +1,15 @@
 import path from 'path'
-import os from 'os'
 import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import { isValidClaudeSessionId } from '../../claude-session-id.js'
+import { getClaudeHome } from '../../claude-home.js'
 import type { CodingCliProvider } from '../provider.js'
 import type { NormalizedEvent, ParsedSessionMeta } from '../types.js'
 import { parseClaudeEvent, isMessageEvent, isResultEvent, isToolResultContent, isToolUseContent, isTextContent } from '../../claude-stream-types.js'
 import { looksLikePath } from '../utils.js'
 
-export function defaultClaudeHome(): string {
-  // Claude Code stores logs in ~/.claude by default (Linux/macOS).
-  // On Windows, set CLAUDE_HOME to a path you can access from Node (e.g. \\wsl$\\...).
-  return process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude')
-}
-
 export type JsonlMeta = {
+  sessionId?: string
   cwd?: string
   title?: string
   summary?: string
@@ -42,6 +37,7 @@ function isSystemContext(text: string): boolean {
 /** Parse session metadata from jsonl content (pure function for testing) */
 export function parseSessionContent(content: string): JsonlMeta {
   const lines = content.split(/\r?\n/).filter(Boolean)
+  let sessionId: string | undefined
   let cwd: string | undefined
   let title: string | undefined
   let summary: string | undefined
@@ -52,6 +48,19 @@ export function parseSessionContent(content: string): JsonlMeta {
       obj = JSON.parse(line)
     } catch {
       continue
+    }
+
+    if (!sessionId) {
+      const candidates = [
+        obj?.sessionId,
+        obj?.session_id,
+        obj?.message?.sessionId,
+        obj?.message?.session_id,
+        obj?.data?.sessionId,
+        obj?.data?.session_id,
+      ].filter((v: any) => typeof v === 'string') as string[]
+      const valid = candidates.find((v) => isValidClaudeSessionId(v))
+      if (valid) sessionId = valid
     }
 
     const candidates = [
@@ -86,10 +95,11 @@ export function parseSessionContent(content: string): JsonlMeta {
       if (typeof s === 'string' && s.trim()) summary = s.trim().slice(0, 240)
     }
 
-    if (cwd && title && summary) break
+    if (cwd && title && summary && sessionId) break
   }
 
   return {
+    sessionId,
     cwd,
     title,
     summary,
@@ -100,7 +110,7 @@ export function parseSessionContent(content: string): JsonlMeta {
 export const claudeProvider: CodingCliProvider = {
   name: 'claude',
   displayName: 'Claude',
-  homeDir: defaultClaudeHome(),
+  homeDir: getClaudeHome(),
 
   getSessionGlob() {
     return path.join(this.homeDir, 'projects', '**', '*.jsonl')

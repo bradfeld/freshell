@@ -30,7 +30,7 @@ export interface Tab {
   mode: TabMode
   shell?: ShellType
   initialCwd?: string
-  resumeSessionId?: string
+  resumeSessionId?: string     // Compatibility-only seed for initial pane; pane content is authoritative (do not mutate after creation)
   createdAt: number
   titleSetByUser?: boolean     // If true, don't auto-update title
   lastInputAt?: number

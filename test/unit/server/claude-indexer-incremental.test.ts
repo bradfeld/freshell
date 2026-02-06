@@ -16,7 +16,7 @@ describe('ClaudeSessionIndexer incremental updates', () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-indexer-incremental-'))
     claudeHome = path.join(tempDir, '.claude')
     projectDir = path.join(claudeHome, 'projects', 'project-a')
-    sessionFile = path.join(projectDir, 'session-1.jsonl')
+    sessionFile = path.join(projectDir, '550e8400-e29b-41d4-a716-446655440000.jsonl')
     await fs.mkdir(projectDir, { recursive: true })
 
     process.env.CLAUDE_HOME = claudeHome
@@ -58,7 +58,11 @@ describe('ClaudeSessionIndexer incremental updates', () => {
   })
 
   it('removes sessions incrementally when files disappear', async () => {
-    await fs.writeFile(sessionFile, '{"cwd":"/tmp","role":"user","content":"One"}\n')
+    const embeddedId = '6f1c2b3a-4d5e-6f70-8a9b-0c1d2e3f4a5b'
+    await fs.writeFile(
+      sessionFile,
+      `{"sessionId":"${embeddedId}","cwd":"/tmp","role":"user","content":"One"}\n`
+    )
 
     const indexer = new ClaudeSessionIndexer()
     await indexer.refresh()

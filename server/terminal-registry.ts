@@ -1010,6 +1010,18 @@ export class TerminalRegistry extends EventEmitter {
   }
 
   /**
+   * Find a running Claude terminal that already owns the given sessionId.
+   */
+  findRunningClaudeTerminalBySession(sessionId: string): TerminalRecord | undefined {
+    for (const term of this.terminals.values()) {
+      if (term.mode !== 'claude') continue
+      if (term.status !== 'running') continue
+      if (term.resumeSessionId === sessionId) return term
+    }
+    return undefined
+  }
+
+  /**
    * Find claude-mode terminals that have no resumeSessionId (waiting to be associated)
    * and whose cwd matches the given path. Results sorted by createdAt (oldest first).
    */

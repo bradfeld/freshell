@@ -456,6 +456,38 @@ describe('legacy tab resumeSessionId migration', () => {
     expect(layout.content.resumeSessionId).toBe(validSessionId)
   })
 
+  it('migrates resumeSessionId even when tab mode is missing or shell', async () => {
+    localStorage.setItem('freshell.tabs.v1', JSON.stringify({
+      tabs: {
+        tabs: [
+          { id: 'tab-1', mode: 'shell', resumeSessionId: validSessionId, status: 'running', title: 'Claude', createRequestId: 'tab-1' },
+        ],
+        activeTabId: 'tab-1',
+      },
+    }))
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify({
+      version: 3,
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: { kind: 'terminal', mode: 'claude', createRequestId: 'req-1', status: 'running' },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+    }))
+
+    vi.resetModules()
+    const panesReducer = (await import('../../../../src/store/panesSlice')).default
+    const tabsReducer = (await import('../../../../src/store/tabsSlice')).default
+
+    const store = configureStore({ reducer: { tabs: tabsReducer, panes: panesReducer } })
+    const layout = store.getState().panes.layouts['tab-1'] as any
+    expect(layout.content.resumeSessionId).toBe(validSessionId)
+  })
+
   it('does not migrate resumeSessionId into non-claude panes', async () => {
     localStorage.setItem('freshell.tabs.v1', JSON.stringify({
       tabs: {

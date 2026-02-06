@@ -75,7 +75,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
   useEffect(() => {
     lastSessionActivityAtRef.current = 0
-  }, [tab?.resumeSessionId])
+  }, [terminalContent?.resumeSessionId])
 
   // Helper to update pane content - uses ref to avoid recreation on content changes
   // This is CRITICAL: if updateContent depended on terminalContent directly,
@@ -154,17 +154,20 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       ws.send({ type: 'terminal.input', terminalId: tid, data })
 
       const currentTab = tabRef.current
+      const currentContent = contentRef.current
       if (currentTab) {
         const now = Date.now()
         dispatch(updateTab({ id: currentTab.id, updates: { lastInputAt: now } }))
-        if (currentTab.resumeSessionId) {
+        const resumeSessionId = currentContent?.resumeSessionId
+        if (resumeSessionId && currentContent?.mode && currentContent.mode !== 'shell') {
           if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
             lastSessionActivityAtRef.current = now
             const provider =
+              currentContent.mode ||
               currentTab.codingCliProvider ||
               (currentTab.mode !== 'shell' ? currentTab.mode : undefined) ||
               'claude'
-            dispatch(updateSessionActivity({ sessionId: currentTab.resumeSessionId, provider, lastInputAt: now }))
+            dispatch(updateSessionActivity({ sessionId: resumeSessionId, provider, lastInputAt: now }))
           }
         }
       }
@@ -412,6 +415,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           if (currentTab) {
             dispatch(updateTab({ id: currentTab.id, updates: { terminalId: newId, status: 'running' } }))
           }
+          if (msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId) {
+            updateContent({ resumeSessionId: msg.effectiveResumeSessionId })
+          }
           if (msg.snapshot) {
             try { term.clear(); term.write(msg.snapshot) } catch { /* disposed */ }
           }
@@ -465,11 +471,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.session.associated' && msg.terminalId === tid) {
           const sessionId = msg.sessionId as string
           updateContent({ resumeSessionId: sessionId })
-          // Also update the tab for sidebar session matching
-          const currentTab = tabRef.current
-          if (currentTab) {
-            dispatch(updateTab({ id: currentTab.id, updates: { resumeSessionId: sessionId } }))
-          }
         }
 
         if (msg.type === 'error' && msg.requestId === reqId) {

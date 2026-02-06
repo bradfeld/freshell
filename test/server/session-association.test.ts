@@ -12,6 +12,15 @@ vi.mock('node-pty', () => ({
   })),
 }))
 
+const SESSION_ID_ONE = '550e8400-e29b-41d4-a716-446655440000'
+const SESSION_ID_TWO = '6f1c2b3a-4d5e-6f70-8a9b-0c1d2e3f4a5b'
+const SESSION_ID_THREE = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+const SESSION_ID_FOUR = '2c1a2a5a-3f9f-4b5e-9b39-7d7e0c9a4b10'
+const SESSION_ID_FIVE = '3a0b2c9f-1e2d-4f6a-8f3a-4b8a9d7c1e20'
+const SESSION_ID_SIX = '4b1c3d2e-5f6a-7b8c-9d0e-1f2a3b4c5d6e'
+const SESSION_ID_SEVEN = '5c2d4e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f'
+const SESSION_ID_EIGHT = '6d3e5f7a-8b9c-0d1e-2f3a-4b5c6d7e8f90'
+
 describe('Session-Terminal Association Integration', () => {
   it('should associate terminal with session when session is created', () => {
     const registry = new TerminalRegistry()
@@ -44,7 +53,7 @@ describe('Session-Terminal Association Integration', () => {
 
     // Simulate new session detection
     const newSession: ClaudeSession = {
-      sessionId: 'claude-session-123',
+      sessionId: SESSION_ID_ONE,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',
@@ -52,12 +61,12 @@ describe('Session-Terminal Association Integration', () => {
     indexer['detectNewSessions']([newSession])
 
     // Verify association
-    expect(registry.get(term.terminalId)?.resumeSessionId).toBe('claude-session-123')
+    expect(registry.get(term.terminalId)?.resumeSessionId).toBe(SESSION_ID_ONE)
     expect(broadcasts).toHaveLength(1)
     expect(broadcasts[0]).toEqual({
       type: 'terminal.session.associated',
       terminalId: term.terminalId,
-      sessionId: 'claude-session-123',
+      sessionId: SESSION_ID_ONE,
     })
 
     // Cleanup
@@ -81,11 +90,11 @@ describe('Session-Terminal Association Integration', () => {
     indexer['initialized'] = true
 
     // Create terminal that already has resumeSessionId
-    registry.create({ mode: 'claude', cwd: '/home/user/project', resumeSessionId: 'existing-session' })
+    registry.create({ mode: 'claude', cwd: '/home/user/project', resumeSessionId: SESSION_ID_ONE })
 
     // Simulate new session
     indexer['detectNewSessions']([{
-      sessionId: 'new-session',
+      sessionId: SESSION_ID_TWO,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',
@@ -124,7 +133,7 @@ describe('Session-Terminal Association Integration', () => {
 
     // Simulate new session
     indexer['detectNewSessions']([{
-      sessionId: 'new-session',
+      sessionId: SESSION_ID_TWO,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',
@@ -133,7 +142,7 @@ describe('Session-Terminal Association Integration', () => {
     // Should only associate the OLDEST terminal (term1)
     expect(broadcasts).toHaveLength(1)
     expect(broadcasts[0].terminalId).toBe(term1.terminalId)
-    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe('new-session')
+    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe(SESSION_ID_TWO)
     expect(registry.get(term2.terminalId)?.resumeSessionId).toBeUndefined()
 
     // Cleanup
@@ -166,34 +175,34 @@ describe('Session-Terminal Association Integration', () => {
 
     // First Claude (term1) creates its session
     indexer['detectNewSessions']([{
-      sessionId: 'session-for-term1',
+      sessionId: SESSION_ID_ONE,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',
     }])
 
     // term1 should now be associated
-    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe('session-for-term1')
+    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe(SESSION_ID_ONE)
     expect(registry.get(term2.terminalId)?.resumeSessionId).toBeUndefined()
 
     // Second Claude (term2) creates its session
     indexer['detectNewSessions']([{
-      sessionId: 'session-for-term2',
+      sessionId: SESSION_ID_THREE,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',
     }])
 
     // Now term2 should also be associated (with different session)
-    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe('session-for-term1')
-    expect(registry.get(term2.terminalId)?.resumeSessionId).toBe('session-for-term2')
+    expect(registry.get(term1.terminalId)?.resumeSessionId).toBe(SESSION_ID_ONE)
+    expect(registry.get(term2.terminalId)?.resumeSessionId).toBe(SESSION_ID_THREE)
 
     // Two broadcasts total, one per terminal
     expect(broadcasts).toHaveLength(2)
     expect(broadcasts[0].terminalId).toBe(term1.terminalId)
-    expect(broadcasts[0].sessionId).toBe('session-for-term1')
+    expect(broadcasts[0].sessionId).toBe(SESSION_ID_ONE)
     expect(broadcasts[1].terminalId).toBe(term2.terminalId)
-    expect(broadcasts[1].sessionId).toBe('session-for-term2')
+    expect(broadcasts[1].sessionId).toBe(SESSION_ID_THREE)
 
     // Cleanup
     registry.shutdown()
@@ -219,7 +228,7 @@ describe('Session-Terminal Association Integration', () => {
     // Simulate startup: detectNewSessions called BEFORE initialized = true
     // This simulates what happens during start() before initialized flag is set
     indexer['detectNewSessions']([{
-      sessionId: 'existing-session',
+      sessionId: SESSION_ID_FOUR,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',
@@ -228,7 +237,7 @@ describe('Session-Terminal Association Integration', () => {
     // Should NOT broadcast - indexer not yet initialized
     expect(broadcasts).toHaveLength(0)
     // But session should be tracked
-    expect(indexer['knownSessionIds'].has('existing-session')).toBe(true)
+    expect(indexer['knownSessionIds'].has(SESSION_ID_FOUR)).toBe(true)
 
     // Cleanup
     registry.shutdown()
@@ -255,7 +264,7 @@ describe('Session-Terminal Association Integration', () => {
 
     // Simulate session with NO cwd (orphaned session)
     indexer['detectNewSessions']([{
-      sessionId: 'orphaned-session',
+      sessionId: SESSION_ID_FIVE,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: undefined,
@@ -289,7 +298,7 @@ describe('Session-Terminal Association Integration', () => {
 
     // Simulate new session
     indexer['detectNewSessions']([{
-      sessionId: 'new-session',
+      sessionId: SESSION_ID_SIX,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',
@@ -333,7 +342,7 @@ describe('Session-Terminal Association Platform-specific', () => {
 
     // Simulate session with trailing slash (should still match)
     indexer['detectNewSessions']([{
-      sessionId: 'normalized-session',
+      sessionId: SESSION_ID_SEVEN,
       projectPath: '/home/user/project/',
       updatedAt: Date.now(),
       cwd: '/home/user/project/',
@@ -342,7 +351,7 @@ describe('Session-Terminal Association Platform-specific', () => {
     // Should match after normalization removes trailing slash
     expect(broadcasts).toHaveLength(1)
     expect(broadcasts[0].terminalId).toBe(term.terminalId)
-    expect(broadcasts[0].sessionId).toBe('normalized-session')
+    expect(broadcasts[0].sessionId).toBe(SESSION_ID_SEVEN)
 
     registry.shutdown()
   })
@@ -372,7 +381,7 @@ describe('Session-Terminal Association Platform-specific', () => {
 
     // Session also has forward slashes
     indexer['detectNewSessions']([{
-      sessionId: 'slash-session',
+      sessionId: SESSION_ID_EIGHT,
       projectPath: '/home/user/project',
       updatedAt: Date.now(),
       cwd: '/home/user/project',

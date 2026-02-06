@@ -5,6 +5,7 @@ import fsp from 'fs/promises'
 import type { CodingCliProvider } from '../../../../server/coding-cli/provider'
 import { CodingCliSessionIndexer } from '../../../../server/coding-cli/session-indexer'
 import { configStore } from '../../../../server/config-store'
+import { makeSessionKey } from '../../../../server/coding-cli/types'
 
 vi.mock('../../../../server/config-store', () => ({
   configStore: {
@@ -158,6 +159,67 @@ describe('CodingCliSessionIndexer', () => {
     await indexer.refresh()
 
     expect(parseSessionFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('prefers ParsedSessionMeta.sessionId over filename', async () => {
+    const fileA = path.join(tempDir, 'legacy-id.jsonl')
+    await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+    const provider: CodingCliProvider = {
+      ...makeProvider([fileA]),
+      parseSessionFile: () => ({
+        cwd: '/project/a',
+        title: 'Title A',
+        sessionId: 'canonical-id',
+        messageCount: 1,
+      }),
+    }
+
+    const indexer = new CodingCliSessionIndexer([provider])
+
+    await indexer.refresh()
+
+    const sessionId = indexer.getProjects()[0]?.sessions[0]?.sessionId
+    expect(sessionId).toBe('canonical-id')
+  })
+
+  it('applies legacy overrides when sessionId differs from filename', async () => {
+    const legacyId = 'legacy-id'
+    const canonicalId = 'canonical-id'
+    const fileA = path.join(tempDir, `${legacyId}.jsonl`)
+    await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+    vi.mocked(configStore.snapshot).mockResolvedValueOnce({
+      sessionOverrides: {
+        [makeSessionKey('claude', legacyId)]: {
+          titleOverride: 'Overridden',
+        },
+      },
+      settings: {
+        codingCli: {
+          enabledProviders: ['claude'],
+          providers: {},
+        },
+      },
+    })
+
+    const provider: CodingCliProvider = {
+      ...makeProvider([fileA]),
+      parseSessionFile: () => ({
+        cwd: '/project/a',
+        title: 'Title A',
+        sessionId: canonicalId,
+        messageCount: 1,
+      }),
+    }
+
+    const indexer = new CodingCliSessionIndexer([provider])
+
+    await indexer.refresh()
+
+    const session = indexer.getProjects()[0]?.sessions[0]
+    expect(session?.sessionId).toBe(canonicalId)
+    expect(session?.title).toBe('Overridden')
   })
 
   it('avoids relisting session files when nothing changed', async () => {

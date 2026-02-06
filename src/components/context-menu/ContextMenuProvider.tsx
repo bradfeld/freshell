@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, closeTab, reorderTabs, updateTab, setActiveTab } from '@/store/tabsSlice'
-import { addPane, closePane, initLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
+import { addTab, closeTab, reorderTabs, updateTab, setActiveTab, openSessionTab } from '@/store/tabsSlice'
+import { addPane, closePane, initLayout, resetLayout, resetSplit, swapSplit, updatePaneTitle } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { buildShareUrl } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
 import { collectTerminalIds, findPaneContent } from '@/lib/pane-utils'
+import { collectSessionRefsFromNode } from '@/lib/session-utils'
 import { getTabDisplayTitle } from '@/lib/tab-title'
 import { getBrowserActions, getEditorActions, getTerminalActions } from '@/lib/pane-action-registry'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
@@ -241,24 +242,12 @@ export function ContextMenuProvider({
       menuState?.target.kind === 'sidebar-session' && menuState?.target.sessionId === sessionId
         ? menuState?.target.runningTerminalId
         : undefined
-    if (runningTerminalId) {
-      dispatch(addTab({
-        title: session.title || session.sessionId.slice(0, 8),
-        terminalId: runningTerminalId,
-        status: 'running',
-        mode,
-        codingCliProvider: mode,
-        resumeSessionId: session.sessionId,
-        forceNew: true,
-      }))
-      return
-    }
-    dispatch(addTab({
+    dispatch(openSessionTab({
+      sessionId: session.sessionId,
       title: session.title || session.sessionId.slice(0, 8),
-      mode,
-      codingCliProvider: mode,
-      initialCwd: session.cwd,
-      resumeSessionId: session.sessionId,
+      cwd: session.cwd,
+      provider: mode,
+      terminalId: runningTerminalId,
       forceNew: true,
     }))
   }, [dispatch, getSessionInfo, menuState?.target])
@@ -387,11 +376,12 @@ export function ContextMenuProvider({
     if (!info) return
     const { session, project } = info
     const keyProvider = (provider || session.provider || 'claude')
-    const relatedTabs = tabsState.tabs.filter(
-      (t) =>
-        t.resumeSessionId === sessionId &&
-        (t.codingCliProvider || t.mode || 'claude') === keyProvider
-    )
+    const relatedTabs = tabsState.tabs.filter((t) => {
+      const layout = panes[t.id]
+      if (!layout) return false
+      const refs = collectSessionRefsFromNode(layout)
+      return refs.some((ref) => ref.provider === keyProvider && ref.sessionId === sessionId)
+    })
     const hasTab = relatedTabs.length > 0
     const tabLastInputAt = relatedTabs.reduce((max, tab) => Math.max(max, tab.lastInputAt ?? 0), 0) || undefined
     const runningTerminalId =
@@ -421,7 +411,7 @@ export function ContextMenuProvider({
       projectColor: project.color,
     }
     await copyText(JSON.stringify(metadata, null, 2))
-  }, [getSessionInfo, tabsState.tabs, menuState?.target])
+  }, [getSessionInfo, tabsState.tabs, panes, menuState?.target])
 
   const setProjectColor = useCallback(async (projectPath: string) => {
     const next = window.prompt('Project color (hex)', '#6b7280')
@@ -448,11 +438,12 @@ export function ContextMenuProvider({
         const project = sessions.find((p) => p.projectPath === projectPath)
         if (project) {
           for (const session of project.sessions) {
-            dispatch(addTab({
+            const provider = (session.provider || 'claude') as CodingCliProviderName
+            dispatch(openSessionTab({
+              sessionId: session.sessionId,
               title: session.title || session.sessionId.slice(0, 8),
-              mode: 'claude',
-              initialCwd: session.cwd,
-              resumeSessionId: session.sessionId,
+              cwd: session.cwd,
+              provider,
               forceNew: true,
             }))
           }

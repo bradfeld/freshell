@@ -1599,6 +1599,20 @@ describe('TerminalRegistry', () => {
     })
   })
 
+  describe('findRunningClaudeTerminalBySession', () => {
+    it('finds a running claude terminal by resumeSessionId', () => {
+      const record = registry.create({
+        mode: 'claude',
+        cwd: '/home/user/project',
+        resumeSessionId: VALID_CLAUDE_SESSION_ID,
+      })
+
+      const found = registry.findRunningClaudeTerminalBySession(VALID_CLAUDE_SESSION_ID)
+
+      expect(found?.terminalId).toBe(record.terminalId)
+    })
+  })
+
   describe('findTerminalsBySession() ignores shell mode', () => {
     it('does not return shell-mode terminals even with matching resumeSessionId', () => {
       registry.create({

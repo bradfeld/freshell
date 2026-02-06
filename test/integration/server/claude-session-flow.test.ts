@@ -9,6 +9,9 @@
 //   RUN_CLAUDE_INTEGRATION=true npm run test:server
 //
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import { promises as fs } from 'fs'
+import path from 'path'
+import os from 'os'
 import http from 'http'
 import express from 'express'
 import WebSocket from 'ws'
@@ -16,6 +19,9 @@ import { WsHandler } from '../../../server/ws-handler'
 import { TerminalRegistry } from '../../../server/terminal-registry'
 import { CodingCliSessionManager } from '../../../server/coding-cli/session-manager'
 import { claudeProvider } from '../../../server/coding-cli/providers/claude'
+import { SessionRepairService, createSessionScanner } from '../../../server/session-scanner'
+import { claudeIndexer } from '../../../server/claude-indexer'
+import { configStore } from '../../../server/config-store'
 
 vi.mock('node-pty', () => ({
   spawn: vi.fn(() => ({
@@ -119,5 +125,94 @@ describe.skipIf(!runClaudeIntegration)('Claude Session Flow Integration', () => 
     expect(hasInit || hasResult).toBe(true)
 
     ws.close()
+  }, 30000)
+
+  it('resumes a known claude session via terminal.create', async () => {
+    const originalClaudeHome = process.env.CLAUDE_HOME
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-session-flow-'))
+    const claudeHome = path.join(tempDir, '.claude')
+    const projectDir = path.join(claudeHome, 'projects', 'session-project')
+    const sessionId = '550e8400-e29b-41d4-a716-446655440000'
+    const sessionFile = path.join(projectDir, `${sessionId}.jsonl`)
+
+    process.env.CLAUDE_HOME = claudeHome
+    await fs.mkdir(projectDir, { recursive: true })
+    await fs.writeFile(sessionFile, `{\"sessionId\":\"${sessionId}\",\"cwd\":\"/tmp\",\"role\":\"user\",\"content\":\"hello\"}\\n`)
+
+    vi.spyOn(configStore, 'snapshot').mockResolvedValue({
+      version: 1,
+      settings: {},
+      sessionOverrides: {},
+      terminalOverrides: {},
+      projectColors: {},
+    } as any)
+    vi.spyOn(configStore, 'getProjectColors').mockResolvedValue({})
+
+    await claudeIndexer.refresh()
+
+    const sessionRepairService = new SessionRepairService({
+      cacheDir: tempDir,
+      scanner: createSessionScanner(),
+    })
+    sessionRepairService.setFilePathResolver((id) => claudeIndexer.getFilePathForSession(id))
+    await sessionRepairService.start()
+
+    const app = express()
+    const server2 = http.createServer(app)
+    const registry2 = new TerminalRegistry()
+    const cliManager2 = new CodingCliSessionManager([claudeProvider])
+    const wsHandler2 = new WsHandler(server2, registry2, cliManager2, sessionRepairService)
+
+    let port2 = 0
+    await new Promise<void>((resolve) => {
+      server2.listen(0, '127.0.0.1', () => {
+        port2 = (server2.address() as any).port
+        resolve()
+      })
+    })
+
+    const ws = await new Promise<WebSocket>((resolve, reject) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port2}/ws`)
+      socket.on('open', () => {
+        socket.send(JSON.stringify({ type: 'hello', token: process.env.AUTH_TOKEN || 'test-token' }))
+      })
+      socket.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'ready') resolve(socket)
+      })
+      socket.on('error', reject)
+      setTimeout(() => reject(new Error('Timeout')), 5000)
+    })
+
+    const created = await new Promise<any>((resolve) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'terminal.created') resolve(msg)
+      })
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId: 'resume-req-1',
+        mode: 'claude',
+        resumeSessionId: sessionId,
+      }))
+    })
+
+    expect(created.effectiveResumeSessionId).toBe(sessionId)
+    const content = await fs.readFile(sessionFile, 'utf8')
+    expect(content).toContain(sessionId)
+
+    ws.close()
+    wsHandler2.close()
+    cliManager2.shutdown()
+    registry2.shutdown()
+    await new Promise<void>((resolve) => server2.close(() => resolve()))
+    await sessionRepairService.stop()
+    vi.restoreAllMocks()
+    await fs.rm(tempDir, { recursive: true, force: true })
+    if (originalClaudeHome === undefined) {
+      delete process.env.CLAUDE_HOME
+    } else {
+      process.env.CLAUDE_HOME = originalClaudeHome
+    }
   }, 30000)
 })

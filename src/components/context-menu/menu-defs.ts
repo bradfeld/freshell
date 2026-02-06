@@ -3,6 +3,7 @@ import type { AppView } from '@/components/Sidebar'
 import type { Tab, ProjectGroup } from '@/store/types'
 import type { PaneNode } from '@/store/paneTypes'
 import { findPaneContent } from '@/lib/pane-utils'
+import { collectSessionRefsFromNode } from '@/lib/session-utils'
 import type { TerminalActions, EditorActions, BrowserActions } from '@/lib/pane-action-registry'
 
 export type MenuActions = {
@@ -73,6 +74,18 @@ function getSessionById(projects: ProjectGroup[], sessionId: string, provider?: 
 
 export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): MenuItem[] {
   const { actions, tabs, paneLayouts, sessions, view, sidebarCollapsed, expandedProjects, contextElement, platform } = ctx
+  const isSessionOpen = (sessionId: string, provider?: string) => {
+    const keyProvider = provider || 'claude'
+    for (const tab of tabs) {
+      const layout = paneLayouts[tab.id]
+      if (!layout) continue
+      const refs = collectSessionRefsFromNode(layout)
+      if (refs.some((ref) => ref.provider === keyProvider && ref.sessionId === sessionId)) {
+        return true
+      }
+    }
+    return false
+  }
 
   if (target.kind === 'global') {
     const views: Array<{ id: AppView; label: string }> = [
@@ -302,11 +315,7 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
   if (target.kind === 'history-session') {
     const sessionInfo = getSessionById(sessions, target.sessionId, target.provider)
     const hasSummary = !!sessionInfo?.session.summary
-    const isOpen = tabs.some(
-      (t) =>
-        t.resumeSessionId === target.sessionId &&
-        (t.codingCliProvider || t.mode || 'claude') === (target.provider || 'claude')
-    )
+    const isOpen = isSessionOpen(target.sessionId, target.provider)
     return [
       { type: 'item', id: 'history-session-open', label: 'Open session', onSelect: () => actions.openSessionInNewTab(target.sessionId, target.provider) },
       { type: 'item', id: 'history-session-rename', label: 'Rename', onSelect: () => actions.renameSession(target.sessionId, target.provider, true) },

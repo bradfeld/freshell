@@ -4,6 +4,7 @@ import path from 'path'
 import os from 'os'
 import { ClaudeSessionIndexer } from '../../../server/claude-indexer'
 import { configStore } from '../../../server/config-store'
+import { logger } from '../../../server/logger'
 
 describe('ClaudeSessionIndexer refresh integration', () => {
   let tempDir: string
@@ -16,7 +17,7 @@ describe('ClaudeSessionIndexer refresh integration', () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-refresh-'))
     claudeHome = path.join(tempDir, '.claude')
     projectDir = path.join(claudeHome, 'projects', 'project-a')
-    sessionFile = path.join(projectDir, 'session-1.jsonl')
+    sessionFile = path.join(projectDir, '550e8400-e29b-41d4-a716-446655440000.jsonl')
     await fs.mkdir(projectDir, { recursive: true })
 
     process.env.CLAUDE_HOME = claudeHome
@@ -63,5 +64,41 @@ describe('ClaudeSessionIndexer refresh integration', () => {
     expect(session.summary).toBe('Second summary')
     expect(session.messageCount).toBe(2)
     expect(session.createdAt).toBe(Date.parse('2025-01-02T00:00:01.000Z'))
+  })
+
+  it('prefers embedded sessionId over filename when both are valid', async () => {
+    const embeddedId = '550e8400-e29b-41d4-a716-446655440000'
+    const filenameId = '6f1c2b3a-4d5e-6f70-8a9b-0c1d2e3f4a5b'
+    const filePath = path.join(projectDir, `${filenameId}.jsonl`)
+
+    const line = JSON.stringify({
+      sessionId: embeddedId,
+      cwd: '/tmp',
+      role: 'user',
+      content: 'Title',
+    })
+    await fs.writeFile(filePath, `${line}\n`)
+
+    const indexer = new ClaudeSessionIndexer()
+    await indexer.refresh()
+
+    const session = indexer.getProjects()[0].sessions[0]
+    expect(session.sessionId).toBe(embeddedId)
+    expect(indexer.getFilePathForSession(embeddedId)).toBe(filePath)
+  })
+
+  it('skips sessions when both embedded and filename IDs are invalid', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    const invalidFile = path.join(projectDir, 'not-a-uuid.jsonl')
+    await fs.writeFile(invalidFile, '{"sessionId":"also-not-uuid","cwd":"/tmp"}\n')
+
+    const indexer = new ClaudeSessionIndexer()
+    await indexer.refresh()
+
+    expect(indexer.getProjects()).toHaveLength(0)
+    const logged = warnSpy.mock.calls.some(([, msg]) => typeof msg === 'string' && msg.includes('invalid sessionId'))
+    expect(logged).toBe(true)
+
+    warnSpy.mockRestore()
   })
 })

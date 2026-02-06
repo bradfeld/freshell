@@ -1,11 +1,23 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
-import { claudeProvider, defaultClaudeHome, parseSessionContent } from '../../../../server/coding-cli/providers/claude'
+import { claudeProvider, parseSessionContent } from '../../../../server/coding-cli/providers/claude'
+import { getClaudeHome } from '../../../../server/claude-home'
 import { ClaudeSessionIndexer, applyOverride } from '../../../../server/claude-indexer'
 import { looksLikePath } from '../../../../server/coding-cli/utils'
 
 const VALID_CLAUDE_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000'
+const SESSION_A = '11111111-1111-1111-1111-111111111111'
+const SESSION_B = '22222222-2222-2222-2222-222222222222'
+const SESSION_C = '33333333-3333-3333-3333-333333333333'
+const SESSION_D = '44444444-4444-4444-4444-444444444444'
+const SESSION_EXISTING = '55555555-5555-5555-5555-555555555555'
+const SESSION_NO_CWD = '66666666-6666-6666-6666-666666666666'
+const SESSION_NEW = '77777777-7777-7777-7777-777777777777'
+const SESSION_NEWEST = '88888888-8888-8888-8888-888888888888'
+const SESSION_OLDEST = '99999999-9999-9999-9999-999999999999'
+const SESSION_MIDDLE = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+const SESSION_REAPPEAR = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
 
 describe('claudeProvider.resolveProjectPath()', () => {
   it('returns cwd from session metadata (like Codex)', async () => {
@@ -36,7 +48,7 @@ describe('claudeProvider.getStreamArgs()', () => {
 })
 
 describe('claude provider cross-platform tests', () => {
-  describe('defaultClaudeHome()', () => {
+  describe('getClaudeHome()', () => {
     const originalEnv = process.env.CLAUDE_HOME
 
     afterEach(() => {
@@ -50,34 +62,34 @@ describe('claude provider cross-platform tests', () => {
 
     it('should respect CLAUDE_HOME environment variable when set', () => {
       process.env.CLAUDE_HOME = '/custom/claude/home'
-      expect(defaultClaudeHome()).toBe('/custom/claude/home')
+      expect(getClaudeHome()).toBe('/custom/claude/home')
     })
 
     it('should respect Windows CLAUDE_HOME path', () => {
       process.env.CLAUDE_HOME = 'C:\\Users\\Test\\.claude'
-      expect(defaultClaudeHome()).toBe('C:\\Users\\Test\\.claude')
+      expect(getClaudeHome()).toBe('C:\\Users\\Test\\.claude')
     })
 
     it('should respect UNC path for CLAUDE_HOME (WSL access)', () => {
       process.env.CLAUDE_HOME = '\\\\wsl$\\Ubuntu\\home\\user\\.claude'
-      expect(defaultClaudeHome()).toBe('\\\\wsl$\\Ubuntu\\home\\user\\.claude')
+      expect(getClaudeHome()).toBe('\\\\wsl$\\Ubuntu\\home\\user\\.claude')
     })
 
     it('should fall back to os.homedir()/.claude when CLAUDE_HOME not set', () => {
       delete process.env.CLAUDE_HOME
       const expected = path.join(os.homedir(), '.claude')
-      expect(defaultClaudeHome()).toBe(expected)
+      expect(getClaudeHome()).toBe(expected)
     })
 
     it('should return a string that ends with .claude when using default', () => {
       delete process.env.CLAUDE_HOME
-      const result = defaultClaudeHome()
+      const result = getClaudeHome()
       expect(result.endsWith('.claude')).toBe(true)
     })
 
     it('should return an absolute path when using default', () => {
       delete process.env.CLAUDE_HOME
-      const result = defaultClaudeHome()
+      const result = getClaudeHome()
       // On Windows, absolute paths start with drive letter; on Unix, with /
       const isAbsolute = path.isAbsolute(result)
       expect(isAbsolute).toBe(true)
@@ -534,6 +546,26 @@ describe('claude provider cross-platform tests', () => {
   })
 
   describe('parseSessionContent() - real sessions (with conversation)', () => {
+    it('extracts a valid sessionId from content', () => {
+      const realContent = [
+        `{"cwd":"/home/user/project","sessionId":"${VALID_CLAUDE_SESSION_ID}","type":"user","message":{"role":"user","content":"hello"}}`,
+      ].join('\n')
+
+      const meta = parseSessionContent(realContent)
+
+      expect(meta.sessionId).toBe(VALID_CLAUDE_SESSION_ID)
+    })
+
+    it('ignores invalid sessionId values', () => {
+      const realContent = [
+        '{"cwd":"/home/user/project","sessionId":"not-a-uuid","type":"user","message":{"role":"user","content":"hello"}}',
+      ].join('\n')
+
+      const meta = parseSessionContent(realContent)
+
+      expect(meta.sessionId).toBeUndefined()
+    })
+
     it('should extract cwd from session with conversation events', () => {
       const realContent = [
         '{"type":"file-history-snapshot","messageId":"abc","snapshot":{}}',
@@ -570,18 +602,18 @@ describe('ClaudeSessionIndexer new session detection', () => {
     indexer['initialized'] = true
 
     // Add session A to known set (simulating it was seen before)
-    indexer['knownSessionIds'].add('session-a')
+    indexer['knownSessionIds'].add(SESSION_A)
 
     // Simulate detecting sessions A and B
     const sessions: ClaudeSession[] = [
-      { sessionId: 'session-a', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
-      { sessionId: 'session-b', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_A, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_B, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
     ]
 
     indexer['detectNewSessions'](sessions)
 
     expect(newSessionHandler).toHaveBeenCalledTimes(1)
-    expect(newSessionHandler).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-b' }))
+    expect(newSessionHandler).toHaveBeenCalledWith(expect.objectContaining({ sessionId: SESSION_B }))
   })
 
   it('should not call handlers before initialization (startup scenario)', () => {
@@ -593,13 +625,13 @@ describe('ClaudeSessionIndexer new session detection', () => {
     // initialized is false by default (before start() completes)
     // Simulate first refresh detecting existing sessions
     indexer['detectNewSessions']([
-      { sessionId: 'existing-session', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_EXISTING, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
     ])
 
     // Handler should NOT fire - we're still initializing
     expect(handler).not.toHaveBeenCalled()
     // But session should be tracked
-    expect(indexer['knownSessionIds'].has('existing-session')).toBe(true)
+    expect(indexer['knownSessionIds'].has(SESSION_EXISTING)).toBe(true)
   })
 
   it('should skip sessions without cwd', () => {
@@ -610,7 +642,7 @@ describe('ClaudeSessionIndexer new session detection', () => {
     indexer['initialized'] = true
 
     indexer['detectNewSessions']([
-      { sessionId: 'no-cwd-session', projectPath: '/proj', updatedAt: Date.now(), cwd: undefined },
+      { sessionId: SESSION_NO_CWD, projectPath: '/proj', updatedAt: Date.now(), cwd: undefined },
     ])
 
     expect(handler).not.toHaveBeenCalled()
@@ -625,7 +657,7 @@ describe('ClaudeSessionIndexer new session detection', () => {
     indexer['initialized'] = true
 
     indexer['detectNewSessions']([
-      { sessionId: 'new-session', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_NEW, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
     ])
 
     expect(handler).not.toHaveBeenCalled()
@@ -637,29 +669,29 @@ describe('ClaudeSessionIndexer new session detection', () => {
 
     // First detection adds sessions A, B, C
     indexer['detectNewSessions']([
-      { sessionId: 'session-a', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
-      { sessionId: 'session-b', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
-      { sessionId: 'session-c', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_A, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_B, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_C, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
     ])
 
     expect(indexer['knownSessionIds'].size).toBe(3)
-    expect(indexer['knownSessionIds'].has('session-a')).toBe(true)
-    expect(indexer['knownSessionIds'].has('session-b')).toBe(true)
-    expect(indexer['knownSessionIds'].has('session-c')).toBe(true)
+    expect(indexer['knownSessionIds'].has(SESSION_A)).toBe(true)
+    expect(indexer['knownSessionIds'].has(SESSION_B)).toBe(true)
+    expect(indexer['knownSessionIds'].has(SESSION_C)).toBe(true)
 
     // Second detection: B was deleted, D was added
     indexer['detectNewSessions']([
-      { sessionId: 'session-a', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
-      { sessionId: 'session-c', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
-      { sessionId: 'session-d', projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_A, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_C, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
+      { sessionId: SESSION_D, projectPath: '/proj', updatedAt: Date.now(), cwd: '/proj' },
     ])
 
     // B should be pruned, D should be added
     expect(indexer['knownSessionIds'].size).toBe(3)
-    expect(indexer['knownSessionIds'].has('session-a')).toBe(true)
-    expect(indexer['knownSessionIds'].has('session-b')).toBe(false) // Pruned
-    expect(indexer['knownSessionIds'].has('session-c')).toBe(true)
-    expect(indexer['knownSessionIds'].has('session-d')).toBe(true) // Added
+    expect(indexer['knownSessionIds'].has(SESSION_A)).toBe(true)
+    expect(indexer['knownSessionIds'].has(SESSION_B)).toBe(false) // Pruned
+    expect(indexer['knownSessionIds'].has(SESSION_C)).toBe(true)
+    expect(indexer['knownSessionIds'].has(SESSION_D)).toBe(true) // Added
   })
 
   it('should call handlers in oldest-first order when multiple new sessions are detected', () => {
@@ -669,12 +701,12 @@ describe('ClaudeSessionIndexer new session detection', () => {
     indexer['initialized'] = true
 
     indexer['detectNewSessions']([
-      { sessionId: 'newest', projectPath: '/proj', updatedAt: 200, cwd: '/proj' },
-      { sessionId: 'oldest', projectPath: '/proj', updatedAt: 100, cwd: '/proj' },
-      { sessionId: 'middle', projectPath: '/proj', updatedAt: 150, cwd: '/proj' },
+      { sessionId: SESSION_NEWEST, projectPath: '/proj', updatedAt: 200, cwd: '/proj' },
+      { sessionId: SESSION_OLDEST, projectPath: '/proj', updatedAt: 100, cwd: '/proj' },
+      { sessionId: SESSION_MIDDLE, projectPath: '/proj', updatedAt: 150, cwd: '/proj' },
     ])
 
-    expect(calls).toEqual(['oldest', 'middle', 'newest'])
+    expect(calls).toEqual([SESSION_OLDEST, SESSION_MIDDLE, SESSION_NEWEST])
   })
 
   it('should not fire handlers for sessions that reappear after being seen', () => {
@@ -685,7 +717,7 @@ describe('ClaudeSessionIndexer new session detection', () => {
 
     // First appearance - should fire
     indexer['detectNewSessions']([
-      { sessionId: 'session-a', projectPath: '/proj', updatedAt: 100, cwd: '/proj' },
+      { sessionId: SESSION_REAPPEAR, projectPath: '/proj', updatedAt: 100, cwd: '/proj' },
     ])
     expect(handler).toHaveBeenCalledTimes(1)
 
@@ -694,7 +726,7 @@ describe('ClaudeSessionIndexer new session detection', () => {
 
     // Reappearance with same sessionId should NOT fire again
     indexer['detectNewSessions']([
-      { sessionId: 'session-a', projectPath: '/proj', updatedAt: 200, cwd: '/proj' },
+      { sessionId: SESSION_REAPPEAR, projectPath: '/proj', updatedAt: 200, cwd: '/proj' },
     ])
 
     expect(handler).toHaveBeenCalledTimes(1)

@@ -29,7 +29,7 @@ describe('ClaudeSessionIndexer createdAt', () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-created-at-'))
     const claudeHome = path.join(tempDir, '.claude')
     const projectDir = path.join(claudeHome, 'projects', 'project-a')
-    const sessionFile = path.join(projectDir, 'session-1.jsonl')
+    const sessionFile = path.join(projectDir, '550e8400-e29b-41d4-a716-446655440000.jsonl')
     await fs.mkdir(projectDir, { recursive: true })
 
     process.env.CLAUDE_HOME = claudeHome

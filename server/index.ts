@@ -538,7 +538,11 @@ async function main() {
     // This prevents incorrect associations when multiple terminals share the same cwd
     const term = unassociated[0]
     log.info({ terminalId: term.terminalId, sessionId: session.sessionId }, 'Associating terminal with new Claude session')
-    registry.setResumeSessionId(term.terminalId, session.sessionId)
+    const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
+    if (!associated) {
+      log.warn({ terminalId: term.terminalId, sessionId: session.sessionId }, 'Skipping invalid Claude session association')
+      return
+    }
     try {
       wsHandler.broadcast({
         type: 'terminal.session.associated' as const,
@@ -586,6 +590,7 @@ async function main() {
       { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
     )
       .then(() => {
+        sessionRepairService.setFilePathResolver((id) => claudeIndexer.getFilePathForSession(id))
         startupState.markReady('claudeIndexer')
         logger.info({ task: 'claudeIndexer' }, 'Startup task ready')
       })

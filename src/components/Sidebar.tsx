@@ -4,7 +4,7 @@ import { List, type RowComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { addTab, setActiveTab } from '@/store/tabsSlice'
+import { openSessionTab } from '@/store/tabsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { searchSessions, type SearchResult } from '@/lib/api'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
@@ -12,6 +12,7 @@ import type { BackgroundTerminal, CodingCliProviderName } from '@/store/types'
 import { makeSelectSortedSessionItems, type SidebarSessionItem } from '@/store/selectors/sidebarSelectors'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { ProviderIcon } from '@/components/icons/provider-icons'
+import { getActiveSessionRefForTab } from '@/lib/session-utils'
 
 export type AppView = 'terminal' | 'sessions' | 'overview' | 'settings'
 
@@ -52,6 +53,7 @@ export default function Sidebar({
   const settings = useAppSelector((s) => s.settings.settings)
   const tabs = useAppSelector((s) => s.tabs.tabs)
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
+  const activeSessionRef = useAppSelector((s) => activeTabId ? getActiveSessionRefForTab(s, activeTabId) : undefined)
   const selectSortedItems = useMemo(() => makeSelectSortedSessionItems(), [])
 
   const ws = useMemo(() => getWsClient(), [])
@@ -161,7 +163,6 @@ export default function Sidebar({
           archived: result.archived,
           cwd: result.cwd,
           hasTab: existing?.hasTab ?? false,
-          tabLastInputAt: existing?.tabLastInputAt,
           ratchetedActivity: existing?.ratchetedActivity,
           isRunning: existing?.isRunning ?? false,
           runningTerminalId: existing?.runningTerminalId,
@@ -194,40 +195,13 @@ export default function Sidebar({
 
   const handleItemClick = (item: SessionItem) => {
     const provider = item.provider as CodingCliProviderName
-    if (item.isRunning && item.runningTerminalId) {
-      // Session is running - check if tab with this terminal already exists
-      const existingTab = tabs.find((t) => t.terminalId === item.runningTerminalId)
-      if (existingTab) {
-        dispatch(setActiveTab(existingTab.id))
-      } else {
-        // Create new tab to attach to the running terminal
-        dispatch(addTab({
-          title: item.title,
-          terminalId: item.runningTerminalId,
-          status: 'running',
-          mode: provider,
-          codingCliProvider: provider,
-          resumeSessionId: item.sessionId,
-        }))
-      }
-    } else {
-      // Session not running - check if tab with this session already exists
-      const existingTab = tabs.find((t) =>
-        t.resumeSessionId === item.sessionId && (t.codingCliProvider || t.mode) === provider
-      )
-      if (existingTab) {
-        dispatch(setActiveTab(existingTab.id))
-      } else {
-        // Create new tab to resume the session
-        dispatch(addTab({
-          title: item.title,
-          mode: provider,
-          codingCliProvider: provider,
-          initialCwd: item.cwd,
-          resumeSessionId: item.sessionId
-        }))
-      }
-    }
+    dispatch(openSessionTab({
+      sessionId: item.sessionId,
+      title: item.title,
+      cwd: item.cwd,
+      provider,
+      terminalId: item.isRunning ? item.runningTerminalId : undefined,
+    }))
     onNavigate('terminal')
   }
 
@@ -239,9 +213,8 @@ export default function Sidebar({
   ]
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  const activeProvider = activeTab?.codingCliProvider || (activeTab?.mode !== 'shell' ? activeTab?.mode : undefined)
-  const activeSessionKey = activeTab?.resumeSessionId && activeProvider
-    ? `${activeProvider}:${activeTab.resumeSessionId}`
+  const activeSessionKey = activeSessionRef
+    ? `${activeSessionRef.provider}:${activeSessionRef.sessionId}`
     : null
   const activeTerminalId = activeTab?.terminalId
   const effectiveListHeight = listHeight > 0

@@ -4,6 +4,7 @@ import WebSocket from 'ws'
 
 const TEST_TIMEOUT_MS = 30_000
 const HOOK_TIMEOUT_MS = 30_000
+const VALID_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000'
 
 // Increase test timeout for network tests
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: HOOK_TIMEOUT_MS })
@@ -92,6 +93,7 @@ class FakeRegistry {
       mode: opts.mode || 'shell',
       shell: opts.shell || 'system',
       status: 'running',
+      resumeSessionId: opts.resumeSessionId,
       exitCode: undefined as number | undefined,
       clients: new Set<WebSocket>(),
       pendingSnapshotClients: new Map<WebSocket, string[]>(),
@@ -176,6 +178,15 @@ class FakeRegistry {
       status: r.status,
       hasClients: r.clients.size > 0,
     }))
+  }
+
+  findRunningClaudeTerminalBySession(sessionId: string) {
+    for (const rec of this.records.values()) {
+      if (rec.mode !== 'claude') continue
+      if (rec.status !== 'running') continue
+      if (rec.resumeSessionId === sessionId) return rec
+    }
+    return undefined
   }
 
   // Simulate terminal output for testing
@@ -1122,6 +1133,35 @@ describe('WebSocket edge cases', () => {
       // All responses should have the same terminalId (idempotent)
       const terminalIds = new Set(responses.map((r) => r.terminalId))
       expect(terminalIds.size).toBe(1)
+
+      close()
+    })
+
+    it('reuses running claude terminal when resumeSessionId matches', async () => {
+      const { ws, close } = await createAuthenticatedConnection()
+
+      const requestId1 = 'resume-claude-1'
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId: requestId1,
+        mode: 'claude',
+        resumeSessionId: VALID_SESSION_ID,
+      }))
+
+      const created1 = await waitForMessage(ws, (m) => m.type === 'terminal.created' && m.requestId === requestId1)
+
+      const requestId2 = 'resume-claude-2'
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId: requestId2,
+        mode: 'claude',
+        resumeSessionId: VALID_SESSION_ID,
+      }))
+
+      const created2 = await waitForMessage(ws, (m) => m.type === 'terminal.created' && m.requestId === requestId2)
+
+      expect(created2.terminalId).toBe(created1.terminalId)
+      expect(created2.effectiveResumeSessionId).toBe(VALID_SESSION_ID)
 
       close()
     })

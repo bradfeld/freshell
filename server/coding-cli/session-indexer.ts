@@ -328,7 +328,18 @@ export class CodingCliSessionIndexer {
       }
       if (!cached.baseSession) continue
       const compositeKey = makeSessionKey(cached.baseSession.provider, cached.baseSession.sessionId)
-      const ov = cfg.sessionOverrides?.[compositeKey]
+      let ov = cfg.sessionOverrides?.[compositeKey] || cfg.sessionOverrides?.[cached.baseSession.sessionId]
+      if (!ov && cached.baseSession.provider === 'claude' && cached.baseSession.sourceFile) {
+        const legacySessionId = path.basename(cached.baseSession.sourceFile, '.jsonl')
+        if (legacySessionId && legacySessionId !== cached.baseSession.sessionId) {
+          const legacyKey = makeSessionKey(cached.baseSession.provider, legacySessionId)
+          const legacyOverride = cfg.sessionOverrides?.[legacyKey] || cfg.sessionOverrides?.[legacySessionId]
+          if (legacyOverride) {
+            logger.warn({ sessionId: cached.baseSession.sessionId, legacySessionId }, 'Using legacy Claude session override')
+            ov = legacyOverride
+          }
+        }
+      }
       const merged = applyOverride(cached.baseSession, ov)
       if (!merged) continue
       const group = groupsByPath.get(merged.projectPath) || {
