@@ -83,7 +83,7 @@ async def _run(args: argparse.Namespace) -> int:
     return 2
 
   # Hard cap: keep the smoke run small and fast.
-  # This also enforces the repo-local rule: never open more than 6 panes during this smoke.
+  # This caps the per-tab pane stress target (not the total panes across all Freshell tabs).
   MAX_PANES = 6
   if args.pane_target > MAX_PANES:
     log.warn("Clamping pane_target to 6", event="pane_target_clamped", requested=args.pane_target, clamped=MAX_PANES)
@@ -331,10 +331,10 @@ Requirements:
    - If it says "Disconnected", wait up to ~10 seconds for it to become connected, then re-check.
    - If it stays disconnected, FAIL with a short reason.
 4) Pane stress:
-   - Open a new tab to use for this test
+   - Open a new tab in Freshell (an in-app tab, not a browser tab) to use for this test
    - Rename the tab by double clicking on it 'Stress test'
-   - On the current in-app tab, add shell panes until there are {args.pane_target} panes.
-   - Do this one pane at a time (avoid stale element errors): click "Add pane" once, then choose "shell" once. If there are multiple choices for shell (cmd, powershell, wsl) rotate your choice each pane.
+   - Add shell panes to Stress test tab until there are {args.pane_target} panes.
+   - Do this one pane at a time (avoid stale element errors): click "Add pane" once, then choose a shell option once ("Shell", "CMD", "PowerShell", or "WSL"). If there are multiple shell choices, rotate your choice each pane.
 5) Mixed panes on a new in-app tab:
    - Create a new Freshell in-app shell tab using the '+' button in the top tab bar (tooltip: "New shell tab").
    - Rename the tab by double clicking on it 'Test mixed panes'
@@ -346,10 +346,10 @@ Requirements:
      - Ensure Preview mode works:
        - Click the "Source" button and then the "Preview" button (in that order) to prove mode switching works.
      - Use `find_text` to confirm "Quick Start" is visible (this ensures file content actually loaded).
-7) Verify the Terminal pane:
+7) Verify the shell pane:
    - In the shell pane:
      - Wait for the terminal to be ready (not stuck on "Starting terminal..." / "Reconnecting...").
-       - If it is still stuck after ~15 seconds, close just the Terminal pane and re-create a shell pane once, then wait again.
+       - If it is still stuck after ~15 seconds, close just the shell pane and re-create a shell pane once, then wait again.
        - If it is still stuck, FAIL with a short reason.
      - Then run `node -v` (or `git --version` if node is unavailable).
      - WAIT for the command to finish and then check that the terminal output contains a version-looking string (examples: `v20.11.0` or `git version 2.44.0`).
