@@ -162,6 +162,7 @@ Target URL: {target_url}
 
 Important constraints:
 - Do not create or write any files during this run.
+- Do everything in a single browser window. You may open new tabs inside that window. Do not open any new windows.
 
 Requirements:
 1) Navigate to the Target URL.
@@ -172,27 +173,21 @@ Requirements:
    - Use the UI control(s) for adding/splitting panes (floating action button, split buttons, etc).
    - Try to add panes until the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
    - If you can still add panes indefinitely, stop once you have created at least {args.pane_target} panes total (this is a "good enough" stress level for this smoke test).
-   - IMPORTANT: Don't try to verify pane types on this stress-test tab. Just create many panes and then stop.
+   - IMPORTANT: This is ONLY a pane-count stress. Do not create any actual Terminal/Editor/Browser content on this tab.
+     - If the UI prompts you to choose a pane type for a new pane, do NOT select any option. Dismiss the chooser (Escape / click outside) so the new pane remains an empty "picker" pane.
+     - Specifically: do not click CMD/WSL/PowerShell during pane stress, since that creates real terminal sessions and can hit terminal limits.
 6) Create a new shell tab (click the plus button in the tab bar with the tooltip/title "New shell tab"). Do not open new windows.
-7) On that new tab, create a few panes and confirm one of each type exists (Editor, Terminal, Browser). Keep this as a multi-pane tab for quick review.
-8) Create a new shell tab for a single-pane Editor verification:
-   - Create an Editor pane.
-   - Open this file path: {known_text_file}
-   - Verify visually the editor shows content from that file (not the empty scratch-pad placeholder). Do not rely on DOM text search for this.
-9) Create a new shell tab for a single-pane Terminal verification:
-   - Create a WSL (or other shell) terminal pane.
-   - Run `node -v` (or `git --version` if node is unavailable).
-   - Verify visually the command output looks like a version string in the terminal output.
-10) Create a new shell tab for a single-pane Browser verification:
-   - Create a Browser pane.
-   - Navigate to https://example.com
-   - Verify visually the page shows "Example Domain".
-11) Create one more new shell tab for Settings verification.
-12) On that tab, open the sidebar (if it is collapsed) using the top-left toggle button.
-13) Click "Settings" in the sidebar.
-14) On the Settings page, confirm "Terminal preview" is visible (use `find_text`).
-15) Navigate back to the terminal view.
-16) Click through the tabs in the tab bar to confirm they still render (stress, multi-pane, editor, terminal, browser, settings).
+7) On that new tab, create a few panes and set up EXACTLY one of each type: Editor, Terminal, Browser (keep this tab multi-pane for quick review).
+   - In the Editor pane: open this file path: {known_text_file}. Verify visually the editor shows content (not an empty placeholder).
+   - In the Terminal pane: run `node -v` (or `git --version` if node is unavailable). Verify visually the output looks like a version string.
+   - In the Browser pane: navigate to https://example.com and verify visually it shows "Example Domain".
+   - Keep terminal creation minimal: do not create extra terminal panes beyond this one.
+8) Create one more new shell tab for Settings verification.
+9) On that tab, open the sidebar (if it is collapsed) using the top-left toggle button.
+10) Click "Settings" in the sidebar.
+11) On the Settings page, confirm "Terminal preview" is visible (use `find_text`).
+12) Navigate back to the terminal view.
+13) Click through the tabs in the tab bar to confirm they still render (stress, multi-pane, settings).
 
 Output:
 At the end, output exactly one line:
