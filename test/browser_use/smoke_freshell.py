@@ -14,6 +14,7 @@ import sys
 import traceback
 import logging
 import urllib.request
+import time
 from pathlib import Path
 
 from smoke_utils import (
@@ -168,8 +169,23 @@ async def _run(args: argparse.Namespace) -> int:
       await browser.event_bus.dispatch(SwitchTabEvent(target_id=None))
     except Exception:
       pass
-    # Best-effort: Freshell removes `?token=...` after it boots; give it a moment.
-    await asyncio.sleep(0.5)
+    # Wait for the SPA to render enough that the agent sees real DOM content.
+    # In some environments the first few extraction snapshots can come back empty even though navigation succeeded.
+    deadline = time.monotonic() + 20.0
+    ready = False
+    while time.monotonic() < deadline:
+      try:
+        # The Add Pane button is a good proxy for "terminal view rendered".
+        has_add_pane = await page.evaluate("() => !!document.querySelector('button[aria-label=\"Add pane\"]')")
+        if has_add_pane:
+          ready = True
+          break
+      except Exception:
+        pass
+      await asyncio.sleep(0.5)
+    if not ready:
+      log.warn("Pre-open did not detect rendered UI in time", event="preopen_target_not_ready")
+
     try:
       current_url = await page.get_url()
       log.info("Target URL opened", event="preopen_target_ok", currentUrl=redact_url(current_url))
@@ -196,6 +212,7 @@ Important constraints:
 
 Requirements:
 1) Wait until the page is fully loaded and the top bar is visible.
+   - If the page looks blank/empty after waiting, do a single refresh and wait again.
 2) Verify the app header contains the text "freshell".
 3) Verify the connection indicator shows the app is connected (not disconnected).
 4) Pane stress test (do this once):
