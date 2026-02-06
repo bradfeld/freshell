@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WsClient } from '../../../../src/lib/ws-client'
 
 class MockWebSocket {
@@ -39,14 +39,20 @@ class MockWebSocket {
 
 describe('WsClient.connect', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     MockWebSocket.instances = []
     // @ts-expect-error - test override
     globalThis.WebSocket = MockWebSocket
     sessionStorage.setItem('auth-token', 't')
 
     // Some Vitest environments provide a minimal window without timer fns.
-    if (typeof (window as any).setTimeout !== 'function') (window as any).setTimeout = setTimeout
-    if (typeof (window as any).clearTimeout !== 'function') (window as any).clearTimeout = clearTimeout
+    ;(window as any).setTimeout = globalThis.setTimeout
+    ;(window as any).clearTimeout = globalThis.clearTimeout
+  })
+
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
   })
 
   it('returns the same in-flight promise and resolves only after ready', async () => {
@@ -72,7 +78,6 @@ describe('WsClient.connect', () => {
   })
 
   it('treats HELLO_TIMEOUT as transient and schedules reconnect', async () => {
-    vi.useFakeTimers()
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
 
     const c = new WsClient('ws://example/ws')
@@ -86,7 +91,5 @@ describe('WsClient.connect', () => {
 
     // Should schedule a reconnect attempt (baseReconnectDelay = 1000).
     expect(setTimeoutSpy.mock.calls.some((call) => call[1] === 1000)).toBe(true)
-
-    vi.useRealTimers()
   })
 })

@@ -687,7 +687,12 @@ describe('App Bootstrap', () => {
       },
       writable: true,
     })
-    mockApiGet.mockResolvedValue({})
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
+      return Promise.resolve({})
+    })
   })
 
   afterEach(() => {

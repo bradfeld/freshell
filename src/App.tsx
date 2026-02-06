@@ -28,6 +28,7 @@ import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 500
 const MOBILE_BREAKPOINT = 768
+const EMPTY_IDLE_WARNINGS: Record<string, unknown> = {}
 
 export default function App() {
   useThemeEffect()
@@ -38,7 +39,7 @@ export default function App() {
   const connection = useAppSelector((s) => s.connection.status)
   const connectionError = useAppSelector((s) => s.connection.lastError)
   const settings = useAppSelector((s) => s.settings.settings)
-  const idleWarnings = useAppSelector((s) => s.idleWarnings.warnings)
+  const idleWarnings = useAppSelector((s) => (s as any).idleWarnings?.warnings ?? EMPTY_IDLE_WARNINGS)
   const idleWarningCount = Object.keys(idleWarnings).length
 
   const [view, setView] = useState<AppView>('terminal')
