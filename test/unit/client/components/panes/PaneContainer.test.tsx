@@ -117,6 +117,7 @@ function createStore(
       connection: {
         status: 'disconnected',
         platform: null,
+        availableClis: {},
         ...initialConnectionState,
       },
     },
@@ -798,6 +799,13 @@ describe('PaneContainer', () => {
       }
     }
 
+    // Helper to find the picker container (the div with tabIndex for scoped shortcuts)
+    function getPickerContainer() {
+      const container = document.querySelector('[data-context="pane-picker"]')
+      if (!container) throw new Error('Picker container not found')
+      return container
+    }
+
     it('creates terminal with shell=cmd when cmd is selected', () => {
       const node = createPickerNode('pane-1')
       const store = createStore(
@@ -810,14 +818,12 @@ describe('PaneContainer', () => {
         store
       )
 
-      // Press 'c' key for CMD
-      fireEvent.keyDown(document, { key: 'c' })
+      const container = getPickerContainer()
+      // Press 'c' key for CMD on the picker container (shortcuts are scoped)
+      fireEvent.keyDown(container, { key: 'c' })
 
       // Wait for transition to complete (the picker has a fade animation)
-      const picker = screen.getByText('CMD').closest('div[class*="transition"]')
-      if (picker) {
-        fireEvent.transitionEnd(picker)
-      }
+      fireEvent.transitionEnd(container)
 
       // Verify the pane content was updated with shell=cmd
       const state = store.getState().panes
@@ -843,14 +849,9 @@ describe('PaneContainer', () => {
         store
       )
 
-      // Press 'p' key for PowerShell
-      fireEvent.keyDown(document, { key: 'p' })
-
-      // Wait for transition to complete
-      const picker = screen.getByText('PowerShell').closest('div[class*="transition"]')
-      if (picker) {
-        fireEvent.transitionEnd(picker)
-      }
+      const container = getPickerContainer()
+      fireEvent.keyDown(container, { key: 'p' })
+      fireEvent.transitionEnd(container)
 
       // Verify the pane content was updated with shell=powershell
       const state = store.getState().panes
@@ -875,14 +876,9 @@ describe('PaneContainer', () => {
         store
       )
 
-      // Press 'w' key for WSL
-      fireEvent.keyDown(document, { key: 'w' })
-
-      // Wait for transition to complete
-      const picker = screen.getByText('WSL').closest('div[class*="transition"]')
-      if (picker) {
-        fireEvent.transitionEnd(picker)
-      }
+      const container = getPickerContainer()
+      fireEvent.keyDown(container, { key: 'w' })
+      fireEvent.transitionEnd(container)
 
       // Verify the pane content was updated with shell=wsl
       const state = store.getState().panes
@@ -897,7 +893,6 @@ describe('PaneContainer', () => {
 
     it('creates terminal with shell=system when shell is selected (non-Windows)', () => {
       const node = createPickerNode('pane-1')
-      // For non-Windows, platform will be null (default) which shows 'Shell' option
       const store = createStore(
         { layouts: { 'tab-1': node }, activePane: { 'tab-1': 'pane-1' } },
         { platform: 'linux' }
@@ -908,14 +903,9 @@ describe('PaneContainer', () => {
         store
       )
 
-      // Press 's' key for Shell
-      fireEvent.keyDown(document, { key: 's' })
-
-      // Wait for transition to complete
-      const picker = screen.getByText('Shell').closest('div[class*="transition"]')
-      if (picker) {
-        fireEvent.transitionEnd(picker)
-      }
+      const container = getPickerContainer()
+      fireEvent.keyDown(container, { key: 's' })
+      fireEvent.transitionEnd(container)
 
       // Verify the pane content was updated with shell=system
       const state = store.getState().panes

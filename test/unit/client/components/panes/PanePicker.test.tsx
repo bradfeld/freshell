@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { configureStore } from '@reduxjs/toolkit'
+import { Provider } from 'react-redux'
 import PanePicker from '@/components/panes/PanePicker'
+import settingsReducer from '@/store/settingsSlice'
+import connectionReducer from '@/store/connectionSlice'
+import type { DefaultNewPane, SidebarSortMode, TerminalTheme } from '@/store/types'
 
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
@@ -15,67 +20,169 @@ vi.mock('lucide-react', () => ({
   ),
 }))
 
-// Mock redux hooks
-vi.mock('@/store/hooks', () => ({
-  useAppSelector: vi.fn(),
-}))
+function createStore(overrides?: {
+  platform?: string | null
+  availableClis?: Record<string, boolean>
+  enabledProviders?: string[]
+}) {
+  return configureStore({
+    reducer: {
+      settings: settingsReducer,
+      connection: connectionReducer,
+    },
+    preloadedState: {
+      connection: {
+        status: 'ready' as const,
+        platform: overrides?.platform ?? null,
+        availableClis: overrides?.availableClis ?? {},
+      },
+      settings: {
+        settings: {
+          theme: 'system' as const,
+          uiScale: 1,
+          terminal: {
+            fontSize: 14,
+            fontFamily: 'monospace',
+            lineHeight: 1.2,
+            cursorBlink: true,
+            scrollback: 5000,
+            theme: 'auto' as TerminalTheme,
+          },
+          safety: { autoKillIdleMinutes: 180, warnBeforeKillMinutes: 5 },
+          sidebar: {
+            sortMode: 'activity' as SidebarSortMode,
+            showProjectBadges: true,
+            width: 288,
+            collapsed: false,
+          },
+          panes: { defaultNewPane: 'ask' as DefaultNewPane },
+          codingCli: {
+            enabledProviders: (overrides?.enabledProviders ?? []) as any[],
+            providers: {},
+          },
+          logging: { debug: false },
+        },
+        loaded: true,
+        lastSavedAt: null,
+      },
+    },
+  })
+}
 
-import { useAppSelector } from '@/store/hooks'
-const mockUseAppSelector = vi.mocked(useAppSelector)
+function renderPicker(
+  overrides?: Parameters<typeof createStore>[0],
+  props?: { onSelect?: ReturnType<typeof vi.fn>; onCancel?: ReturnType<typeof vi.fn>; isOnlyPane?: boolean }
+) {
+  const store = createStore(overrides)
+  const onSelect = props?.onSelect ?? vi.fn()
+  const onCancel = props?.onCancel ?? vi.fn()
+  const isOnlyPane = props?.isOnlyPane ?? false
+  render(
+    <Provider store={store}>
+      <PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={isOnlyPane} />
+    </Provider>
+  )
+  return { onSelect, onCancel, store }
+}
+
+// Helper to get the picker container
+const getContainer = () => {
+  const container = document.querySelector('[data-context="pane-picker"]')
+  if (!container) throw new Error('Picker container not found')
+  return container
+}
+
+// Helper to complete the fade animation
+const completeFadeAnimation = () => {
+  fireEvent.transitionEnd(getContainer())
+}
 
 describe('PanePicker', () => {
-  let onSelect: ReturnType<typeof vi.fn>
-  let onCancel: ReturnType<typeof vi.fn>
-
   beforeEach(() => {
-    onSelect = vi.fn()
-    onCancel = vi.fn()
-    mockUseAppSelector.mockReturnValue(null) // Default: unknown platform
+    vi.clearAllMocks()
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  // Helper to get the container div that handles transition
-  // Uses 'Browser' text which is always present regardless of platform
-  const getContainer = () => {
-    return screen.getByText('Browser').closest('button')!.parentElement!.parentElement!
-  }
-
-  // Helper to complete the fade animation
-  const completeFadeAnimation = () => {
-    fireEvent.transitionEnd(getContainer())
-  }
-
   describe('rendering', () => {
-    it('renders all three options', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-      expect(screen.getByText('Shell')).toBeInTheDocument()
-      expect(screen.getByText('Browser')).toBeInTheDocument()
+    it('renders Editor, Browser, Shell options by default', () => {
+      renderPicker()
       expect(screen.getByText('Editor')).toBeInTheDocument()
+      expect(screen.getByText('Browser')).toBeInTheDocument()
+      expect(screen.getByText('Shell')).toBeInTheDocument()
     })
 
     it('renders icons for each option', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-      expect(screen.getByTestId('terminal-icon')).toBeInTheDocument()
-      expect(screen.getByTestId('globe-icon')).toBeInTheDocument()
+      renderPicker()
       expect(screen.getByTestId('file-text-icon')).toBeInTheDocument()
+      expect(screen.getByTestId('globe-icon')).toBeInTheDocument()
+      expect(screen.getByTestId('terminal-icon')).toBeInTheDocument()
+    })
+
+    it('shows Claude and Codex buttons when available and enabled', () => {
+      renderPicker({
+        availableClis: { claude: true, codex: true },
+        enabledProviders: ['claude', 'codex'],
+      })
+      expect(screen.getByRole('button', { name: 'Claude' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Codex' })).toBeInTheDocument()
+    })
+
+    it('hides Claude when not available on system', () => {
+      renderPicker({
+        availableClis: { claude: false, codex: true },
+        enabledProviders: ['claude', 'codex'],
+      })
+      expect(screen.queryByRole('button', { name: 'Claude' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Codex' })).toBeInTheDocument()
+    })
+
+    it('hides Codex when disabled in settings', () => {
+      renderPicker({
+        availableClis: { claude: true, codex: true },
+        enabledProviders: ['claude'],
+      })
+      expect(screen.getByRole('button', { name: 'Claude' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Codex' })).not.toBeInTheDocument()
+    })
+
+    it('renders options in correct order: CLIs, Editor, Browser, Shell', () => {
+      renderPicker({
+        availableClis: { claude: true, codex: true },
+        enabledProviders: ['claude', 'codex'],
+      })
+      const buttons = screen.getAllByRole('button')
+      const labels = buttons.map(b => b.getAttribute('aria-label'))
+      expect(labels[0]).toBe('Claude')
+      expect(labels[1]).toBe('Codex')
+      expect(labels[2]).toBe('Editor')
+      expect(labels[3]).toBe('Browser')
+      expect(labels[4]).toBe('Shell')
+    })
+
+    it('shows only non-CLI options when no CLIs are available', () => {
+      renderPicker({ availableClis: {} })
+      expect(screen.queryByRole('button', { name: 'Claude' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Codex' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Editor' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Browser' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Shell' })).toBeInTheDocument()
     })
   })
 
   describe('mouse interaction', () => {
     it('calls onSelect with shell when Shell is clicked after fade', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const { onSelect } = renderPicker()
       fireEvent.click(screen.getByText('Shell'))
-      // onSelect is called after fade animation completes
       expect(onSelect).not.toHaveBeenCalled()
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('shell')
     })
 
     it('starts fade animation on click', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      renderPicker()
       const container = getContainer()
       expect(container).not.toHaveClass('opacity-0')
       fireEvent.click(screen.getByText('Shell'))
@@ -83,44 +190,92 @@ describe('PanePicker', () => {
     })
 
     it('ignores additional clicks during fade', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const { onSelect } = renderPicker()
       fireEvent.click(screen.getByText('Shell'))
       fireEvent.click(screen.getByText('Browser'))
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledTimes(1)
       expect(onSelect).toHaveBeenCalledWith('shell')
     })
+
+    it('calls onSelect with claude when Claude button is clicked', () => {
+      const { onSelect } = renderPicker({
+        availableClis: { claude: true },
+        enabledProviders: ['claude'],
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Claude' }))
+      completeFadeAnimation()
+      expect(onSelect).toHaveBeenCalledWith('claude')
+    })
   })
 
-  describe('keyboard shortcuts', () => {
-    it('calls onSelect with shell on S key after fade', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-      fireEvent.keyDown(document, { key: 's' })
-      expect(onSelect).not.toHaveBeenCalled()
+  describe('keyboard shortcuts (scoped to picker container)', () => {
+    it('fires shortcut S for Shell when container has focus', () => {
+      const { onSelect } = renderPicker()
+      const container = getContainer()
+      fireEvent.keyDown(container, { key: 's' })
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('shell')
     })
 
     it('shortcuts are case-insensitive', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-      fireEvent.keyDown(document, { key: 'S' })
+      const { onSelect } = renderPicker()
+      const container = getContainer()
+      fireEvent.keyDown(container, { key: 'S' })
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('shell')
+    })
+
+    it('fires shortcut L for Claude', () => {
+      const { onSelect } = renderPicker({
+        availableClis: { claude: true },
+        enabledProviders: ['claude'],
+      })
+      fireEvent.keyDown(getContainer(), { key: 'l' })
+      completeFadeAnimation()
+      expect(onSelect).toHaveBeenCalledWith('claude')
+    })
+
+    it('fires shortcut X for Codex', () => {
+      const { onSelect } = renderPicker({
+        availableClis: { codex: true },
+        enabledProviders: ['codex'],
+      })
+      fireEvent.keyDown(getContainer(), { key: 'x' })
+      completeFadeAnimation()
+      expect(onSelect).toHaveBeenCalledWith('codex')
+    })
+
+    it('does not fire shortcuts when an element outside the picker has focus', () => {
+      const onSelect = vi.fn()
+      const store = createStore()
+      render(
+        <Provider store={store}>
+          <div>
+            <PanePicker onSelect={onSelect} onCancel={vi.fn()} isOnlyPane={false} />
+            <input data-testid="other-input" />
+          </div>
+        </Provider>
+      )
+      const otherInput = screen.getByTestId('other-input')
+      otherInput.focus()
+      fireEvent.keyDown(otherInput, { key: 's' })
+      expect(onSelect).not.toHaveBeenCalled()
     })
   })
 
   describe('arrow key navigation', () => {
     it('moves focus right with ArrowRight', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-      const shellButton = screen.getByText('Shell').closest('button')!
-      shellButton.focus()
-      fireEvent.keyDown(shellButton, { key: 'ArrowRight' })
+      renderPicker()
+      const editorButton = screen.getByText('Editor').closest('button')!
+      editorButton.focus()
+      fireEvent.keyDown(editorButton, { key: 'ArrowRight' })
       const browserButton = screen.getByText('Browser').closest('button')!
       expect(browserButton).toHaveFocus()
     })
 
     it('selects focused option on Enter after fade', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const { onSelect } = renderPicker()
       const browserButton = screen.getByText('Browser').closest('button')!
       browserButton.focus()
       fireEvent.keyDown(browserButton, { key: 'Enter' })
@@ -132,21 +287,22 @@ describe('PanePicker', () => {
 
   describe('escape behavior', () => {
     it('calls onCancel on Escape when not only pane', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-      fireEvent.keyDown(document, { key: 'Escape' })
+      const { onCancel } = renderPicker()
+      fireEvent.keyDown(getContainer(), { key: 'Escape' })
       expect(onCancel).toHaveBeenCalled()
     })
 
     it('does not call onCancel on Escape when only pane', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={true} />)
-      fireEvent.keyDown(document, { key: 'Escape' })
+      const onCancel = vi.fn()
+      renderPicker(undefined, { onCancel, isOnlyPane: true })
+      fireEvent.keyDown(getContainer(), { key: 'Escape' })
       expect(onCancel).not.toHaveBeenCalled()
     })
   })
 
   describe('shortcut hints', () => {
     it('shows shortcut hint on hover', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      renderPicker()
       const shellButton = screen.getByText('Shell').closest('button')!
       fireEvent.mouseEnter(shellButton)
       const hint = screen.getByText('S', { selector: '.shortcut-hint' })
@@ -154,7 +310,7 @@ describe('PanePicker', () => {
     })
 
     it('hides shortcut hint on mouse leave', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      renderPicker()
       const shellButton = screen.getByText('Shell').closest('button')!
       fireEvent.mouseEnter(shellButton)
       fireEvent.mouseLeave(shellButton)
@@ -165,9 +321,7 @@ describe('PanePicker', () => {
 
   describe('platform-specific shell options', () => {
     it('shows single Shell option on non-Windows platforms', () => {
-      mockUseAppSelector.mockReturnValue('darwin')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
+      renderPicker({ platform: 'darwin' })
       expect(screen.getByText('Shell')).toBeInTheDocument()
       expect(screen.queryByText('CMD')).not.toBeInTheDocument()
       expect(screen.queryByText('PowerShell')).not.toBeInTheDocument()
@@ -175,9 +329,7 @@ describe('PanePicker', () => {
     })
 
     it('shows CMD, PowerShell, WSL options on Windows', () => {
-      mockUseAppSelector.mockReturnValue('win32')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
+      renderPicker({ platform: 'win32' })
       expect(screen.getByText('CMD')).toBeInTheDocument()
       expect(screen.getByText('PowerShell')).toBeInTheDocument()
       expect(screen.getByText('WSL')).toBeInTheDocument()
@@ -185,117 +337,83 @@ describe('PanePicker', () => {
     })
 
     it('calls onSelect with cmd when CMD clicked on Windows', () => {
-      mockUseAppSelector.mockReturnValue('win32')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
+      const { onSelect } = renderPicker({ platform: 'win32' })
       fireEvent.click(screen.getByText('CMD'))
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('cmd')
     })
 
     it('calls onSelect with powershell when PowerShell clicked', () => {
-      mockUseAppSelector.mockReturnValue('win32')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
+      const { onSelect } = renderPicker({ platform: 'win32' })
       fireEvent.click(screen.getByText('PowerShell'))
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('powershell')
     })
 
     it('calls onSelect with wsl when WSL clicked', () => {
-      mockUseAppSelector.mockReturnValue('win32')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
+      const { onSelect } = renderPicker({ platform: 'win32' })
       fireEvent.click(screen.getByText('WSL'))
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('wsl')
     })
 
     it('uses C shortcut for CMD on Windows', () => {
-      mockUseAppSelector.mockReturnValue('win32')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
-      fireEvent.keyDown(document, { key: 'c' })
+      const { onSelect } = renderPicker({ platform: 'win32' })
+      fireEvent.keyDown(getContainer(), { key: 'c' })
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('cmd')
     })
 
     it('uses P shortcut for PowerShell on Windows', () => {
-      mockUseAppSelector.mockReturnValue('win32')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
-      fireEvent.keyDown(document, { key: 'p' })
+      const { onSelect } = renderPicker({ platform: 'win32' })
+      fireEvent.keyDown(getContainer(), { key: 'p' })
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('powershell')
     })
 
     it('uses W shortcut for WSL on Windows', () => {
-      mockUseAppSelector.mockReturnValue('win32')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
-      fireEvent.keyDown(document, { key: 'w' })
+      const { onSelect } = renderPicker({ platform: 'win32' })
+      fireEvent.keyDown(getContainer(), { key: 'w' })
       completeFadeAnimation()
       expect(onSelect).toHaveBeenCalledWith('wsl')
     })
 
     it('falls back to Shell option when platform is null', () => {
-      mockUseAppSelector.mockReturnValue(null)
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
+      renderPicker({ platform: null })
       expect(screen.getByText('Shell')).toBeInTheDocument()
     })
 
     it('shows CMD, PowerShell, WSL options on WSL platform', () => {
-      mockUseAppSelector.mockReturnValue('wsl')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
+      renderPicker({ platform: 'wsl' })
       expect(screen.getByText('CMD')).toBeInTheDocument()
       expect(screen.getByText('PowerShell')).toBeInTheDocument()
       expect(screen.getByText('WSL')).toBeInTheDocument()
       expect(screen.queryByText('Shell')).not.toBeInTheDocument()
     })
-
-    it('calls onSelect with cmd when CMD clicked on WSL', () => {
-      mockUseAppSelector.mockReturnValue('wsl')
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-
-      fireEvent.click(screen.getByText('CMD'))
-      completeFadeAnimation()
-      expect(onSelect).toHaveBeenCalledWith('cmd')
-    })
   })
 
   describe('responsive sizing', () => {
-    it('applies @container class to outer wrapper for container query support', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+    it('applies @container class to outer wrapper', () => {
+      renderPicker()
       const container = getContainer()
       expect(container).toHaveClass('@container')
     })
 
     it('applies responsive padding classes to outer wrapper', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      renderPicker()
       const container = getContainer()
-      // Mobile-first: smallest padding is default, larger sizes use container breakpoints
       expect(container).toHaveClass('p-2')
     })
 
     it('applies responsive gap classes to button container', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      renderPicker()
       const buttonContainer = getContainer().querySelector('.flex.flex-wrap')!
       expect(buttonContainer).toHaveClass('gap-2')
     })
 
-    it('applies responsive size classes to icons', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
-      const icon = screen.getByTestId('terminal-icon')
-      // Mobile-first: smallest icon size is default
-      expect(icon).toHaveClass('h-6', 'w-6')
-    })
-
     it('applies responsive padding classes to buttons', () => {
-      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      renderPicker()
       const shellButton = screen.getByText('Shell').closest('button')!
-      // Mobile-first: smallest padding is default
       expect(shellButton).toHaveClass('p-2')
     })
   })

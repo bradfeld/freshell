@@ -7,7 +7,8 @@ import PaneDivider from './PaneDivider'
 import TerminalView from '../TerminalView'
 import BrowserPane from './BrowserPane'
 import EditorPane from './EditorPane'
-import PanePicker from './PanePicker'
+import PanePicker, { type PanePickerType } from './PanePicker'
+import { isCodingCliProviderName } from '@/lib/coding-cli-utils'
 import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
@@ -133,68 +134,81 @@ function PickerWrapper({
   isOnlyPane: boolean
 }) {
   const dispatch = useAppDispatch()
+  const settings = useAppSelector((s) => s.settings?.settings)
 
-  const handleSelect = useCallback((type: 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' | 'editor') => {
+  const handleSelect = useCallback((type: PanePickerType) => {
     let newContent: PaneContent
 
-    switch (type) {
-      case 'shell':
-        newContent = {
-          kind: 'terminal',
-          mode: 'shell',
-          shell: 'system',
-          createRequestId: nanoid(),
-          status: 'creating',
-        }
-        break
-      case 'cmd':
-        newContent = {
-          kind: 'terminal',
-          mode: 'shell',
-          shell: 'cmd',
-          createRequestId: nanoid(),
-          status: 'creating',
-        }
-        break
-      case 'powershell':
-        newContent = {
-          kind: 'terminal',
-          mode: 'shell',
-          shell: 'powershell',
-          createRequestId: nanoid(),
-          status: 'creating',
-        }
-        break
-      case 'wsl':
-        newContent = {
-          kind: 'terminal',
-          mode: 'shell',
-          shell: 'wsl',
-          createRequestId: nanoid(),
-          status: 'creating',
-        }
-        break
-      case 'browser':
-        newContent = {
-          kind: 'browser',
-          url: '',
-          devToolsOpen: false,
-        }
-        break
-      case 'editor':
-        newContent = {
-          kind: 'editor',
-          filePath: null,
-          language: null,
-          readOnly: false,
-          content: '',
-          viewMode: 'source',
-        }
-        break
+    if (isCodingCliProviderName(type)) {
+      const providerCwd = settings?.codingCli?.providers?.[type]?.cwd
+      newContent = {
+        kind: 'terminal',
+        mode: type,
+        shell: 'system',
+        createRequestId: nanoid(),
+        status: 'creating',
+        ...(providerCwd ? { initialCwd: providerCwd } : {}),
+      }
+    } else {
+      switch (type) {
+        case 'shell':
+          newContent = {
+            kind: 'terminal',
+            mode: 'shell',
+            shell: 'system',
+            createRequestId: nanoid(),
+            status: 'creating',
+          }
+          break
+        case 'cmd':
+          newContent = {
+            kind: 'terminal',
+            mode: 'shell',
+            shell: 'cmd',
+            createRequestId: nanoid(),
+            status: 'creating',
+          }
+          break
+        case 'powershell':
+          newContent = {
+            kind: 'terminal',
+            mode: 'shell',
+            shell: 'powershell',
+            createRequestId: nanoid(),
+            status: 'creating',
+          }
+          break
+        case 'wsl':
+          newContent = {
+            kind: 'terminal',
+            mode: 'shell',
+            shell: 'wsl',
+            createRequestId: nanoid(),
+            status: 'creating',
+          }
+          break
+        case 'browser':
+          newContent = {
+            kind: 'browser',
+            url: '',
+            devToolsOpen: false,
+          }
+          break
+        case 'editor':
+          newContent = {
+            kind: 'editor',
+            filePath: null,
+            language: null,
+            readOnly: false,
+            content: '',
+            viewMode: 'source',
+          }
+          break
+      }
     }
 
     dispatch(updatePaneContent({ tabId, paneId, content: newContent }))
-  }, [dispatch, tabId, paneId])
+  }, [dispatch, tabId, paneId, settings])
 
   const handleCancel = useCallback(() => {
     dispatch(closePane({ tabId, paneId }))
