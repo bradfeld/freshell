@@ -189,6 +189,9 @@ export default function SettingsView() {
     return () => {
       if (pendingRef.current) clearTimeout(pendingRef.current)
       if (defaultCwdTimerRef.current) clearTimeout(defaultCwdTimerRef.current)
+      for (const timer of Object.values(providerCwdTimerRef.current)) {
+        clearTimeout(timer)
+      }
     }
   }, [])
 
@@ -246,6 +249,57 @@ export default function SettingsView() {
         })
     }, 500)
   }, [commitDefaultCwd])
+
+  // Per-provider cwd state
+  const [providerCwdInputs, setProviderCwdInputs] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {}
+    for (const config of CODING_CLI_PROVIDER_CONFIGS) {
+      initial[config.name] = settings.codingCli?.providers?.[config.name]?.cwd ?? ''
+    }
+    return initial
+  })
+  const [providerCwdErrors, setProviderCwdErrors] = useState<Record<string, string | null>>({})
+  const providerCwdTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const providerCwdValidationRef = useRef<Record<string, number>>({})
+
+  const scheduleProviderCwdValidation = useCallback((providerName: string, value: string) => {
+    const key = providerName
+    if (!providerCwdValidationRef.current[key]) providerCwdValidationRef.current[key] = 0
+    providerCwdValidationRef.current[key] += 1
+    const validationId = providerCwdValidationRef.current[key]
+    if (providerCwdTimerRef.current[key]) clearTimeout(providerCwdTimerRef.current[key])
+
+    providerCwdTimerRef.current[key] = setTimeout(() => {
+      if (providerCwdValidationRef.current[key] !== validationId) return
+      const trimmed = value.trim()
+      if (!trimmed) {
+        setProviderCwdErrors((prev) => ({ ...prev, [key]: null }))
+        dispatch(updateSettingsLocal({
+          codingCli: { providers: { [providerName]: { cwd: undefined } } },
+        } as any))
+        scheduleSave({ codingCli: { providers: { [providerName]: { cwd: undefined } } } })
+        return
+      }
+
+      api.post<{ valid: boolean }>('/api/files/validate-dir', { path: trimmed })
+        .then((result) => {
+          if (providerCwdValidationRef.current[key] !== validationId) return
+          if (result.valid) {
+            setProviderCwdErrors((prev) => ({ ...prev, [key]: null }))
+            dispatch(updateSettingsLocal({
+              codingCli: { providers: { [providerName]: { cwd: trimmed } } },
+            } as any))
+            scheduleSave({ codingCli: { providers: { [providerName]: { cwd: trimmed } } } })
+          } else {
+            setProviderCwdErrors((prev) => ({ ...prev, [key]: 'directory not found' }))
+          }
+        })
+        .catch(() => {
+          if (providerCwdValidationRef.current[key] !== validationId) return
+          setProviderCwdErrors((prev) => ({ ...prev, [key]: 'directory not found' }))
+        })
+    }, 500)
+  }, [dispatch, scheduleSave])
 
   const setProviderEnabled = useCallback((provider: CodingCliProviderName, enabled: boolean) => {
     const next = enabled
@@ -730,6 +784,30 @@ export default function SettingsView() {
                       </select>
                     </SettingsRow>
                   )}
+
+                  <SettingsRow label={`${provider.label} starting directory`}>
+                    <div className="relative w-full max-w-xs">
+                      <input
+                        type="text"
+                        aria-label={`${provider.label} starting directory`}
+                        value={providerCwdInputs[provider.name] ?? ''}
+                        placeholder="e.g. ~/projects/my-app"
+                        aria-invalid={providerCwdErrors[provider.name] ? true : undefined}
+                        onChange={(e) => {
+                          const nextValue = e.target.value
+                          setProviderCwdInputs((prev) => ({ ...prev, [provider.name]: nextValue }))
+                          setProviderCwdErrors((prev) => ({ ...prev, [provider.name]: null }))
+                          scheduleProviderCwdValidation(provider.name, nextValue)
+                        }}
+                        className="w-full h-8 px-3 text-sm bg-muted border-0 rounded-md placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-border"
+                      />
+                      {providerCwdErrors[provider.name] && (
+                        <span className="pointer-events-none absolute right-2 -bottom-4 text-[10px] text-destructive">
+                          {providerCwdErrors[provider.name]}
+                        </span>
+                      )}
+                    </div>
+                  </SettingsRow>
                 </div>
               )
             })}
