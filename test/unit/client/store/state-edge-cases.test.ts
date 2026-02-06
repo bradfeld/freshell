@@ -500,9 +500,8 @@ describe('State Edge Cases', () => {
         ]
         store.dispatch(setProjects(newProjects))
 
-        // expandedProjects still contains old project path (stale reference)
-        expect(store.getState().sessions.expandedProjects.has('/old/project')).toBe(true)
-        // This documents current behavior - expandedProjects is not cleaned up
+        // expandedProjects should not keep stale project paths
+        expect(store.getState().sessions.expandedProjects.has('/old/project')).toBe(false)
       })
 
       it('handles expandAll when projects are empty', () => {
@@ -1055,15 +1054,14 @@ describe('State Edge Cases', () => {
       expect(state.tabs.find((t) => t.id === state.activeTabId)).toBeUndefined()
     })
 
-    it('ISSUE: expandedProjects not cleaned up when projects change', () => {
+    it('FIXED: expandedProjects is pruned when projects change', () => {
       const store = createTestStore()
 
       store.dispatch(setProjects([{ projectPath: '/old', sessions: [] }]))
       store.dispatch(setProjectExpanded({ projectPath: '/old', expanded: true }))
       store.dispatch(setProjects([{ projectPath: '/new', sessions: [] }]))
 
-      // Old project path still in expandedProjects
-      expect(store.getState().sessions.expandedProjects.has('/old')).toBe(true)
+      expect(store.getState().sessions.expandedProjects.has('/old')).toBe(false)
     })
 
     it('ISSUE: connection state allows invalid transitions', () => {
