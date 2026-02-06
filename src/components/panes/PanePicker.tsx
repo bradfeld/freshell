@@ -123,7 +123,8 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, pane
   return (
     <div
       className={cn(
-        'h-full w-full flex items-center justify-center p-8',
+        '@container h-full w-full flex items-center justify-center',
+        'p-2 @[250px]:p-4 @[400px]:p-8',
         'transition-opacity duration-150 ease-out',
         fading && 'opacity-0'
       )}
@@ -132,7 +133,7 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, pane
       data-pane-id={paneId}
       onTransitionEnd={handleTransitionEnd}
     >
-      <div className="flex flex-wrap justify-center gap-8">
+      <div className="flex flex-wrap justify-center gap-2 @[250px]:gap-4 @[400px]:gap-8">
         {options.map((option, index) => (
           <button
             key={option.type}
@@ -144,14 +145,15 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, pane
             onMouseEnter={() => setHoveredIndex(index)}
             onMouseLeave={() => setHoveredIndex(null)}
             className={cn(
-              'flex flex-col items-center gap-3 p-6 rounded-lg',
+              'flex flex-col items-center gap-2 @[250px]:gap-3',
+              'p-2 @[250px]:p-3 @[400px]:p-6 rounded-lg',
               'transition-all duration-150',
               'hover:opacity-100 focus:opacity-100 focus:outline-none',
               'opacity-50 hover:scale-105'
             )}
           >
-            <option.icon className="h-12 w-12" />
-            <span className="text-sm font-medium">{option.label}</span>
+            <option.icon className="h-6 w-6 @[250px]:h-8 @[250px]:w-8 @[400px]:h-12 @[400px]:w-12" />
+            <span className="text-xs @[400px]:text-sm font-medium">{option.label}</span>
             <span className={cn(
               'shortcut-hint text-xs -mt-1 transition-opacity duration-150',
               showHint(index) ? 'opacity-40' : 'opacity-0'
