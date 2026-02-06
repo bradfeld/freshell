@@ -263,6 +263,7 @@ or
 SMOKE_RESULT: FAIL - <short reason>
 """
 
+  log.info("Agent init start", event="agent_init_start")
   agent = Agent(
     task=task.strip(),
     llm=llm,
@@ -275,6 +276,7 @@ SMOKE_RESULT: FAIL - <short reason>
     max_actions_per_step=2,
     directly_open_url=False,
   )
+  log.info("Agent init done", event="agent_init_done")
 
   _start, elapsed_s = monotonic_timer()
   try:
@@ -282,6 +284,7 @@ SMOKE_RESULT: FAIL - <short reason>
     sys.stdout = _RedactingStream(orig_stdout, token)
     sys.stderr = _RedactingStream(orig_stderr, token)
     try:
+      log.info("Agent run start", event="agent_run_start", maxSteps=args.max_steps)
       history = await agent.run(max_steps=args.max_steps)
     finally:
       sys.stdout = orig_stdout
