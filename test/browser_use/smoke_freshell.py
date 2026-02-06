@@ -172,7 +172,8 @@ Requirements:
    - Use the UI control(s) for adding/splitting panes (floating action button, split buttons, etc).
    - Try to add panes until the UI prevents adding more (button disabled, no new pane appears, or explicit limit message).
    - If you can still add panes indefinitely, stop once you have created at least {args.pane_target} panes total (this is a "good enough" stress level for this smoke test).
-6) After you hit the limit, choose exactly one pane of each type and do a trivial verification:
+6) After you hit the limit (or the stress target), close extra panes until there are only 3-4 panes visible and the panes are large enough to interact with.
+7) Choose exactly one pane of each type and do a trivial verification:
    - Editor pane:
      - Choose the "Editor" pane type for a pane.
      - Open this file path: {known_text_file}
@@ -185,10 +186,10 @@ Requirements:
      - Choose the "Browser" pane type for a different pane.
      - Navigate to https://example.com
      - Verify the page shows "Example Domain".
-7) Open the sidebar (if it is collapsed) using the top-left toggle button.
-8) Click "Settings" in the sidebar.
-9) On the Settings page, confirm "Terminal preview" is visible.
-10) Navigate back to the terminal view.
+8) Open the sidebar (if it is collapsed) using the top-left toggle button.
+9) Click "Settings" in the sidebar.
+10) On the Settings page, confirm "Terminal preview" is visible.
+11) Navigate back to the terminal view.
 
 Output:
 At the end, output exactly one line:
