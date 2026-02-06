@@ -7,11 +7,13 @@ export interface ConnectionState {
   lastError?: string
   lastReadyAt?: number
   platform: string | null
+  availableClis: Record<string, boolean>
 }
 
 const initialState: ConnectionState = {
   status: 'disconnected',
   platform: null,
+  availableClis: {},
 }
 
 export const connectionSlice = createSlice({
@@ -28,8 +30,11 @@ export const connectionSlice = createSlice({
     setPlatform: (state, action: PayloadAction<string>) => {
       state.platform = action.payload
     },
+    setAvailableClis: (state, action: PayloadAction<Record<string, boolean>>) => {
+      state.availableClis = action.payload
+    },
   },
 })
 
-export const { setStatus, setError, setPlatform } = connectionSlice.actions
+export const { setStatus, setError, setPlatform, setAvailableClis } = connectionSlice.actions
 export default connectionSlice.reducer

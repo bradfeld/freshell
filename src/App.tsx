@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { setStatus, setError, setPlatform } from '@/store/connectionSlice'
+import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
 import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
 import { addTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
@@ -189,8 +189,13 @@ export default function App() {
       }
 
       try {
-        const platformInfo = await api.get<{ platform: string }>('/api/platform')
-        if (!cancelled) dispatch(setPlatform(platformInfo.platform))
+        const platformInfo = await api.get<{ platform: string; availableClis?: Record<string, boolean> }>('/api/platform')
+        if (!cancelled) {
+          dispatch(setPlatform(platformInfo.platform))
+          if (platformInfo.availableClis) {
+            dispatch(setAvailableClis(platformInfo.availableClis))
+          }
+        }
       } catch (err: any) {
         console.warn('Failed to load platform info', err)
       }

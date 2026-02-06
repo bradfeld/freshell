@@ -3,6 +3,7 @@ import connectionReducer, {
   setStatus,
   setError,
   setPlatform,
+  setAvailableClis,
   ConnectionState,
   ConnectionStatus,
 } from '../../../../src/store/connectionSlice'
@@ -199,6 +200,31 @@ describe('connectionSlice', () => {
       }
       const state = connectionReducer(initialState, setPlatform('linux'))
       expect(state.platform).toBe('linux')
+    })
+  })
+
+  describe('availableClis state', () => {
+    it('has empty availableClis in initial state', () => {
+      const state = connectionReducer(undefined, { type: 'unknown' })
+      expect(state.availableClis).toEqual({})
+    })
+
+    it('stores availableClis via setAvailableClis', () => {
+      const state = connectionReducer(undefined, setAvailableClis({ claude: true, codex: false }))
+      expect(state.availableClis).toEqual({ claude: true, codex: false })
+    })
+
+    it('replaces availableClis entirely on update', () => {
+      let state = connectionReducer(undefined, setAvailableClis({ claude: true, codex: false }))
+      state = connectionReducer(state, setAvailableClis({ claude: false }))
+      expect(state.availableClis).toEqual({ claude: false })
+    })
+
+    it('does not interfere with other state', () => {
+      let state = connectionReducer(undefined, setAvailableClis({ claude: true }))
+      state = connectionReducer(state, setPlatform('linux'))
+      expect(state.platform).toBe('linux')
+      expect(state.availableClis).toEqual({ claude: true })
     })
   })
 
