@@ -498,6 +498,10 @@ export const panesSlice = createSlice({
       const root = state.layouts[tabId]
       if (!root) return
 
+      // Some unit tests hydrate partial slice state; ensure these maps exist.
+      if (!state.paneTitles) state.paneTitles = {}
+      if (!state.paneTitleSetByUser) state.paneTitleSetByUser = {}
+
       function updateContent(node: PaneNode): { node: PaneNode; previousContent: PaneContent | null } {
         if (node.type === 'leaf') {
           if (node.id === paneId) {

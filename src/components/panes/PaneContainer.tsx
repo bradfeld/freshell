@@ -20,6 +20,8 @@ import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 // Stable empty object to avoid selector memoization issues
 const EMPTY_PANE_TITLES: Record<string, string> = {}
+const EMPTY_PENDING_REQUESTS: Record<string, never> = {}
+const EMPTY_CODING_CLI_SESSIONS: Record<string, never> = {}
 
 interface PaneContainerProps {
   tabId: string
@@ -31,8 +33,10 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] ?? EMPTY_PANE_TITLES)
-  const pendingRequests = useAppSelector((s) => s.codingCli.pendingRequests)
-  const codingCliSessions = useAppSelector((s) => s.codingCli.sessions)
+  // Some unit tests mount PaneContainer with a reduced store (no codingCli slice).
+  // Treat missing codingCli state as empty.
+  const pendingRequests = useAppSelector((s) => s.codingCli?.pendingRequests ?? EMPTY_PENDING_REQUESTS)
+  const codingCliSessions = useAppSelector((s) => s.codingCli?.sessions ?? EMPTY_CODING_CLI_SESSIONS)
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
 
