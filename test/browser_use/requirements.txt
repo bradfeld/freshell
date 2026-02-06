@@ -1,0 +1,5 @@
+# browser_use smoke runner (non-gating)
+#
+# Keep <1.0 to avoid breaking changes in the library surface.
+browser-use>=0.11.0,<1.0.0
+
