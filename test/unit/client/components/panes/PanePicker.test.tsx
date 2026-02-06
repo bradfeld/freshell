@@ -264,4 +264,39 @@ describe('PanePicker', () => {
       expect(onSelect).toHaveBeenCalledWith('cmd')
     })
   })
+
+  describe('responsive sizing', () => {
+    it('applies @container class to outer wrapper for container query support', () => {
+      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const container = getContainer()
+      expect(container).toHaveClass('@container')
+    })
+
+    it('applies responsive padding classes to outer wrapper', () => {
+      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const container = getContainer()
+      // Mobile-first: smallest padding is default, larger sizes use container breakpoints
+      expect(container).toHaveClass('p-2')
+    })
+
+    it('applies responsive gap classes to button container', () => {
+      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const buttonContainer = getContainer().querySelector('.flex.flex-wrap')!
+      expect(buttonContainer).toHaveClass('gap-2')
+    })
+
+    it('applies responsive size classes to icons', () => {
+      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const icon = screen.getByTestId('terminal-icon')
+      // Mobile-first: smallest icon size is default
+      expect(icon).toHaveClass('h-6', 'w-6')
+    })
+
+    it('applies responsive padding classes to buttons', () => {
+      render(<PanePicker onSelect={onSelect} onCancel={onCancel} isOnlyPane={false} />)
+      const shellButton = screen.getByText('Shell').closest('button')!
+      // Mobile-first: smallest padding is default
+      expect(shellButton).toHaveClass('p-2')
+    })
+  })
 })
