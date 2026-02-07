@@ -658,6 +658,37 @@ describe('App WS message handling', () => {
       expect(store.getState().sessions.projects.map((p: any) => p.projectPath).sort()).toEqual(['/p1', '/p2'])
     })
   })
+
+  it('applies sessions.patch messages (upsert + remove) without clearing all sessions', async () => {
+    let handler: ((msg: any) => void) | null = null
+    mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
+      handler = cb
+      return () => { handler = null }
+    })
+
+    const store = createTestStore()
+    renderApp(store)
+    await waitFor(() => expect(handler).not.toBeNull())
+
+    // Seed state via a full snapshot (existing behavior).
+    handler!({
+      type: 'sessions.updated',
+      projects: [
+        { projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', updatedAt: 1 }] },
+        { projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', updatedAt: 2 }] },
+      ],
+    })
+
+    handler!({
+      type: 'sessions.patch',
+      upsertProjects: [{ projectPath: '/p3', sessions: [{ provider: 'claude', sessionId: 's3', updatedAt: 3 }] }],
+      removeProjectPaths: ['/p1'],
+    })
+
+    await waitFor(() => {
+      expect(store.getState().sessions.projects.map((p: any) => p.projectPath).sort()).toEqual(['/p2', '/p3'])
+    })
+  })
 })
 
 describe('App Component - Idle Warnings', () => {

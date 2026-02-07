@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
-import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
+import { setProjects, clearProjects, mergeProjects, applySessionsPatch } from '@/store/sessionsSlice'
 import { switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { createTabWithPane } from '@/store/tabThunks'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
@@ -214,6 +214,12 @@ export default function App() {
         } else {
           dispatch(setProjects(msg.projects || []))
         }
+      }
+      if (msg.type === 'sessions.patch') {
+        dispatch(applySessionsPatch({
+          upsertProjects: msg.upsertProjects || [],
+          removeProjectPaths: msg.removeProjectPaths || [],
+        }))
       }
       if (msg.type === 'settings.updated') {
         dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
