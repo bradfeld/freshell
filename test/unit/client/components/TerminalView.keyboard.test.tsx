@@ -188,8 +188,6 @@ describe('TerminalView keyboard handling', () => {
 
       // Handler should return false to prevent xterm from processing the key
       expect(result).toBe(false)
-      // Should prevent native browser paste (xterm hidden textarea) to avoid double-paste
-      expect(event.preventDefault).toHaveBeenCalled()
 
       // Wait for async clipboard read
       await waitFor(() => {
@@ -223,7 +221,6 @@ describe('TerminalView keyboard handling', () => {
       const result = capturedKeyHandler!(event)
 
       expect(result).toBe(false)
-      expect(event.preventDefault).toHaveBeenCalled()
 
       await waitFor(() => {
         expect(clipboardMocks.readText).toHaveBeenCalled()
@@ -302,7 +299,6 @@ describe('TerminalView keyboard handling', () => {
       // Should return false to prevent xterm from processing Ctrl+V
       // This allows the browser's native paste event to fire
       expect(result).toBe(false)
-      expect(event.preventDefault).not.toHaveBeenCalled()
       // Should not call clipboard API since it's not available
       expect(clipboardMocks.readText).not.toHaveBeenCalled()
 

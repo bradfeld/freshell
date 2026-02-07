@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { reorderTabs, updateTab, setActiveTab, requestTabRename } from '@/store/tabsSlice'
 import { createTabWithPane, closeTabWithCleanup } from '@/store/tabThunks'
-import { addPane, resetLayout, resetSplit, swapSplit, updatePaneTitle, setActivePane } from '@/store/panesSlice'
-import { closePaneWithCleanup } from '@/store/paneThunks'
+import { addPane, closePane, resetLayout, resetSplit, swapSplit, updatePaneTitle, setActivePane } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
+import { cancelCodingCliRequest } from '@/store/codingCliSlice'
+import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
@@ -24,6 +25,7 @@ import { buildMenuItems } from './menu-defs'
 import { copyDataset, isTextInputLike, parseContextTarget } from './context-menu-utils'
 
 const CONTEXT_MENU_KEYS = ['ContextMenu']
+const EMPTY_PENDING_REQUESTS: Record<string, never> = {}
 const EMPTY_SESSION_ACTIVITY: Record<string, number> = {}
 const EMPTY_PANE_TITLES: Record<string, Record<string, string>> = {}
 const EMPTY_ACTIVE_PANES: Record<string, string> = {}
@@ -81,6 +83,7 @@ export function ContextMenuProvider({
   const panes = useAppSelector((s) => s.panes.layouts)
   const paneTitles = useAppSelector((s) => s.panes?.paneTitles) ?? EMPTY_PANE_TITLES
   const activePanes = useAppSelector((s) => s.panes?.activePane) ?? EMPTY_ACTIVE_PANES
+  const pendingRequests = useAppSelector((s) => s.codingCli?.pendingRequests) ?? EMPTY_PENDING_REQUESTS
   const sessionActivity = useAppSelector((s) => s.sessionActivity?.sessions) ?? EMPTY_SESSION_ACTIVITY
   const sessions = useAppSelector((s) => s.sessions.projects)
   const expandedProjects = useAppSelector((s) => s.sessions.expandedProjects)
@@ -92,6 +95,8 @@ export function ContextMenuProvider({
   const menuRef = useRef<HTMLDivElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const suppressNextFocusRestoreRef = useRef(false)
+
+  const ws = useMemo(() => getWsClient(), [])
 
   const closeMenu = useCallback(() => {
     setMenuState(null)
@@ -245,8 +250,22 @@ export function ContextMenuProvider({
   }, [tabsState.tabs, closeTabById])
 
   const closePaneById = useCallback((tabId: string, paneId: string) => {
-    dispatch(closePaneWithCleanup({ tabId, paneId }))
-  }, [dispatch])
+    const layout = panes[tabId]
+    if (!layout) return
+    const content = findPaneContent(layout, paneId)
+    if (content?.kind === 'session') {
+      const sessionId = content.sessionId
+      if (pendingRequests[sessionId]) {
+        dispatch(cancelCodingCliRequest({ requestId: sessionId }))
+      } else {
+        ws.send({ type: 'codingcli.kill', sessionId })
+      }
+    } else if (content?.kind === 'terminal' && content.terminalId) {
+      // Detach from terminal to stop receiving output
+      ws.send({ type: 'terminal.detach', terminalId: content.terminalId })
+    }
+    dispatch(closePane({ tabId, paneId }))
+  }, [dispatch, panes, pendingRequests, ws])
 
   const moveTab = useCallback((tabId: string, dir: -1 | 1) => {
     const index = tabsState.tabs.findIndex((t) => t.id === tabId)
@@ -339,7 +358,7 @@ export function ContextMenuProvider({
 
     // Preserve existing panes and add a new one for the opened session.
     dispatch(addPane({ tabId: activeTabId, newContent }))
-  }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, menuState?.target])
+  }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, ws, pendingRequests, menuState?.target])
 
   const renameSession = useCallback(async (sessionId: string, provider?: string, withSummary?: boolean) => {
     const info = getSessionInfo(sessionId, provider)

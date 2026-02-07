@@ -20,7 +20,6 @@ import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
 const SESSION_ACTIVITY_THROTTLE_MS = 5000
-const OUTPUT_DISPATCH_THROTTLE_MS = 500
 
 interface TerminalViewProps {
   tabId: string
@@ -44,6 +43,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const hiddenRef = useRef(hidden)
   const lastSessionActivityAtRef = useRef(0)
   const lastOutputDispatchAtRef = useRef(0)
+
+  // Throttle recordOutput dispatches to avoid performance issues with chatty terminals
+  const OUTPUT_DISPATCH_THROTTLE_MS = 500
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -94,19 +96,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (mountedRef.current && termRef.current) return
     mountedRef.current = true
 
-    const trackInput = () => {
-      dispatch(recordInput({ paneId }))
-      const now = Date.now()
-      const sessionId = contentRef.current?.resumeSessionId
-      const mode = contentRef.current?.mode
-      if (sessionId && mode && isCodingCliMode(mode)) {
-        if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
-          lastSessionActivityAtRef.current = now
-          dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
-        }
-      }
-    }
-
     if (termRef.current) {
       termRef.current.dispose()
       termRef.current = null
@@ -143,7 +132,17 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         const tid = terminalIdRef.current
         if (!tid) return
         ws.send({ type: 'terminal.input', terminalId: tid, data: text })
-        trackInput()
+        dispatch(recordInput({ paneId }))
+        // Update session activity for sidebar sorting
+        const now = Date.now()
+        const sessionId = contentRef.current?.resumeSessionId
+        const mode = contentRef.current?.mode
+        if (sessionId && mode && isCodingCliMode(mode)) {
+          if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+            lastSessionActivityAtRef.current = now
+            dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
+          }
+        }
       },
       selectAll: () => term.selectAll(),
       clearScrollback: () => term.clear(),
@@ -162,7 +161,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       const tid = terminalIdRef.current
       if (!tid) return
       ws.send({ type: 'terminal.input', terminalId: tid, data })
-      trackInput()
+
+      // Track input for activity monitoring (to filter out echo)
+      dispatch(recordInput({ paneId }))
+
+      const now = Date.now()
+      const sessionId = contentRef.current?.resumeSessionId
+      const mode = contentRef.current?.mode
+      if (sessionId && mode && isCodingCliMode(mode)) {
+        if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+          lastSessionActivityAtRef.current = now
+          dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
+        }
+      }
     })
 
     term.attachCustomKeyEventHandler((event) => {
@@ -180,15 +191,22 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       // Otherwise, let the browser handle paste natively via paste event
       if (event.ctrlKey && (event.key === 'v' || event.key === 'V') && event.type === 'keydown' && !event.repeat) {
         if (isClipboardReadAvailable()) {
-          // Prevent the browser's native paste into xterm's hidden textarea, which would
-          // otherwise cause double-paste (native + our manual ws.send).
-          event.preventDefault()
           void readText().then((text) => {
             if (!text) return
             const tid = terminalIdRef.current
             if (!tid) return
             ws.send({ type: 'terminal.input', terminalId: tid, data: text })
-            trackInput()
+            dispatch(recordInput({ paneId }))
+            // Update session activity for sidebar sorting
+            const now = Date.now()
+            const sessionId = contentRef.current?.resumeSessionId
+            const mode = contentRef.current?.mode
+            if (sessionId && mode && isCodingCliMode(mode)) {
+              if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+                lastSessionActivityAtRef.current = now
+                dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
+              }
+            }
           })
           return false
         }
@@ -333,17 +351,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         await ws.connect()
       } catch { /* handled elsewhere */ }
 
-      const sendCreate = () => {
-        ws.send({
-          type: 'terminal.create',
-          requestId: createRequestId,
-          mode,
-          shell: shell || 'system',
-          cwd: initialCwd,
-          resumeSessionId: getResumeSessionIdFromRef(contentRef),
-        })
-      }
-
       unsub = ws.onMessage((msg) => {
         const tid = terminalIdRef.current
         const reqId = requestIdRef.current
@@ -359,33 +366,26 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {
-          try { xtermApi.clear() } catch { /* disposed */ }
+          try { xtermApi.clear() } catch {}
           if (msg.snapshot) {
-            try { xtermApi.write(msg.snapshot) } catch { /* disposed */ }
+            try { xtermApi.write(msg.snapshot) } catch {}
           }
         }
 
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
           const newId = msg.terminalId as string
           terminalIdRef.current = newId
-          const updates: Partial<TerminalPaneContent> = { terminalId: newId, status: 'running' }
-          if (msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId) {
-            updates.resumeSessionId = msg.effectiveResumeSessionId as string
-          }
-          updateContent(updates)
+          updateContent({ terminalId: newId, status: 'running' })
           if (msg.snapshot) {
-            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch { /* disposed */ }
+            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch {}
           }
-          // The server attaches the creator automatically during terminal.create.
-          // Avoid sending a second attach, which can race a snapshot and clear new output.
-          setIsAttaching(false)
-          ws.send({ type: 'terminal.resize', terminalId: newId, cols: xtermApi.cols, rows: xtermApi.rows })
+          attach(newId)
         }
 
         if (msg.type === 'terminal.attached' && msg.terminalId === tid) {
           setIsAttaching(false)
           if (msg.snapshot) {
-            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch { /* disposed */ }
+            try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch {}
           }
           updateContent({ status: 'running' })
         }
@@ -437,18 +437,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
       unsubReconnect = ws.onReconnect(() => {
         const tid = terminalIdRef.current
-        if (tid) {
-          attach(tid)
-          return
-        }
-
-        // If the socket dropped mid-create (terminal.create sent but terminal.created not received),
-        // re-send the create with the same idempotency key. This is safe due to:
-        // - server-side requestId idempotency
-        // - ws-client in-flight dedupe + clearing on reconnect
-        if (contentRef.current?.status === 'creating') {
-          sendCreate()
-        }
+        if (tid) attach(tid)
       })
 
       // Use paneContent for terminal lifecycle - NOT tab
@@ -464,7 +453,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         // Terminal has exited - don't create a new one
         // User can restart manually via context menu if needed
       } else {
-        sendCreate()
+        ws.send({
+          type: 'terminal.create',
+          requestId: createRequestId,
+          mode,
+          shell: shell || 'system',
+          cwd: initialCwd,
+          resumeSessionId: getResumeSessionIdFromRef(contentRef),
+        })
       }
     }
 
@@ -492,6 +488,16 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // when tab properties (like title) change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTerminal, paneId, terminalContent?.createRequestId, updateContent, ws, dispatch])
+
+  // Detach when this terminal pane unmounts (tab close or pane swap)
+  useEffect(() => {
+    return () => {
+      const tid = terminalIdRef.current
+      if (tid) {
+        ws.send({ type: 'terminal.detach', terminalId: tid })
+      }
+    }
+  }, [ws])
 
   // NOW we can do the conditional return - after all hooks
   if (!isTerminal || !terminalContent) {

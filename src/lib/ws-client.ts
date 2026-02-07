@@ -1,4 +1,4 @@
-import { getClientPerfConfig, logClientPerf } from '@/lib/perf-logger'
+import { getClientPerfConfig, isClientPerfLoggingEnabled, logClientPerf } from '@/lib/perf-logger'
 import { getAuthToken } from '@/lib/auth'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'ready'
@@ -16,7 +16,6 @@ export class WsClient {
   private messageHandlers = new Set<MessageHandler>()
   private reconnectHandlers = new Set<ReconnectHandler>()
   private pendingMessages: unknown[] = []
-  private inFlightTerminalCreateRequestIds = new Set<string>()
   private intentionalClose = false
   private helloExtensionProvider?: HelloExtensionProvider
 
@@ -112,14 +111,6 @@ export class WsClient {
           return
         }
 
-        // Prevent strict-mode / reconnect churn from sending duplicate creates.
-        if (msg.type === 'terminal.created' && typeof msg.requestId === 'string') {
-          this.inFlightTerminalCreateRequestIds.delete(msg.requestId)
-        }
-        if (msg.type === 'error' && typeof msg.requestId === 'string') {
-          this.inFlightTerminalCreateRequestIds.delete(msg.requestId)
-        }
-
         if (msg.type === 'ready') {
           window.clearTimeout(timeout)
           const isReconnect = this.wasConnectedOnce
@@ -183,7 +174,6 @@ export class WsClient {
         const wasConnecting = this._state === 'connecting'
         this._state = 'disconnected'
         this.ws = null
-        this.inFlightTerminalCreateRequestIds.clear()
 
         if (event.code === 4001) {
           this.intentionalClose = true
@@ -244,10 +234,7 @@ export class WsClient {
 
   private scheduleReconnect(options: { minDelayMs?: number } = {}) {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logClientPerf('perf.ws_max_reconnect_attempts', {
-        attempts: this.reconnectAttempts,
-        maxAttempts: this.maxReconnectAttempts,
-      }, 'error')
+      console.error('WsClient: max reconnect attempts reached')
       return
     }
 
@@ -257,11 +244,7 @@ export class WsClient {
 
     window.setTimeout(() => {
       if (!this.intentionalClose) {
-        this.connect().catch((err) => {
-          logClientPerf('perf.ws_reconnect_failed', {
-            error: err instanceof Error ? err.message : String(err),
-          }, 'warn')
-        })
+        this.connect().catch((err) => console.error('WsClient: reconnect failed', err))
       }
     }, delay)
 
@@ -279,7 +262,6 @@ export class WsClient {
     this.ws = null
     this._state = 'disconnected'
     this.pendingMessages = []
-    this.inFlightTerminalCreateRequestIds.clear()
   }
 
   /**
@@ -287,14 +269,6 @@ export class WsClient {
    */
   send(msg: unknown) {
     if (this.intentionalClose) return
-
-    if (msg && typeof msg === 'object' && (msg as any).type === 'terminal.create') {
-      const requestId = (msg as any).requestId
-      if (typeof requestId === 'string' && requestId) {
-        if (this.inFlightTerminalCreateRequestIds.has(requestId)) return
-        this.inFlightTerminalCreateRequestIds.add(requestId)
-      }
-    }
 
     if (this._state === 'ready' && this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg))
@@ -304,13 +278,7 @@ export class WsClient {
     // Queue until ready (handles connecting, connected, and temporary disconnects)
     if (this.pendingMessages.length >= this.maxQueueSize) {
       // Drop oldest to prevent unbounded memory.
-      const dropped = this.pendingMessages.shift()
-      if (dropped && typeof dropped === 'object' && (dropped as any).type === 'terminal.create') {
-        const requestId = (dropped as any).requestId
-        if (typeof requestId === 'string' && requestId) {
-          this.inFlightTerminalCreateRequestIds.delete(requestId)
-        }
-      }
+      this.pendingMessages.shift()
     }
     this.pendingMessages.push(msg)
 

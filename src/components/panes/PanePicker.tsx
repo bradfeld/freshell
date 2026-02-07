@@ -8,8 +8,6 @@ import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 
 export type PanePickerType = 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' | 'editor' | CodingCliProviderName
 
-const EMPTY_AVAILABLE_CLIS: Record<string, boolean> = {}
-
 interface PickerOption {
   type: PanePickerType
   label: string
@@ -63,7 +61,7 @@ interface PanePickerProps {
 
 export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, paneId }: PanePickerProps) {
   const platform = useAppSelector((s) => s.connection?.platform ?? null)
-  const availableClis = useAppSelector((s) => s.connection?.availableClis ?? EMPTY_AVAILABLE_CLIS)
+  const availableClis = useAppSelector((s) => s.connection?.availableClis ?? {})
   const enabledProviders = useAppSelector((s) => s.settings?.settings?.codingCli?.enabledProviders ?? [])
 
   const options = useMemo(() => {

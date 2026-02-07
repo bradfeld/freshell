@@ -1,4 +1,7 @@
 import type { PaneNode, PaneContent, TerminalPaneContent, SessionPaneContent } from '@/store/paneTypes'
+import type { TerminalStatus } from '@/store/types'
+
+export type PaneLeaf = Extract<PaneNode, { type: 'leaf' }>
 
 /**
  * Get the cwd of the first terminal in the pane tree (depth-first traversal).
@@ -42,23 +45,6 @@ export function collectPaneIds(node: PaneNode): string[] {
     ...collectPaneIds(node.children[0]),
     ...collectPaneIds(node.children[1]),
   ]
-}
-
-/**
- * Collect pane leaf IDs from possibly-malformed persisted layout nodes.
- * Prefer this over collectPaneIds when dealing with untrusted localStorage data.
- */
-export function collectPaneIdsSafe(node: any, out: string[] = []): string[] {
-  if (!node || typeof node !== 'object') return out
-  if (node.type === 'leaf') {
-    if (typeof node.id === 'string') out.push(node.id)
-    return out
-  }
-  if (node.type === 'split' && Array.isArray(node.children) && node.children.length >= 2) {
-    collectPaneIdsSafe(node.children[0], out)
-    collectPaneIdsSafe(node.children[1], out)
-  }
-  return out
 }
 
 export function collectTerminalPanes(node: PaneNode): Array<{ paneId: string; content: TerminalPaneContent }> {
@@ -132,4 +118,30 @@ export function findPaneIdByContent(
     return predicate(node.content) ? node.id : null
   }
   return findPaneIdByContent(node.children[0], predicate) || findPaneIdByContent(node.children[1], predicate)
+}
+
+export function deriveTabStatus(layout?: PaneNode): TerminalStatus {
+  if (!layout) return 'creating'
+
+  const terminals = collectTerminalPanes(layout)
+  if (terminals.length === 0) return 'running'
+
+  let hasRunning = false
+  let hasCreating = false
+  let hasError = false
+  let hasExited = false
+
+  for (const terminal of terminals) {
+    const status = terminal.content.status
+    if (status === 'running') hasRunning = true
+    else if (status === 'creating') hasCreating = true
+    else if (status === 'error') hasError = true
+    else if (status === 'exited') hasExited = true
+  }
+
+  if (hasRunning) return 'running'
+  if (hasCreating) return 'creating'
+  if (hasError) return 'error'
+  if (hasExited) return 'exited'
+  return 'creating'
 }

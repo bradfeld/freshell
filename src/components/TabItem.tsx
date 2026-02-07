@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import { X, Circle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -28,7 +27,6 @@ function StatusIndicator({ status, isWorking }: { status: TerminalStatus; isWork
 export interface TabItemProps {
   tab: Tab
   status: TerminalStatus
-  isWorking?: boolean
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
@@ -44,7 +42,6 @@ export interface TabItemProps {
 export default function TabItem({
   tab,
   status,
-  isWorking,
   isActive,
   isDragging,
   isRenaming,
@@ -56,13 +53,6 @@ export default function TabItem({
   onClick,
   onDoubleClick,
 }: TabItemProps) {
-  const renameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!isRenaming) return
-    renameInputRef.current?.focus()
-  }, [isRenaming])
-
   return (
     <div
       className={cn(
@@ -76,23 +66,14 @@ export default function TabItem({
       data-tab-id={tab.id}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
-      role="button"
-      tabIndex={0}
-      aria-label={`Switch to tab ${tab.title}`}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onClick()
-        }
-      }}
     >
-      <StatusIndicator status={status} isWorking={isWorking} />
+      <StatusIndicator status={status} />
 
       {isRenaming ? (
         <input
           className="bg-transparent outline-none w-32 text-sm"
           value={renameValue}
-          ref={renameInputRef}
+          autoFocus
           onChange={(e) => onRenameChange(e.target.value)}
           onBlur={onRenameBlur}
           onKeyDown={onRenameKeyDown}

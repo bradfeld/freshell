@@ -1,8 +1,12 @@
 import { createAsyncThunk } from '@reduxjs/toolkit'
 import { nanoid } from 'nanoid'
-import { addTab, removeTab } from './tabsSlice'
-import { initLayout, removeLayout } from './panesSlice'
+import { addTab, closeTab } from './tabsSlice'
+import { initLayout } from './panesSlice'
 import type { PaneContentInput } from './paneTypes'
+import { collectTerminalPanes, collectSessionPanes } from '@/lib/pane-utils'
+import { getWsClient } from '@/lib/ws-client'
+import { cancelCodingCliRequest } from './codingCliSlice'
+import type { RootState } from './store'
 
 export const createTabWithPane = createAsyncThunk(
   'tabs/createTabWithPane',
@@ -31,14 +35,31 @@ export const closeTabWithCleanup = createAsyncThunk(
   'tabs/closeTabWithCleanup',
   async (
     { tabId, killTerminals }: { tabId: string; killTerminals?: boolean },
-    { dispatch }
+    { dispatch, getState }
   ) => {
-    // Side-effects (detach/kill terminals, cancel/kill coding CLI sessions, activity cleanup)
-    // are handled centrally in paneCleanupListeners via state diffs.
-    dispatch({
-      ...removeLayout({ tabId }),
-      meta: { killTerminals: !!killTerminals },
-    } as any)
-    dispatch(removeTab(tabId))
+    const state = getState() as RootState
+    const layout = state.panes.layouts[tabId]
+    const ws = getWsClient()
+
+    if (layout) {
+      const terminalPanes = collectTerminalPanes(layout)
+      for (const terminal of terminalPanes) {
+        const terminalId = terminal.content.terminalId
+        if (!terminalId) continue
+        ws.send({ type: killTerminals ? 'terminal.kill' : 'terminal.detach', terminalId })
+      }
+
+      const sessionPanes = collectSessionPanes(layout)
+      for (const session of sessionPanes) {
+        const sessionId = session.content.sessionId
+        if (state.codingCli.pendingRequests[sessionId]) {
+          dispatch(cancelCodingCliRequest({ requestId: sessionId }))
+        } else {
+          ws.send({ type: 'codingcli.kill', sessionId })
+        }
+      }
+    }
+
+    dispatch(closeTab(tabId))
   }
 )

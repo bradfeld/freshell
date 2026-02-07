@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal, History, Settings, LayoutGrid, Search, Loader2, X, Archive } from 'lucide-react'
 import { List, type RowComponentProps } from 'react-window'
 import { cn } from '@/lib/utils'
@@ -70,11 +70,11 @@ export default function Sidebar({
   const [listHeight, setListHeight] = useState(0)
 
   // Fetch background terminals
-  const refresh = useCallback(() => {
+  const refresh = () => {
     const requestId = `list-${Date.now()}`
     requestIdRef.current = requestId
     ws.send({ type: 'terminal.list', requestId })
-  }, [ws])
+  }
 
   useEffect(() => {
     ws.connect().catch(() => {})
@@ -95,7 +95,7 @@ export default function Sidebar({
       unsub()
       window.clearInterval(interval)
     }
-  }, [ws, refresh])
+  }, [ws])
 
   // Backend search for non-title tiers
   useEffect(() => {
@@ -195,7 +195,7 @@ export default function Sidebar({
     return () => ro.disconnect()
   }, [])
 
-  const handleItemClick = useCallback((item: SessionItem) => {
+  const handleItemClick = (item: SessionItem) => {
     const provider = item.provider as CodingCliProviderName
     if (item.isRunning && item.runningTerminalId) {
       // Session is running - check if tab with this terminal already exists
@@ -261,7 +261,7 @@ export default function Sidebar({
       }
     }
     onNavigate('terminal')
-  }, [dispatch, onNavigate, panes])
+  }
 
   const nav = [
     { id: 'terminal' as const, label: 'Terminal', icon: Terminal, shortcut: 'T' },
@@ -271,12 +271,9 @@ export default function Sidebar({
   ]
 
   const activeLayout = activeTabId ? panes[activeTabId] : undefined
-  const activeTerminalIds = useMemo(() => {
-    const ids = activeLayout
-      ? collectTerminalPanes(activeLayout).map((pane) => pane.content.terminalId).filter(Boolean) as string[]
-      : []
-    return new Set(ids)
-  }, [activeLayout])
+  const activeTerminalIds = new Set(
+    activeLayout ? collectTerminalPanes(activeLayout).map((pane) => pane.content.terminalId).filter(Boolean) as string[] : []
+  )
   // Collect active session keys from both terminal panes (with resumeSessionId) and session panes
   const activeSessionKeys = useMemo(() => {
     if (!activeLayout) return new Set<string>()

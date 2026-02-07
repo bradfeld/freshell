@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import type { CodingCliProviderName } from '@/store/types'
 import { toggleProjectExpanded, setProjects } from '@/store/sessionsSlice'
@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { createTabWithPane } from '@/store/tabThunks'
 import { cn } from '@/lib/utils'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
-import { Search, ChevronRight, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
+import { Search, ChevronRight, MoreHorizontal, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 function formatTime(ts: number) {
@@ -124,7 +124,6 @@ export default function HistoryView({ onOpenSession }: { onOpenSession?: () => v
               'p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
               loading && 'animate-spin'
             )}
-            aria-label={loading ? 'Loading...' : 'Refresh sessions'}
           >
             <RefreshCw className="h-4 w-4" />
           </button>
@@ -197,12 +196,6 @@ function ProjectCard({
 }) {
   const color = project.color || '#6b7280'
   const [showColorPicker, setShowColorPicker] = useState(false)
-  const colorInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!showColorPicker) return
-    colorInputRef.current?.focus()
-  }, [showColorPicker])
 
   return (
     <div className="rounded-lg border border-border/50 bg-card overflow-hidden">
@@ -243,7 +236,6 @@ function ProjectCard({
                 onClick={() => setShowColorPicker(!showColorPicker)}
                 className="h-5 w-8 rounded border border-border/50"
                 style={{ backgroundColor: color }}
-                aria-label="Open color picker"
               />
               {showColorPicker && (
                 <input
@@ -254,7 +246,7 @@ function ProjectCard({
                     setShowColorPicker(false)
                   }}
                   className="absolute top-full left-0 mt-1"
-                  ref={colorInputRef}
+                  autoFocus
                   onBlur={() => setShowColorPicker(false)}
                 />
               )}
@@ -297,12 +289,6 @@ function SessionRow({
   const [title, setTitle] = useState(session.title || '')
   const [summary, setSummary] = useState(session.summary || '')
   const [showActions, setShowActions] = useState(false)
-  const titleInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!editing) return
-    titleInputRef.current?.focus()
-  }, [editing])
 
   if (editing) {
     return (
@@ -312,7 +298,7 @@ function SessionRow({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
-          ref={titleInputRef}
+          autoFocus
         />
         <input
           className="w-full h-8 px-3 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-border"
@@ -349,15 +335,6 @@ function SessionRow({
     <div
       className="group px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
       onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      aria-label={`Open session ${session.title || session.sessionId.slice(0, 8)}`}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onOpen()
-        }
-      }}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
       data-context={ContextIds.HistorySession}
@@ -395,37 +372,26 @@ function SessionRow({
             'flex items-center gap-1 transition-opacity',
             showActions ? 'opacity-100' : 'opacity-0'
           )}
+          onClick={(e) => e.stopPropagation()}
         >
           <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onOpen()
-            }}
+            onClick={onOpen}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Open"
-            aria-label="Open session"
           >
             <Play className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setEditing(true)
-            }}
+            onClick={() => setEditing(true)}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Edit"
-            aria-label="Edit session"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onDelete()
-            }}
+            onClick={onDelete}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             title="Delete"
-            aria-label="Delete session"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>

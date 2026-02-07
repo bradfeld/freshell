@@ -41,7 +41,7 @@ function makeStore() {
   })
 }
 
-describe('tabs persistence - skipPersist', () => {
+describe('tabs persistence - skipPersist + strip volatile fields', () => {
   beforeEach(() => {
     localStorageMock.clear()
     vi.useFakeTimers()
@@ -69,5 +69,16 @@ describe('tabs persistence - skipPersist', () => {
 
     vi.runAllTimers()
     expect(setItemSpy).not.toHaveBeenCalled()
+  })
+
+  it('strips lastInputAt from persisted tabs payload', () => {
+    const store = makeStore()
+    store.dispatch(updateTab({ id: 'tab-1', updates: { lastInputAt: 999 } }))
+    vi.runAllTimers()
+
+    const raw = localStorage.getItem('freshell.tabs.v1')
+    expect(raw).not.toBeNull()
+    const parsed = JSON.parse(raw!)
+    expect(parsed.tabs.tabs[0].lastInputAt).toBeUndefined()
   })
 })

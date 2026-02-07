@@ -4,19 +4,17 @@ import { checkActivityTimeout, clearFinished, STREAMING_THRESHOLD_MS } from '@/s
 import { useNotificationSound } from '@/hooks/useNotificationSound'
 
 const ACTIVITY_CHECK_INTERVAL_MS = Math.max(1000, STREAMING_THRESHOLD_MS / 2)
-const EMPTY_ACTIVITY_FLAGS: Record<string, boolean> = {}
 
 export function useTerminalActivityMonitor() {
   const dispatch = useAppDispatch()
-  const hasWorkingPanes = useAppSelector((state) =>
-    Object.values(state.terminalActivity?.working ?? EMPTY_ACTIVITY_FLAGS).some(Boolean),
-  )
-  const finished = useAppSelector((state) => state.terminalActivity?.finished ?? EMPTY_ACTIVITY_FLAGS)
+  const working = useAppSelector((state) => state.terminalActivity?.working ?? {})
+  const finished = useAppSelector((state) => state.terminalActivity?.finished ?? {})
   const { play } = useNotificationSound()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Periodically check for activity timeout on working panes
   useEffect(() => {
+    const hasWorkingPanes = Object.values(working).some(Boolean)
     if (!hasWorkingPanes) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
@@ -37,7 +35,7 @@ export function useTerminalActivityMonitor() {
         intervalRef.current = null
       }
     }
-  }, [dispatch, hasWorkingPanes])
+  }, [dispatch, working])
 
   // Play notification sound when panes finish while window is unfocused
   // Sound plays when the browser window is not focused (user is in another app/window)

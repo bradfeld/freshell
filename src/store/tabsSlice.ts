@@ -1,7 +1,7 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit'
+import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit'
 import type { Tab } from './types'
 import { nanoid } from 'nanoid'
-import { loadPersistedTabs, TABS_SCHEMA_VERSION } from './persistMiddleware'
+import { removeLayout } from './panesSlice'
 
 export interface TabsState {
   tabs: Tab[]
@@ -21,12 +21,11 @@ function loadInitialTabsState(): TabsState {
   }
 
   try {
-    const persisted = loadPersistedTabs()
-    if (!persisted) return defaultState
-    if (persisted.version > TABS_SCHEMA_VERSION) return defaultState
-
-    // The persisted format is { version, tabs: TabsState }
-    const tabsState = persisted.tabs as Partial<TabsState> | undefined
+    const raw = localStorage.getItem('freshell.tabs.v1')
+    if (!raw) return defaultState
+    const parsed = JSON.parse(raw)
+    // The persisted format is { tabs: TabsState }
+    const tabsState = parsed?.tabs as Partial<TabsState> | undefined
     if (!Array.isArray(tabsState?.tabs)) return defaultState
 
     if (import.meta.env.MODE === 'development') {
@@ -46,9 +45,7 @@ function loadInitialTabsState(): TabsState {
       renameRequestTabId: null,
     }
   } catch (err) {
-    if (import.meta.env.MODE === 'development') {
-      console.error('[TabsSlice] Failed to load from localStorage:', err)
-    }
+    console.error('[TabsSlice] Failed to load from localStorage:', err)
     return defaultState
   }
 }
@@ -147,5 +144,13 @@ export const {
   switchToNextTab,
   switchToPrevTab,
 } = tabsSlice.actions
+
+export const closeTab = createAsyncThunk(
+  'tabs/closeTab',
+  async (tabId: string, { dispatch }) => {
+    dispatch(removeTab(tabId))
+    dispatch(removeLayout({ tabId }))
+  }
+)
 
 export default tabsSlice.reducer

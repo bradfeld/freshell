@@ -59,8 +59,8 @@ function buildSessionItems(
 
   for (const layout of Object.values(layouts || {})) {
     // Collect from terminal panes (which may have resumeSessionId)
-    const terminalPanes = collectTerminalPanes(layout)
-    for (const terminal of terminalPanes) {
+    const terminals = collectTerminalPanes(layout)
+    for (const terminal of terminals) {
       if (!terminal.content.resumeSessionId) continue
       if (!terminal.content.mode || terminal.content.mode === 'shell') continue
       const key = `${terminal.content.mode}:${terminal.content.resumeSessionId}`

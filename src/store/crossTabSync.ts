@@ -3,7 +3,7 @@ import { hydratePanes } from './panesSlice'
 import { hydrateTabs } from './tabsSlice'
 import { collectPaneIdsSafe } from '@/lib/pane-utils'
 import { parsePersistedPanesRaw, parsePersistedTabsRaw, PANES_STORAGE_KEY, TABS_STORAGE_KEY } from './persistedState'
-import { getPersistBroadcastSourceId, onPersistBroadcast, PERSIST_BROADCAST_CHANNEL_NAME } from './persistBroadcast'
+import { getPersistBroadcastSourceId, PERSIST_BROADCAST_CHANNEL_NAME } from './persistBroadcast'
 
 type StoreLike = {
   dispatch: (action: any) => any
@@ -94,29 +94,12 @@ function handleIncomingRaw(store: StoreLike, key: string, raw: string) {
 export function installCrossTabSync(store: StoreLike): () => void {
   if (typeof window === 'undefined') return () => {}
 
-  // Storage events and BroadcastChannel can both deliver the same persisted payload.
-  // Dedupe by exact raw value so we don't hydrate twice.
-  const lastProcessedRawByKey = new Map<string, string>()
-  const handleIncomingRawDeduped = (key: string, raw: string) => {
-    if (lastProcessedRawByKey.get(key) === raw) return
-    lastProcessedRawByKey.set(key, raw)
-    handleIncomingRaw(store, key, raw)
-  }
-
-  // Keep dedupe state in sync with local writes too. Otherwise, if we process a remote raw,
-  // then diverge locally (persisted raw changes), a later remote event with the original raw
-  // could be incorrectly ignored.
-  const unsubscribeLocal = onPersistBroadcast((msg) => {
-    if (msg.key !== TABS_STORAGE_KEY && msg.key !== PANES_STORAGE_KEY) return
-    lastProcessedRawByKey.set(msg.key, msg.raw)
-  })
-
   const onStorage = (e: StorageEvent) => {
     if (e.storageArea && e.storageArea !== localStorage) return
     const key = e.key
     if (key !== TABS_STORAGE_KEY && key !== PANES_STORAGE_KEY) return
     if (typeof e.newValue !== 'string') return
-    handleIncomingRawDeduped(key, e.newValue)
+    handleIncomingRaw(store, key, e.newValue)
   }
 
   window.addEventListener('storage', onStorage)
@@ -128,12 +111,11 @@ export function installCrossTabSync(store: StoreLike): () => void {
       const res = zPersistBroadcastMsg.safeParse((event as any)?.data)
       if (!res.success) return
       if (res.data.sourceId === getPersistBroadcastSourceId()) return
-      handleIncomingRawDeduped(res.data.key, res.data.raw)
+      handleIncomingRaw(store, res.data.key, res.data.raw)
     }
   }
 
   return () => {
-    unsubscribeLocal()
     window.removeEventListener('storage', onStorage)
     if (channel) {
       try {

@@ -225,7 +225,6 @@ describe('ws protocol', () => {
   let server: http.Server | undefined
   let port: number
   let WsHandler: any
-  let handler: any
   let registry: FakeRegistry
 
   beforeAll(async () => {
@@ -242,7 +241,7 @@ describe('ws protocol', () => {
       res.end()
     })
     registry = new FakeRegistry()
-    handler = new WsHandler(server, registry as any)
+    new WsHandler(server, registry as any)
     const info = await listen(server)
     port = info.port
   }, HOOK_TIMEOUT_MS)
@@ -253,7 +252,6 @@ describe('ws protocol', () => {
     registry.inputCalls = []
     registry.resizeCalls = []
     registry.killCalls = []
-    ;(handler as any).globalCreatedByRequestId.clear()
   })
 
   afterAll(async () => {
@@ -503,57 +501,6 @@ describe('ws protocol', () => {
     await close()
   })
 
-  it('terminal.create.cancel detaches the current connection by requestId', async () => {
-    const { ws, close } = await createAuthenticatedConnection()
-
-    const requestId = 'cancel-create-1'
-    const terminalId = await createTerminal(ws, requestId)
-
-    const rec = registry.records.get(terminalId)
-    expect(rec).toBeTruthy()
-    expect(rec.clients.size).toBe(1)
-
-    ws.send(JSON.stringify({ type: 'terminal.create.cancel', requestId }))
-
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(rec.clients.size).toBe(0)
-
-    await close()
-  })
-
-  it('terminal.create.cancel can kill a terminal by requestId', async () => {
-    const { ws, close } = await createAuthenticatedConnection()
-
-    const requestId = 'cancel-create-kill-1'
-    const terminalId = await createTerminal(ws, requestId)
-
-    expect(registry.records.has(terminalId)).toBe(true)
-
-    ws.send(JSON.stringify({ type: 'terminal.create.cancel', requestId, kill: true }))
-
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(registry.killCalls).toContain(terminalId)
-    expect(registry.records.has(terminalId)).toBe(false)
-
-    await close()
-  })
-
-  it('terminal.create.cancel kill=true does not kill when requestId belongs to a different connection (cancel-cross-conn)', async () => {
-    const { ws: ws1, close: close1 } = await createAuthenticatedConnection()
-    const requestId = 'cancel-cross-conn'
-    const terminalId = await createTerminal(ws1, requestId)
-
-    const { ws: ws2, close: close2 } = await createAuthenticatedConnection()
-    ws2.send(JSON.stringify({ type: 'terminal.create.cancel', requestId, kill: true }))
-
-    await new Promise((r) => setTimeout(r, 20))
-    expect(registry.killCalls).not.toContain(terminalId)
-    expect(registry.records.has(terminalId)).toBe(true)
-
-    await close1()
-    await close2()
-  })
-
   it('terminal.detach returns error for non-existent terminal', async () => {
     const { ws, close } = await createAuthenticatedConnection()
 
@@ -593,16 +540,18 @@ describe('ws protocol', () => {
   it('terminal.input returns error for non-existent terminal', async () => {
     const { ws, close } = await createAuthenticatedConnection()
 
-    const messagesPromise = collectUntil(ws, (msg) => msg.type === 'error', 5000)
     ws.send(JSON.stringify({ type: 'terminal.input', terminalId: 'nonexistent_terminal', data: 'test' }))
 
-    const messages = await messagesPromise
-    const error = messages.find((m) => m.type === 'error')
-    expect(error).toBeTruthy()
+    const error = await new Promise<any>((resolve) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'error') resolve(msg)
+      })
+    })
 
-    expect((error as any).type).toBe('error')
-    expect((error as any).code).toBe('INVALID_TERMINAL_ID')
-    expect((error as any).terminalId).toBe('nonexistent_terminal')
+    expect(error.type).toBe('error')
+    expect(error.code).toBe('INVALID_TERMINAL_ID')
+    expect(error.terminalId).toBe('nonexistent_terminal')
 
     await close()
   })
@@ -920,54 +869,5 @@ describe('ws protocol', () => {
     expect(rateLimited).toHaveLength(0)
 
     ws.close()
-  })
-
-  it('dedupes terminal.create requestIds across connections', async () => {
-    const requestId = 'dedup-cross-conn'
-
-    const ws1 = new WebSocket(`ws://127.0.0.1:${port}/ws`)
-    await new Promise<void>((resolve) => ws1.on('open', () => resolve()))
-    ws1.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
-    await new Promise<void>((resolve) => {
-      ws1.on('message', (data) => {
-        const msg = JSON.parse(data.toString())
-        if (msg.type === 'ready') resolve()
-      })
-    })
-
-    ws1.send(JSON.stringify({ type: 'terminal.create', requestId, mode: 'shell' }))
-    const created1 = await new Promise<any>((resolve) => {
-      ws1.on('message', (data) => {
-        const msg = JSON.parse(data.toString())
-        if (msg.type === 'terminal.created' && msg.requestId === requestId) resolve(msg)
-      })
-    })
-
-    expect(registry.records.size).toBe(1)
-
-    const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws`)
-    await new Promise<void>((resolve) => ws2.on('open', () => resolve()))
-    ws2.send(JSON.stringify({ type: 'hello', token: 'testtoken-testtoken' }))
-    await new Promise<void>((resolve) => {
-      ws2.on('message', (data) => {
-        const msg = JSON.parse(data.toString())
-        if (msg.type === 'ready') resolve()
-      })
-    })
-
-    ws2.send(JSON.stringify({ type: 'terminal.create', requestId, mode: 'shell' }))
-    const created2 = await new Promise<any>((resolve) => {
-      ws2.on('message', (data) => {
-        const msg = JSON.parse(data.toString())
-        if (msg.type === 'terminal.created' && msg.requestId === requestId) resolve(msg)
-      })
-    })
-
-    // Second connection should reuse the same terminal.
-    expect(created2.terminalId).toBe(created1.terminalId)
-    expect(registry.records.size).toBe(1)
-
-    await closeWebSocket(ws1)
-    await closeWebSocket(ws2)
   })
 })

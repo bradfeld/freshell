@@ -8,7 +8,6 @@ import codingCliReducer, { registerCodingCliRequest } from '@/store/codingCliSli
 import panesReducer from '@/store/panesSlice'
 import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import terminalActivityReducer from '@/store/terminalActivitySlice'
-import { createPaneCleanupListenerMiddleware } from '@/store/paneCleanupListeners'
 import type { Tab } from '@/store/types'
 
 // Mock the ws-client module
@@ -59,7 +58,6 @@ type StoreOverrides = Partial<TabsState> & {
 
 function createStore(overrides: StoreOverrides = {}) {
   const { panes, codingCli, settings, terminalActivity, ...tabsState } = overrides
-  const listener = createPaneCleanupListenerMiddleware()
   return configureStore({
     reducer: {
       tabs: tabsReducer,
@@ -68,7 +66,6 @@ function createStore(overrides: StoreOverrides = {}) {
       settings: settingsReducer,
       terminalActivity: terminalActivityReducer,
     },
-    middleware: (getDefault) => getDefault().prepend(listener.middleware),
     preloadedState: {
       tabs: {
         tabs: [],
@@ -397,7 +394,7 @@ describe('TabBar', () => {
       })
     })
 
-    it('close button cancels terminal.create when tab has no terminalId yet', () => {
+    it('close button does not send ws message when tab has no terminalId', () => {
       const tab = createTab({
         id: 'tab-1',
         title: 'Tab 1',
@@ -431,10 +428,7 @@ describe('TabBar', () => {
       const closeButton = screen.getByTitle('Close (Shift+Click to kill)')
       fireEvent.click(closeButton)
 
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'terminal.create.cancel',
-        requestId: 'req-1',
-      })
+      expect(mockSend).not.toHaveBeenCalled()
     })
 
     it('clicking close button stops event propagation (does not activate tab)', () => {

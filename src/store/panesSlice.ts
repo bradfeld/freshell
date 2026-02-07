@@ -2,7 +2,6 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { nanoid } from 'nanoid'
 import type { PanesState, PaneContent, PaneContentInput, PaneNode } from './paneTypes'
 import { isValidClaudeSessionId } from '@/lib/claude-session-id'
-import { loadPersistedPanes, loadPersistedTabs, TABS_SCHEMA_VERSION } from './persistMiddleware'
 
 /**
  * Normalize terminal input to full PaneContent with defaults.
@@ -33,11 +32,18 @@ function normalizeContent(input: PaneContentInput): PaneContent {
 }
 
 function applyLegacyResumeSessionIds(state: PanesState): PanesState {
-  const persistedTabs = loadPersistedTabs()
-  if (!persistedTabs) return state
-  if (persistedTabs.version > TABS_SCHEMA_VERSION) return state
+  if (typeof localStorage === 'undefined') return state
+  const rawTabs = localStorage.getItem('freshell.tabs.v1')
+  if (!rawTabs) return state
 
-  const tabsState = persistedTabs.tabs
+  let parsedTabs: any
+  try {
+    parsedTabs = JSON.parse(rawTabs)
+  } catch {
+    return state
+  }
+
+  const tabsState = parsedTabs?.tabs
   if (!tabsState?.tabs) return state
 
   const resumeByTabId = new Map<string, string>()
@@ -116,19 +122,22 @@ function loadInitialPanesState(): PanesState {
     paneTitleSetByUser: {},
   }
 
-  const persisted = loadPersistedPanes()
-  if (!persisted) return defaultState
-
-  if (import.meta.env.MODE === 'development') {
-    console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(persisted.layouts || {}))
+  try {
+    const raw = localStorage.getItem('freshell.panes.v1')
+    if (!raw) return defaultState
+    const parsed = JSON.parse(raw) as PanesState
+    console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(parsed.layouts || {}))
+    const state = {
+      layouts: parsed.layouts || {},
+      activePane: parsed.activePane || {},
+      paneTitles: parsed.paneTitles || {},
+      paneTitleSetByUser: parsed.paneTitleSetByUser || {},
+    }
+    return applyLegacyResumeSessionIds(state)
+  } catch (err) {
+    console.error('[PanesSlice] Failed to load from localStorage:', err)
+    return defaultState
   }
-  const state = {
-    layouts: persisted.layouts || {},
-    activePane: persisted.activePane || {},
-    paneTitles: persisted.paneTitles || {},
-    paneTitleSetByUser: persisted.paneTitleSetByUser || {},
-  }
-  return applyLegacyResumeSessionIds(state)
 }
 
 const initialState: PanesState = loadInitialPanesState()
@@ -188,14 +197,11 @@ function buildHorizontalRow(leaves: Extract<PaneNode, { type: 'leaf' }>[]): Pane
   const mid = Math.ceil(leaves.length / 2)
   const left = leaves.slice(0, mid)
   const right = leaves.slice(mid)
-  // Size splits proportionally so each leaf ends up with equal width.
-  const leftSize = (left.length / leaves.length) * 100
-  const rightSize = 100 - leftSize
   return {
     type: 'split',
     id: nanoid(),
     direction: 'horizontal',
-    sizes: [leftSize, rightSize],
+    sizes: [50, 50],
     children: [buildHorizontalRow(left), buildHorizontalRow(right)],
   }
 }
@@ -530,14 +536,19 @@ export const panesSlice = createSlice({
         content.kind === 'session' &&
         previousContent.sessionId !== content.sessionId
 
-      if (kindChanged) {
-        // Kind changed: clear all title state (including user-set titles)
-        delete state.paneTitles[tabId]?.[paneId]
-        delete state.paneTitleSetByUser[tabId]?.[paneId]
-      } else if (terminalIdChanged || sessionIdChanged) {
-        // Terminal/session identity changed: clear non-user-set titles only
+      if (kindChanged || terminalIdChanged || sessionIdChanged) {
+        // Only clear non-user-set titles
         if (state.paneTitles[tabId]?.[paneId] && !state.paneTitleSetByUser[tabId]?.[paneId]) {
           delete state.paneTitles[tabId][paneId]
+        }
+        // Always clear kind-related state when kind changes
+        if (kindChanged) {
+          if (state.paneTitles[tabId]?.[paneId]) {
+            delete state.paneTitles[tabId][paneId]
+          }
+          if (state.paneTitleSetByUser[tabId]?.[paneId]) {
+            delete state.paneTitleSetByUser[tabId][paneId]
+          }
         }
       }
     },

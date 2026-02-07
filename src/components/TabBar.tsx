@@ -35,7 +35,6 @@ interface SortableTabProps {
   tab: Tab
   status: TerminalStatus
   displayTitle: string
-  isWorking?: boolean
   isActive: boolean
   isDragging: boolean
   isRenaming: boolean
@@ -52,7 +51,6 @@ function SortableTab({
   tab,
   status,
   displayTitle,
-  isWorking,
   isActive,
   isDragging,
   isRenaming,
@@ -88,7 +86,6 @@ function SortableTab({
       <TabItem
         tab={tabWithDisplayTitle}
         status={status}
-        isWorking={isWorking}
         isActive={isActive}
         isDragging={isDragging}
         isRenaming={isRenaming}
@@ -105,19 +102,17 @@ function SortableTab({
 }
 
 // Stable empty object to avoid creating new references
-const EMPTY_TABS: Tab[] = []
 const EMPTY_LAYOUTS: Record<string, never> = {}
 const EMPTY_PANE_TITLES: Record<string, Record<string, string>> = {}
 const EMPTY_ACTIVE_PANES: Record<string, string> = {}
 const EMPTY_PENDING_REQUESTS: Record<string, never> = {}
 const EMPTY_CODINGCLI_SESSIONS: Record<string, never> = {}
-const EMPTY_WORKING_PANES: Record<string, boolean> = {}
 
 export default function TabBar() {
   useTerminalActivityMonitor()
   const dispatch = useAppDispatch()
   const tabsState = useAppSelector((s) => s.tabs)
-  const tabs = tabsState?.tabs ?? EMPTY_TABS
+  const tabs = tabsState?.tabs ?? []
   const activeTabId = tabsState?.activeTabId ?? null
   const renameRequestTabId = tabsState?.renameRequestTabId ?? null
   const paneLayouts = useAppSelector((s) => s.panes?.layouts) ?? EMPTY_LAYOUTS
@@ -125,7 +120,6 @@ export default function TabBar() {
   const activePanes = useAppSelector((s) => s.panes?.activePane) ?? EMPTY_ACTIVE_PANES
   const pendingRequests = useAppSelector((s) => s.codingCli?.pendingRequests) ?? EMPTY_PENDING_REQUESTS
   const codingCliSessions = useAppSelector((s) => s.codingCli?.sessions) ?? EMPTY_CODINGCLI_SESSIONS
-  const workingPanes = useAppSelector((s) => s.terminalActivity?.working) ?? EMPTY_WORKING_PANES
   const settings = useAppSelector((s) => s.settings?.settings) ?? defaultSettings
 
   // Compute display title for a single tab
@@ -178,16 +172,6 @@ export default function TabBar() {
     // Default for tabs with no terminal or session panes (e.g., browser-only)
     return 'running'
   }, [paneLayouts, pendingRequests, codingCliSessions])
-
-  const isTabWorking = useCallback(
-    (tabId: string): boolean => {
-      const layout = paneLayouts[tabId]
-      if (!layout) return false
-      const terminalPanes = collectTerminalPanes(layout)
-      return terminalPanes.some((pane) => !!workingPanes[pane.paneId])
-    },
-    [paneLayouts, workingPanes],
-  )
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -272,14 +256,12 @@ export default function TabBar() {
           <div className="flex items-end gap-0.5 overflow-x-auto flex-1">
             {tabs.map((tab: Tab) => {
               const status = getTabStatus(tab.id)
-              const isWorking = isTabWorking(tab.id)
               return (
                 <SortableTab
                   key={tab.id}
                   tab={tab}
                   status={status}
                   displayTitle={getDisplayTitle(tab)}
-                  isWorking={isWorking}
                   isActive={tab.id === activeTabId}
                   isDragging={activeId === tab.id}
                   isRenaming={renamingId === tab.id}
@@ -338,7 +320,6 @@ export default function TabBar() {
               <TabItem
                 tab={{ ...activeTab, title: getDisplayTitle(activeTab) }}
                 status={getTabStatus(activeTab.id)}
-                isWorking={isTabWorking(activeTab.id)}
                 isActive={activeTab.id === activeTabId}
                 isDragging={false}
                 isRenaming={false}
