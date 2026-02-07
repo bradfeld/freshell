@@ -11,6 +11,7 @@ import panesReducer from '@/store/panesSlice'
 import terminalActivityReducer from '@/store/terminalActivitySlice'
 import codingCliReducer from '@/store/codingCliSlice'
 import sessionActivityReducer from '@/store/sessionActivitySlice'
+import idleWarningsReducer from '@/store/idleWarningsSlice'
 
 // Mock the WebSocket client
 const mockSend = vi.fn()
@@ -80,6 +81,7 @@ function createTestStore() {
       terminalActivity: terminalActivityReducer,
       codingCli: codingCliReducer,
       sessionActivity: sessionActivityReducer,
+      idleWarnings: idleWarningsReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -125,6 +127,9 @@ function createTestStore() {
       },
       sessionActivity: {
         sessions: {},
+      },
+      idleWarnings: {
+        warnings: {},
       },
     },
   })
@@ -655,6 +660,45 @@ describe('App WS message handling', () => {
   })
 })
 
+describe('App Component - Idle Warnings', () => {
+  let messageHandler: ((msg: any) => void) | null = null
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
+      messageHandler = cb
+      return () => { messageHandler = null }
+    })
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
+      return Promise.resolve({})
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('shows an indicator when the server warns an idle terminal will auto-kill soon', async () => {
+    renderApp()
+    await waitFor(() => expect(messageHandler).not.toBeNull())
+
+    messageHandler!({
+      type: 'terminal.idle.warning',
+      terminalId: 'term-idle',
+      killMinutes: 10,
+      warnMinutes: 3,
+      lastActivityAt: Date.now(),
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /auto-kill soon/i })).toBeInTheDocument()
+    })
+  })
+})
+
 describe('Tab Switching Keyboard Shortcuts', () => {
   const originalSessionStorage = global.sessionStorage
 
@@ -678,6 +722,7 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         terminalActivity: terminalActivityReducer,
         codingCli: codingCliReducer,
         sessionActivity: sessionActivityReducer,
+        idleWarnings: idleWarningsReducer,
       },
       middleware: (getDefault) =>
         getDefault({
@@ -723,6 +768,9 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         },
         sessionActivity: {
           sessions: {},
+        },
+        idleWarnings: {
+          warnings: {},
         },
       },
     })
