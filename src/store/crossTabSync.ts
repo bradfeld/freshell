@@ -94,12 +94,21 @@ function handleIncomingRaw(store: StoreLike, key: string, raw: string) {
 export function installCrossTabSync(store: StoreLike): () => void {
   if (typeof window === 'undefined') return () => {}
 
+  // Storage events and BroadcastChannel can both deliver the same persisted payload.
+  // Dedupe by exact raw value so we don't hydrate twice.
+  const lastProcessedRawByKey = new Map<string, string>()
+  const handleIncomingRawDeduped = (key: string, raw: string) => {
+    if (lastProcessedRawByKey.get(key) === raw) return
+    lastProcessedRawByKey.set(key, raw)
+    handleIncomingRaw(store, key, raw)
+  }
+
   const onStorage = (e: StorageEvent) => {
     if (e.storageArea && e.storageArea !== localStorage) return
     const key = e.key
     if (key !== TABS_STORAGE_KEY && key !== PANES_STORAGE_KEY) return
     if (typeof e.newValue !== 'string') return
-    handleIncomingRaw(store, key, e.newValue)
+    handleIncomingRawDeduped(key, e.newValue)
   }
 
   window.addEventListener('storage', onStorage)
@@ -111,7 +120,7 @@ export function installCrossTabSync(store: StoreLike): () => void {
       const res = zPersistBroadcastMsg.safeParse((event as any)?.data)
       if (!res.success) return
       if (res.data.sourceId === getPersistBroadcastSourceId()) return
-      handleIncomingRaw(store, res.data.key, res.data.raw)
+      handleIncomingRawDeduped(res.data.key, res.data.raw)
     }
   }
 
