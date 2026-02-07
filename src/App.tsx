@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
-import { setProjects } from '@/store/sessionsSlice'
+import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
 import { switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
-import { closeTabWithCleanup, createTabWithPane } from '@/store/tabThunks'
+import { createTabWithPane } from '@/store/tabThunks'
 import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
@@ -13,6 +13,7 @@ import { getSessionsForHello } from '@/lib/session-utils'
 import { setClientPerfEnabled } from '@/lib/perf-logger'
 import { applyLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import { store } from '@/store/store'
+import { installCrossTabSync } from '@/store/crossTabSync'
 import { useThemeEffect } from '@/hooks/useTheme'
 import { buildDefaultPaneContent } from '@/lib/default-pane'
 import Sidebar, { AppView } from '@/components/Sidebar'
@@ -47,6 +48,12 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const mainContentRef = useRef<HTMLDivElement>(null)
+  const prevIsMobileRef = useRef(false)
+
+  // Keep this tab's Redux state in sync with persisted writes from other browser tabs.
+  useEffect(() => {
+    return installCrossTabSync(store)
+  }, [])
 
   // Sidebar width from settings (or local state during drag)
   const sidebarWidth = settings.sidebar?.width ?? 288
@@ -64,10 +71,15 @@ export default function App() {
 
   // Auto-collapse sidebar on mobile
   useEffect(() => {
-    if (isMobile && !sidebarCollapsed) {
+    const wasMobile = prevIsMobileRef.current
+    prevIsMobileRef.current = isMobile
+
+    // Only auto-collapse on viewport transition into mobile; don't force-close
+    // after the user intentionally opens it on mobile.
+    if (!wasMobile && isMobile && !sidebarCollapsed) {
       dispatch(updateSettingsLocal({ sidebar: { ...settings.sidebar, collapsed: true } }))
     }
-  }, [isMobile])
+  }, [dispatch, isMobile, settings.sidebar, sidebarCollapsed])
 
   const handleSidebarResize = useCallback((delta: number) => {
     const newWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth + delta))
@@ -78,7 +90,9 @@ export default function App() {
     try {
       await api.patch('/api/settings', { sidebar: settings.sidebar })
       dispatch(markSaved())
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }, [settings.sidebar, dispatch])
 
   const toggleSidebarCollapse = useCallback(async () => {
@@ -87,7 +101,9 @@ export default function App() {
     try {
       await api.patch('/api/settings', { sidebar: { ...settings.sidebar, collapsed: newCollapsed } })
       dispatch(markSaved())
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }, [sidebarCollapsed, settings.sidebar, dispatch])
 
   const toggleTheme = async () => {
@@ -96,7 +112,9 @@ export default function App() {
     try {
       await api.patch('/api/settings', { theme: newTheme })
       dispatch(markSaved())
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }
 
   const handleShare = async () => {
@@ -185,7 +203,15 @@ export default function App() {
       }
 
       if (msg.type === 'sessions.updated') {
-        dispatch(setProjects(msg.projects || []))
+        // Support chunked sessions for mobile browsers with limited WebSocket buffers.
+        if (msg.clear) {
+          dispatch(clearProjects())
+          dispatch(mergeProjects(msg.projects || []))
+        } else if (msg.append) {
+          dispatch(mergeProjects(msg.projects || []))
+        } else {
+          dispatch(setProjects(msg.projects || []))
+        }
       }
       if (msg.type === 'settings.updated') {
         dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
@@ -348,6 +374,7 @@ export default function App() {
             onClick={toggleTheme}
             className="p-1.5 rounded-md hover:bg-muted transition-colors"
             title={`Theme: ${settings.theme}`}
+            aria-label="Toggle theme"
           >
             {settings.theme === 'dark' ? (
               <Moon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -359,6 +386,7 @@ export default function App() {
             onClick={handleShare}
             className="p-1.5 rounded-md hover:bg-muted transition-colors"
             title="Share LAN access"
+            aria-label="Share LAN access"
           >
             <Share2 className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
@@ -380,9 +408,11 @@ export default function App() {
       <div className="flex-1 min-h-0 flex relative" ref={mainContentRef}>
         {/* Mobile overlay when sidebar is open */}
         {isMobile && !sidebarCollapsed && (
-          <div
+          <button
+            type="button"
             className="absolute inset-0 bg-black/50 z-10"
             onClick={toggleSidebarCollapse}
+            aria-label="Close sidebar"
           />
         )}
         {/* Sidebar - on mobile it overlays, on desktop it's inline */}
@@ -409,19 +439,24 @@ export default function App() {
 
       {/* Share modal for Windows */}
       {shareModalUrl && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
-          onClick={() => setShareModalUrl(null)}
-        >
+        <div className="fixed inset-0 flex items-center justify-center z-[60] relative">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShareModalUrl(null)}
+            aria-label="Close share modal"
+          />
           <div
-            className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6"
-            onClick={(e) => e.stopPropagation()}
+            className="bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 p-6 relative z-10"
+            role="dialog"
+            aria-modal="true"
           >
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Welcome to your freshell!</h2>
               <button
                 onClick={() => setShareModalUrl(null)}
                 className="p-1 rounded hover:bg-muted transition-colors"
+                aria-label="Close"
               >
                 <X className="h-4 w-4 text-muted-foreground" />
               </button>
