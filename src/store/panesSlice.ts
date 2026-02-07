@@ -2,6 +2,7 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { nanoid } from 'nanoid'
 import type { PanesState, PaneContent, PaneContentInput, PaneNode } from './paneTypes'
 import { isValidClaudeSessionId } from '@/lib/claude-session-id'
+import { loadPersistedPanes, loadPersistedTabs, TABS_SCHEMA_VERSION } from './persistMiddleware'
 
 /**
  * Normalize terminal input to full PaneContent with defaults.
@@ -32,18 +33,11 @@ function normalizeContent(input: PaneContentInput): PaneContent {
 }
 
 function applyLegacyResumeSessionIds(state: PanesState): PanesState {
-  if (typeof localStorage === 'undefined') return state
-  const rawTabs = localStorage.getItem('freshell.tabs.v1')
-  if (!rawTabs) return state
+  const persistedTabs = loadPersistedTabs()
+  if (!persistedTabs) return state
+  if (persistedTabs.version > TABS_SCHEMA_VERSION) return state
 
-  let parsedTabs: any
-  try {
-    parsedTabs = JSON.parse(rawTabs)
-  } catch {
-    return state
-  }
-
-  const tabsState = parsedTabs?.tabs
+  const tabsState = persistedTabs.tabs
   if (!tabsState?.tabs) return state
 
   const resumeByTabId = new Map<string, string>()
@@ -122,22 +116,19 @@ function loadInitialPanesState(): PanesState {
     paneTitleSetByUser: {},
   }
 
-  try {
-    const raw = localStorage.getItem('freshell.panes.v1')
-    if (!raw) return defaultState
-    const parsed = JSON.parse(raw) as PanesState
-    console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(parsed.layouts || {}))
-    const state = {
-      layouts: parsed.layouts || {},
-      activePane: parsed.activePane || {},
-      paneTitles: parsed.paneTitles || {},
-      paneTitleSetByUser: parsed.paneTitleSetByUser || {},
-    }
-    return applyLegacyResumeSessionIds(state)
-  } catch (err) {
-    console.error('[PanesSlice] Failed to load from localStorage:', err)
-    return defaultState
+  const persisted = loadPersistedPanes()
+  if (!persisted) return defaultState
+
+  if (import.meta.env.MODE === 'development') {
+    console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(persisted.layouts || {}))
   }
+  const state = {
+    layouts: persisted.layouts || {},
+    activePane: persisted.activePane || {},
+    paneTitles: persisted.paneTitles || {},
+    paneTitleSetByUser: persisted.paneTitleSetByUser || {},
+  }
+  return applyLegacyResumeSessionIds(state)
 }
 
 const initialState: PanesState = loadInitialPanesState()
@@ -197,11 +188,14 @@ function buildHorizontalRow(leaves: Extract<PaneNode, { type: 'leaf' }>[]): Pane
   const mid = Math.ceil(leaves.length / 2)
   const left = leaves.slice(0, mid)
   const right = leaves.slice(mid)
+  // Size splits proportionally so each leaf ends up with equal width.
+  const leftSize = (left.length / leaves.length) * 100
+  const rightSize = 100 - leftSize
   return {
     type: 'split',
     id: nanoid(),
     direction: 'horizontal',
-    sizes: [50, 50],
+    sizes: [leftSize, rightSize],
     children: [buildHorizontalRow(left), buildHorizontalRow(right)],
   }
 }

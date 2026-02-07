@@ -15,8 +15,9 @@ if (import.meta.env.DEV) {
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  // StrictMode disabled due to xterm.js incompatibility (double-mount causes renderer issues)
-  <Provider store={store}>
-    <App />
-  </Provider>,
+  <React.StrictMode>
+    <Provider store={store}>
+      <App />
+    </Provider>
+  </React.StrictMode>,
 )

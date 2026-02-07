@@ -17,7 +17,10 @@ describe('Activity sort integration', () => {
     const timestamp = Date.now()
 
     localStorage.setItem('freshell.sessionActivity.v1', JSON.stringify({
-      'session-123': timestamp,
+      version: 1,
+      sessions: {
+        'session-123': timestamp,
+      },
     }))
 
     vi.resetModules()

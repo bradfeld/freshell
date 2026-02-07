@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import type { CodingCliProviderName } from '@/store/types'
 import { toggleProjectExpanded, setProjects } from '@/store/sessionsSlice'
@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { createTabWithPane } from '@/store/tabThunks'
 import { cn } from '@/lib/utils'
 import { getProviderLabel } from '@/lib/coding-cli-utils'
-import { Search, ChevronRight, MoreHorizontal, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
+import { Search, ChevronRight, Play, Pencil, Trash2, RefreshCw } from 'lucide-react'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 
 function formatTime(ts: number) {
@@ -196,6 +196,12 @@ function ProjectCard({
 }) {
   const color = project.color || '#6b7280'
   const [showColorPicker, setShowColorPicker] = useState(false)
+  const colorInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!showColorPicker) return
+    colorInputRef.current?.focus()
+  }, [showColorPicker])
 
   return (
     <div className="rounded-lg border border-border/50 bg-card overflow-hidden">
@@ -246,7 +252,7 @@ function ProjectCard({
                     setShowColorPicker(false)
                   }}
                   className="absolute top-full left-0 mt-1"
-                  autoFocus
+                  ref={colorInputRef}
                   onBlur={() => setShowColorPicker(false)}
                 />
               )}
@@ -289,6 +295,12 @@ function SessionRow({
   const [title, setTitle] = useState(session.title || '')
   const [summary, setSummary] = useState(session.summary || '')
   const [showActions, setShowActions] = useState(false)
+  const titleInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!editing) return
+    titleInputRef.current?.focus()
+  }, [editing])
 
   if (editing) {
     return (
@@ -298,7 +310,7 @@ function SessionRow({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
-          autoFocus
+          ref={titleInputRef}
         />
         <input
           className="w-full h-8 px-3 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-border"
@@ -335,6 +347,15 @@ function SessionRow({
     <div
       className="group px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
       onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open session ${session.title || session.sessionId.slice(0, 8)}`}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
       data-context={ContextIds.HistorySession}
@@ -372,24 +393,32 @@ function SessionRow({
             'flex items-center gap-1 transition-opacity',
             showActions ? 'opacity-100' : 'opacity-0'
           )}
-          onClick={(e) => e.stopPropagation()}
         >
           <button
-            onClick={onOpen}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpen()
+            }}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Open"
           >
             <Play className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => setEditing(true)}
+            onClick={(e) => {
+              e.stopPropagation()
+              setEditing(true)
+            }}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Edit"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             title="Delete"
           >

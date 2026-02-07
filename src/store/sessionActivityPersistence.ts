@@ -1,5 +1,5 @@
 import type { Middleware } from '@reduxjs/toolkit'
-import { SESSION_ACTIVITY_STORAGE_KEY } from './sessionActivitySlice'
+import { SESSION_ACTIVITY_SCHEMA_VERSION, SESSION_ACTIVITY_STORAGE_KEY } from './sessionActivitySlice'
 
 export const SESSION_ACTIVITY_PERSIST_DEBOUNCE_MS = 5000
 
@@ -70,7 +70,10 @@ export const sessionActivityPersistMiddleware: Middleware<{}, SessionActivitySta
 
     try {
       const sessions = store.getState().sessionActivity?.sessions || {}
-      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, JSON.stringify(sessions))
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, JSON.stringify({
+        version: SESSION_ACTIVITY_SCHEMA_VERSION,
+        sessions,
+      }))
       dirty = false
     } catch {
       // Ignore storage errors (quota exceeded, etc.)

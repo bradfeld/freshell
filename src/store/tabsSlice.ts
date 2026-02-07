@@ -2,6 +2,7 @@ import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit'
 import type { Tab } from './types'
 import { nanoid } from 'nanoid'
 import { removeLayout } from './panesSlice'
+import { loadPersistedTabs, TABS_SCHEMA_VERSION } from './persistMiddleware'
 
 export interface TabsState {
   tabs: Tab[]
@@ -21,11 +22,12 @@ function loadInitialTabsState(): TabsState {
   }
 
   try {
-    const raw = localStorage.getItem('freshell.tabs.v1')
-    if (!raw) return defaultState
-    const parsed = JSON.parse(raw)
-    // The persisted format is { tabs: TabsState }
-    const tabsState = parsed?.tabs as Partial<TabsState> | undefined
+    const persisted = loadPersistedTabs()
+    if (!persisted) return defaultState
+    if (persisted.version > TABS_SCHEMA_VERSION) return defaultState
+
+    // The persisted format is { version, tabs: TabsState }
+    const tabsState = persisted.tabs as Partial<TabsState> | undefined
     if (!Array.isArray(tabsState?.tabs)) return defaultState
 
     if (import.meta.env.MODE === 'development') {
@@ -45,7 +47,9 @@ function loadInitialTabsState(): TabsState {
       renameRequestTabId: null,
     }
   } catch (err) {
-    console.error('[TabsSlice] Failed to load from localStorage:', err)
+    if (import.meta.env.MODE === 'development') {
+      console.error('[TabsSlice] Failed to load from localStorage:', err)
+    }
     return defaultState
   }
 }

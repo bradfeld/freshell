@@ -50,6 +50,27 @@ describe('sessionActivitySlice - ratchet persistence', () => {
 
   it('loads from localStorage on slice initialization', async () => {
     const timestamp = Date.now()
+    localStorage.setItem('freshell.sessionActivity.v1', JSON.stringify({
+      version: 1,
+      sessions: { 'claude:session-1': timestamp },
+    }))
+
+    vi.resetModules()
+    const {
+      default: freshReducer,
+      selectSessionActivity: freshSelectSessionActivity,
+    } = await import('@/store/sessionActivitySlice')
+
+    const store = configureStore({
+      reducer: { sessionActivity: freshReducer },
+    })
+
+    const state = store.getState()
+    expect(freshSelectSessionActivity(state, 'claude:session-1')).toBe(timestamp)
+  })
+
+  it('loads legacy record format from localStorage', async () => {
+    const timestamp = Date.now()
     localStorage.setItem('freshell.sessionActivity.v1', JSON.stringify({ 'claude:session-1': timestamp }))
 
     vi.resetModules()
@@ -78,7 +99,10 @@ describe('sessionActivitySlice - ratchet persistence', () => {
     const now = Date.now()
     localStorage.setItem(
       'freshell.sessionActivity.v1',
-      JSON.stringify({ 'claude:session-1': 'bad-value', 'codex:session-2': now })
+      JSON.stringify({
+        version: 1,
+        sessions: { 'claude:session-1': 'bad-value', 'codex:session-2': now },
+      })
     )
 
     vi.resetModules()

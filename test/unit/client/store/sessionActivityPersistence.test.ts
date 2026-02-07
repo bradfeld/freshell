@@ -48,8 +48,8 @@ describe('sessionActivity persistence middleware', () => {
     vi.runAllTimers()
 
     const stored = JSON.parse(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY) || '{}')
-    expect(stored['claude:old-session']).toBeUndefined()
-    expect(stored['claude:fresh-session']).toBe(now)
+    expect(stored.sessions['claude:old-session']).toBeUndefined()
+    expect(stored.sessions['claude:fresh-session']).toBe(now)
   })
 
   it('retries persistence when storage becomes available', () => {

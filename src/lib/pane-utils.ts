@@ -47,6 +47,23 @@ export function collectPaneIds(node: PaneNode): string[] {
   ]
 }
 
+/**
+ * Collect pane leaf IDs from possibly-malformed persisted layout nodes.
+ * Prefer this over collectPaneIds when dealing with untrusted localStorage data.
+ */
+export function collectPaneIdsSafe(node: any, out: string[] = []): string[] {
+  if (!node || typeof node !== 'object') return out
+  if (node.type === 'leaf') {
+    if (typeof node.id === 'string') out.push(node.id)
+    return out
+  }
+  if (node.type === 'split' && Array.isArray(node.children) && node.children.length >= 2) {
+    collectPaneIdsSafe(node.children[0], out)
+    collectPaneIdsSafe(node.children[1], out)
+  }
+  return out
+}
+
 export function collectTerminalPanes(node: PaneNode): Array<{ paneId: string; content: TerminalPaneContent }> {
   if (node.type === 'leaf') {
     if (node.content.kind === 'terminal') {

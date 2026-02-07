@@ -79,6 +79,7 @@ describe('tabs persistence - skipPersist + strip volatile fields', () => {
     const raw = localStorage.getItem('freshell.tabs.v1')
     expect(raw).not.toBeNull()
     const parsed = JSON.parse(raw!)
+    expect(parsed.version).toBe(1)
     expect(parsed.tabs.tabs[0].lastInputAt).toBeUndefined()
   })
 })

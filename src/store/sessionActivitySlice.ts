@@ -1,6 +1,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 
 export const SESSION_ACTIVITY_STORAGE_KEY = 'freshell.sessionActivity.v1'
+export const SESSION_ACTIVITY_SCHEMA_VERSION = 1
 const MAX_SESSION_ACTIVITY_ENTRIES = 2000
 const SESSION_ACTIVITY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -59,7 +60,20 @@ function loadFromStorage(): Record<string, number> {
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return {}
-    const normalized = normalizeSessions(parsed as Record<string, unknown>)
+
+    // Current persisted shape: { version: 1, sessions: Record<string, number> }
+    // Legacy shape (pre-versioning): Record<string, number>
+    let rawSessions: unknown = parsed
+    const version = (parsed as any).version
+    if (typeof version === 'number') {
+      // Forward compatibility: if we ever bump the schema, older clients should ignore newer payloads.
+      if (version > SESSION_ACTIVITY_SCHEMA_VERSION) return {}
+      rawSessions = (parsed as any).sessions
+    }
+
+    if (!rawSessions || typeof rawSessions !== 'object' || Array.isArray(rawSessions)) return {}
+
+    const normalized = normalizeSessions(rawSessions as Record<string, unknown>)
     return pruneSessions(normalized, Date.now())
   } catch {
     return {}

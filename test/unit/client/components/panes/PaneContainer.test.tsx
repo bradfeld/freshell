@@ -7,6 +7,7 @@ import panesReducer from '@/store/panesSlice'
 import settingsReducer from '@/store/settingsSlice'
 import connectionReducer, { ConnectionState } from '@/store/connectionSlice'
 import codingCliReducer from '@/store/codingCliSlice'
+import { createPaneCleanupListenerMiddleware } from '@/store/paneCleanupListeners'
 import type { PanesState } from '@/store/panesSlice'
 import type { PaneNode, PaneContent, EditorPaneContent } from '@/store/paneTypes'
 
@@ -102,6 +103,7 @@ function createStore(
   initialPanesState: Partial<PanesState> = {},
   initialConnectionState: Partial<ConnectionState> = {}
 ) {
+  const listener = createPaneCleanupListenerMiddleware()
   return configureStore({
     reducer: {
       panes: panesReducer,
@@ -109,6 +111,7 @@ function createStore(
       connection: connectionReducer,
       codingCli: codingCliReducer,
     },
+    middleware: (getDefault) => getDefault().prepend(listener.middleware),
     preloadedState: {
       panes: {
         layouts: {},

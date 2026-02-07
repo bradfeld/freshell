@@ -186,10 +186,11 @@ export default function SettingsView() {
   )
 
   useEffect(() => {
+    const providerTimers = providerCwdTimerRef.current
     return () => {
       if (pendingRef.current) clearTimeout(pendingRef.current)
       if (defaultCwdTimerRef.current) clearTimeout(defaultCwdTimerRef.current)
-      for (const timer of Object.values(providerCwdTimerRef.current)) {
+      for (const timer of Object.values(providerTimers)) {
         clearTimeout(timer)
       }
     }

@@ -1,8 +1,7 @@
-import { useRef, useCallback, useMemo } from 'react'
+import { useRef, useCallback } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { closePane, setActivePane, resizePanes } from '@/store/panesSlice'
-import { swapPaneContent } from '@/store/paneThunks'
-import { cancelCodingCliRequest } from '@/store/codingCliSlice'
+import { setActivePane, resizePanes } from '@/store/panesSlice'
+import { closePaneWithCleanup, swapPaneContent } from '@/store/paneThunks'
 import type { PaneNode, PaneContent } from '@/store/paneTypes'
 import Pane from './Pane'
 import PaneDivider from './PaneDivider'
@@ -13,7 +12,6 @@ import PanePicker, { type PanePickerType } from './PanePicker'
 import { isCodingCliProviderName } from '@/lib/coding-cli-utils'
 import SessionView from '../SessionView'
 import { cn } from '@/lib/utils'
-import { getWsClient } from '@/lib/ws-client'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
 import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
@@ -38,29 +36,14 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const pendingRequests = useAppSelector((s) => s.codingCli?.pendingRequests ?? EMPTY_PENDING_REQUESTS)
   const codingCliSessions = useAppSelector((s) => s.codingCli?.sessions ?? EMPTY_CODING_CLI_SESSIONS)
   const containerRef = useRef<HTMLDivElement>(null)
-  const ws = useMemo(() => getWsClient(), [])
 
   // Check if this is the only pane (root is a leaf)
   const rootNode = useAppSelector((s) => s.panes.layouts[tabId])
   const isOnlyPane = rootNode?.type === 'leaf'
 
-  const handleClose = useCallback((paneId: string, content: PaneContent) => {
-    if (content.kind === 'terminal') {
-      const terminalId = content.terminalId
-      if (terminalId) {
-        ws.send({ type: 'terminal.detach', terminalId })
-      }
-    }
-    if (content.kind === 'session') {
-      const sessionId = content.sessionId
-      if (pendingRequests[sessionId]) {
-        dispatch(cancelCodingCliRequest({ requestId: sessionId }))
-      } else {
-        ws.send({ type: 'codingcli.kill', sessionId })
-      }
-    }
-    dispatch(closePane({ tabId, paneId }))
-  }, [dispatch, tabId, ws, pendingRequests])
+  const handleClose = useCallback((paneId: string) => {
+    dispatch(closePaneWithCleanup({ tabId, paneId }))
+  }, [dispatch, tabId])
 
   const handleFocus = useCallback((paneId: string) => {
     dispatch(setActivePane({ tabId, paneId }))
@@ -111,7 +94,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         isOnlyPane={isOnlyPane}
         title={paneTitle}
         status={paneStatus}
-        onClose={() => handleClose(node.id, node.content)}
+        onClose={() => handleClose(node.id)}
         onFocus={() => handleFocus(node.id)}
       >
         {renderContent(tabId, node.id, node.content, isOnlyPane, hidden)}
@@ -241,7 +224,7 @@ function PickerWrapper({
   }, [dispatch, tabId, paneId, settings])
 
   const handleCancel = useCallback(() => {
-    dispatch(closePane({ tabId, paneId }))
+    dispatch(closePaneWithCleanup({ tabId, paneId }))
   }, [dispatch, tabId, paneId])
 
   return (
