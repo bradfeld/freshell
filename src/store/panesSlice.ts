@@ -530,19 +530,14 @@ export const panesSlice = createSlice({
         content.kind === 'session' &&
         previousContent.sessionId !== content.sessionId
 
-      if (kindChanged || terminalIdChanged || sessionIdChanged) {
-        // Only clear non-user-set titles
+      if (kindChanged) {
+        // Kind changed: clear all title state (including user-set titles)
+        delete state.paneTitles[tabId]?.[paneId]
+        delete state.paneTitleSetByUser[tabId]?.[paneId]
+      } else if (terminalIdChanged || sessionIdChanged) {
+        // Terminal/session identity changed: clear non-user-set titles only
         if (state.paneTitles[tabId]?.[paneId] && !state.paneTitleSetByUser[tabId]?.[paneId]) {
           delete state.paneTitles[tabId][paneId]
-        }
-        // Always clear kind-related state when kind changes
-        if (kindChanged) {
-          if (state.paneTitles[tabId]?.[paneId]) {
-            delete state.paneTitles[tabId][paneId]
-          }
-          if (state.paneTitleSetByUser[tabId]?.[paneId]) {
-            delete state.paneTitleSetByUser[tabId][paneId]
-          }
         }
       }
     },

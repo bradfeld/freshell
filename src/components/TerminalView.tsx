@@ -20,6 +20,7 @@ import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
 const SESSION_ACTIVITY_THROTTLE_MS = 5000
+const OUTPUT_DISPATCH_THROTTLE_MS = 500
 
 interface TerminalViewProps {
   tabId: string
@@ -43,9 +44,6 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const hiddenRef = useRef(hidden)
   const lastSessionActivityAtRef = useRef(0)
   const lastOutputDispatchAtRef = useRef(0)
-
-  // Throttle recordOutput dispatches to avoid performance issues with chatty terminals
-  const OUTPUT_DISPATCH_THROTTLE_MS = 500
 
   // Extract terminal-specific fields (safe because we check kind later)
   const isTerminal = paneContent.kind === 'terminal'
@@ -96,6 +94,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (mountedRef.current && termRef.current) return
     mountedRef.current = true
 
+    const trackInput = () => {
+      dispatch(recordInput({ paneId }))
+      const now = Date.now()
+      const sessionId = contentRef.current?.resumeSessionId
+      const mode = contentRef.current?.mode
+      if (sessionId && mode && isCodingCliMode(mode)) {
+        if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
+          lastSessionActivityAtRef.current = now
+          dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
+        }
+      }
+    }
+
     if (termRef.current) {
       termRef.current.dispose()
       termRef.current = null
@@ -132,17 +143,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         const tid = terminalIdRef.current
         if (!tid) return
         ws.send({ type: 'terminal.input', terminalId: tid, data: text })
-        dispatch(recordInput({ paneId }))
-        // Update session activity for sidebar sorting
-        const now = Date.now()
-        const sessionId = contentRef.current?.resumeSessionId
-        const mode = contentRef.current?.mode
-        if (sessionId && mode && isCodingCliMode(mode)) {
-          if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
-            lastSessionActivityAtRef.current = now
-            dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
-          }
-        }
+        trackInput()
       },
       selectAll: () => term.selectAll(),
       clearScrollback: () => term.clear(),
@@ -161,19 +162,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       const tid = terminalIdRef.current
       if (!tid) return
       ws.send({ type: 'terminal.input', terminalId: tid, data })
-
-      // Track input for activity monitoring (to filter out echo)
-      dispatch(recordInput({ paneId }))
-
-      const now = Date.now()
-      const sessionId = contentRef.current?.resumeSessionId
-      const mode = contentRef.current?.mode
-      if (sessionId && mode && isCodingCliMode(mode)) {
-        if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
-          lastSessionActivityAtRef.current = now
-          dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
-        }
-      }
+      trackInput()
     })
 
     term.attachCustomKeyEventHandler((event) => {
@@ -199,17 +188,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             const tid = terminalIdRef.current
             if (!tid) return
             ws.send({ type: 'terminal.input', terminalId: tid, data: text })
-            dispatch(recordInput({ paneId }))
-            // Update session activity for sidebar sorting
-            const now = Date.now()
-            const sessionId = contentRef.current?.resumeSessionId
-            const mode = contentRef.current?.mode
-            if (sessionId && mode && isCodingCliMode(mode)) {
-              if (now - lastSessionActivityAtRef.current >= SESSION_ACTIVITY_THROTTLE_MS) {
-                lastSessionActivityAtRef.current = now
-                dispatch(updateSessionActivity({ sessionId, provider: mode, lastInputAt: now }))
-              }
-            }
+            trackInput()
           })
           return false
         }
@@ -389,7 +368,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
           const newId = msg.terminalId as string
           terminalIdRef.current = newId
-          updateContent({ terminalId: newId, status: 'running' })
+          const updates: Partial<TerminalPaneContent> = { terminalId: newId, status: 'running' }
+          if (msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId) {
+            updates.resumeSessionId = msg.effectiveResumeSessionId as string
+          }
+          updateContent(updates)
           if (msg.snapshot) {
             try { xtermApi.clear(); xtermApi.write(msg.snapshot) } catch { /* disposed */ }
           }

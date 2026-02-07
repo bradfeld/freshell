@@ -920,6 +920,9 @@ export class WsHandler {
         } else {
           this.registry.detach(terminalId, ws)
         }
+        if (localTerminalId) {
+          state.createdByRequestId.delete(requestId)
+        }
         state.attachedTerminalIds.delete(terminalId)
         this.broadcast({ type: 'terminal.list.updated' })
         return
@@ -1195,6 +1198,7 @@ export class WsHandler {
       }
     }
     this.connections.clear()
+    this.globalCreatedByRequestId.clear()
 
     // Close the WebSocket server
     this.wss.close()

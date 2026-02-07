@@ -32,7 +32,10 @@ const terminalActivitySlice = createSlice({
       const now = at ?? Date.now()
       state.lastInputAt[paneId] = now
 
-      // Clear finished state on new input - terminal is active again
+      // Clear finished state on new input - terminal is active again.
+      // Note: the working→finished check below may immediately re-set finished=true
+      // if output has stopped. This is correct: the "finished" transition takes
+      // precedence over the "active again" clear when output has genuinely stopped.
       if (state.finished[paneId]) {
         state.finished[paneId] = false
       }

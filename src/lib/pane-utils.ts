@@ -1,7 +1,4 @@
 import type { PaneNode, PaneContent, TerminalPaneContent, SessionPaneContent } from '@/store/paneTypes'
-import type { TerminalStatus } from '@/store/types'
-
-export type PaneLeaf = Extract<PaneNode, { type: 'leaf' }>
 
 /**
  * Get the cwd of the first terminal in the pane tree (depth-first traversal).
@@ -135,30 +132,4 @@ export function findPaneIdByContent(
     return predicate(node.content) ? node.id : null
   }
   return findPaneIdByContent(node.children[0], predicate) || findPaneIdByContent(node.children[1], predicate)
-}
-
-export function deriveTabStatus(layout?: PaneNode): TerminalStatus {
-  if (!layout) return 'creating'
-
-  const terminals = collectTerminalPanes(layout)
-  if (terminals.length === 0) return 'running'
-
-  let hasRunning = false
-  let hasCreating = false
-  let hasError = false
-  let hasExited = false
-
-  for (const terminal of terminals) {
-    const status = terminal.content.status
-    if (status === 'running') hasRunning = true
-    else if (status === 'creating') hasCreating = true
-    else if (status === 'error') hasError = true
-    else if (status === 'exited') hasExited = true
-  }
-
-  if (hasRunning) return 'running'
-  if (hasCreating) return 'creating'
-  if (hasError) return 'error'
-  if (hasExited) return 'exited'
-  return 'creating'
 }

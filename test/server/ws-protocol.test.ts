@@ -192,6 +192,7 @@ describe('ws protocol', () => {
   let server: http.Server | undefined
   let port: number
   let WsHandler: any
+  let handler: any
   let registry: FakeRegistry
 
   beforeAll(async () => {
@@ -207,7 +208,7 @@ describe('ws protocol', () => {
       res.end()
     })
     registry = new FakeRegistry()
-    new WsHandler(server, registry as any)
+    handler = new WsHandler(server, registry as any)
     const info = await listen(server)
     port = info.port
   }, HOOK_TIMEOUT_MS)
@@ -218,6 +219,7 @@ describe('ws protocol', () => {
     registry.inputCalls = []
     registry.resizeCalls = []
     registry.killCalls = []
+    ;(handler as any).globalCreatedByRequestId.clear()
   })
 
   afterAll(async () => {

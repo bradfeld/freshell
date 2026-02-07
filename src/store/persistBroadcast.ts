@@ -59,3 +59,8 @@ export function broadcastPersistedRaw(key: string, raw: string): void {
     // ignore
   }
 }
+
+export function resetPersistBroadcastForTests(): void {
+  sourceId = null
+  listeners.clear()
+}

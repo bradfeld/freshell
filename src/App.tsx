@@ -338,9 +338,11 @@ export default function App() {
   // Ensure at least one tab exists for first-time users.
   useEffect(() => {
     if (tabs.length === 0) {
-      dispatch(createTabWithPane({ content: buildDefaultPaneContent(settings) }))
+      const currentSettings = store.getState().settings.settings
+      dispatch(createTabWithPane({ content: buildDefaultPaneContent(currentSettings) }))
     }
-  }, [tabs.length, settings, dispatch])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs.length, dispatch])
 
   const content = (() => {
     if (view === 'sessions') return <HistoryView onOpenSession={() => setView('terminal')} />

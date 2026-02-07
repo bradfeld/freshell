@@ -6,11 +6,11 @@ import tabsReducer, {
   updateTab,
   removeTab,
   hydrateTabs,
-  closeTab,
   reorderTabs,
   TabsState,
 } from '../../../../src/store/tabsSlice'
 import panesReducer, { initLayout } from '../../../../src/store/panesSlice'
+import { closeTabWithCleanup } from '../../../../src/store/tabThunks'
 import type { Tab } from '../../../../src/store/types'
 
 // Mock nanoid to return predictable IDs for testing
@@ -361,7 +361,7 @@ describe('tabsSlice', () => {
       expect(store.getState().panes.layouts[tabId]).toBeDefined()
 
       // Close tab
-      await store.dispatch(closeTab(tabId))
+      await store.dispatch(closeTabWithCleanup({ tabId }))
 
       // Layout should be removed
       expect(store.getState().panes.layouts[tabId]).toBeUndefined()

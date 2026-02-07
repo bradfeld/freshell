@@ -124,6 +124,7 @@ export default function HistoryView({ onOpenSession }: { onOpenSession?: () => v
               'p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
               loading && 'animate-spin'
             )}
+            aria-label={loading ? 'Loading...' : 'Refresh sessions'}
           >
             <RefreshCw className="h-4 w-4" />
           </button>
@@ -242,6 +243,7 @@ function ProjectCard({
                 onClick={() => setShowColorPicker(!showColorPicker)}
                 className="h-5 w-8 rounded border border-border/50"
                 style={{ backgroundColor: color }}
+                aria-label="Open color picker"
               />
               {showColorPicker && (
                 <input
@@ -401,6 +403,7 @@ function SessionRow({
             }}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Open"
+            aria-label="Open session"
           >
             <Play className="h-3.5 w-3.5" />
           </button>
@@ -411,6 +414,7 @@ function SessionRow({
             }}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Edit"
+            aria-label="Edit session"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
@@ -421,6 +425,7 @@ function SessionRow({
             }}
             className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             title="Delete"
+            aria-label="Delete session"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>

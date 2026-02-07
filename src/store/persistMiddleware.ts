@@ -53,14 +53,6 @@ function registerFlushCallback(cb: () => void) {
   attachFlushListeners()
 }
 
-function stripTabVolatileFields(tab: unknown) {
-  if (!tab || typeof tab !== 'object') return tab
-  // Strip any runtime-added volatile fields that shouldn't be persisted.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { lastInputAt, ...rest } = tab as Record<string, unknown> & { lastInputAt?: number }
-  return rest
-}
-
 export function resetPersistFlushListenersForTests() {
   flushCallbacks.clear()
 }
@@ -351,9 +343,7 @@ export function loadPersistedPanes(): any | null {
     const parsed = parsePersistedPanesRaw(raw)
     if (!parsed) return null
 
-    // Check if migration needed
     let currentVersion = parsed.version
-    if (currentVersion > PANES_SCHEMA_VERSION) return null
 
     // Run migrations
     let layouts = parsed.layouts || {}
@@ -444,7 +434,7 @@ export const persistMiddleware: Middleware = (store) => {
         tabs: {
           // Persist only stable tab state. Keep ephemeral UI fields out of storage.
           activeTabId: state.tabs.activeTabId,
-          tabs: state.tabs.tabs.map(stripTabVolatileFields),
+          tabs: state.tabs.tabs,
         },
       }
 
