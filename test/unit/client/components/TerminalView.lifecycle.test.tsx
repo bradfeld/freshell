@@ -82,12 +82,17 @@ class MockResizeObserver {
 
 describe('TerminalView lifecycle updates', () => {
   let messageHandler: ((msg: any) => void) | null = null
+  let reconnectHandler: (() => void) | null = null
 
   beforeEach(() => {
     wsMocks.send.mockClear()
     wsMocks.onMessage.mockImplementation((callback: (msg: any) => void) => {
       messageHandler = callback
       return () => { messageHandler = null }
+    })
+    wsMocks.onReconnect.mockImplementation((callback: () => void) => {
+      reconnectHandler = callback
+      return () => { reconnectHandler = null }
     })
     vi.stubGlobal('ResizeObserver', MockResizeObserver)
   })
@@ -295,6 +300,75 @@ describe('TerminalView lifecycle updates', () => {
     rendered.unmount()
 
     expect(wsMocks.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'terminal.detach' }))
+  })
+
+  it('re-sends terminal.create on reconnect when terminalId is still missing', async () => {
+    const tabId = 'tab-reconnect-create'
+    const paneId = 'pane-reconnect-create'
+
+    const paneContent: TerminalPaneContent = {
+      kind: 'terminal',
+      createRequestId: 'req-reconnect-create',
+      status: 'creating',
+      mode: 'shell',
+      shell: 'system',
+      initialCwd: '/tmp',
+    }
+
+    const root: PaneNode = { type: 'leaf', id: paneId, content: paneContent }
+
+    const store = configureStore({
+      reducer: {
+        tabs: tabsReducer,
+        panes: panesReducer,
+        settings: settingsReducer,
+        connection: connectionReducer,
+      },
+      preloadedState: {
+        tabs: {
+          tabs: [{
+            id: tabId,
+            title: 'Tab',
+            createdAt: Date.now(),
+          }],
+          activeTabId: tabId,
+        },
+        panes: {
+          layouts: { [tabId]: root },
+          activePane: { [tabId]: paneId },
+          paneTitles: {},
+          paneTitleSetByUser: {},
+        },
+        settings: { settings: defaultSettings, status: 'loaded' },
+        connection: { status: 'connected', error: null },
+      },
+    })
+
+    render(
+      <Provider store={store}>
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(messageHandler).not.toBeNull()
+      expect(reconnectHandler).not.toBeNull()
+    })
+
+    await waitFor(() => {
+      const createCalls = wsMocks.send.mock.calls.filter(([msg]) =>
+        msg?.type === 'terminal.create' && msg.requestId === 'req-reconnect-create'
+      )
+      expect(createCalls).toHaveLength(1)
+    })
+
+    wsMocks.send.mockClear()
+    reconnectHandler!()
+
+    const createCalls = wsMocks.send.mock.calls.filter(([msg]) =>
+      msg?.type === 'terminal.create' && msg.requestId === 'req-reconnect-create'
+    )
+    expect(createCalls).toHaveLength(1)
   })
 
   it('ignores INVALID_TERMINAL_ID errors for other terminals', async () => {

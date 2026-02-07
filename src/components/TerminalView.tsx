@@ -354,6 +354,17 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         await ws.connect()
       } catch { /* handled elsewhere */ }
 
+      const sendCreate = () => {
+        ws.send({
+          type: 'terminal.create',
+          requestId: createRequestId,
+          mode,
+          shell: shell || 'system',
+          cwd: initialCwd,
+          resumeSessionId: getResumeSessionIdFromRef(contentRef),
+        })
+      }
+
       unsub = ws.onMessage((msg) => {
         const tid = terminalIdRef.current
         const reqId = requestIdRef.current
@@ -443,7 +454,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
       unsubReconnect = ws.onReconnect(() => {
         const tid = terminalIdRef.current
-        if (tid) attach(tid)
+        if (tid) {
+          attach(tid)
+          return
+        }
+
+        // If the socket dropped mid-create (terminal.create sent but terminal.created not received),
+        // re-send the create with the same idempotency key. This is safe due to:
+        // - server-side requestId idempotency
+        // - ws-client in-flight dedupe + clearing on reconnect
+        if (contentRef.current?.status === 'creating') {
+          sendCreate()
+        }
       })
 
       // Use paneContent for terminal lifecycle - NOT tab
@@ -459,14 +481,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         // Terminal has exited - don't create a new one
         // User can restart manually via context menu if needed
       } else {
-        ws.send({
-          type: 'terminal.create',
-          requestId: createRequestId,
-          mode,
-          shell: shell || 'system',
-          cwd: initialCwd,
-          resumeSessionId: getResumeSessionIdFromRef(contentRef),
-        })
+        sendCreate()
       }
     }
 
