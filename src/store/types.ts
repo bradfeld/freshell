@@ -22,10 +22,6 @@ export interface Tab {
   title: string
   createdAt: number
   titleSetByUser?: boolean     // If true, don't auto-update title
-  // Compatibility-only fields (may exist in persisted tabs before pane layout is created).
-  mode?: TabMode
-  codingCliProvider?: CodingCliProviderName
-  resumeSessionId?: string
 }
 
 export interface BackgroundTerminal {
@@ -74,7 +70,7 @@ export interface TerminalOverride {
   deleted?: boolean
 }
 
-export type SidebarSortMode = 'recency' | 'recency-pinned' | 'activity' | 'project'
+export type SidebarSortMode = 'recency' | 'activity' | 'project'
 
 export type DefaultNewPane = 'ask' | 'shell' | 'browser' | 'editor'
 
@@ -106,9 +102,6 @@ export interface CodingCliSettings {
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark'
   uiScale: number // 1 = 100%, 1.5 = 150%, 2 = 200%
-  logging?: {
-    debug?: boolean
-  }
   terminal: {
     fontSize: number
     fontFamily: string

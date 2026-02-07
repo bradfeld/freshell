@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { reorderTabs, updateTab, setActiveTab, requestTabRename } from '@/store/tabsSlice'
 import { createTabWithPane, closeTabWithCleanup } from '@/store/tabThunks'
-import { addPane, closePane, resetLayout, resetSplit, swapSplit, updatePaneTitle, setActivePane } from '@/store/panesSlice'
+import { closePane, resetLayout, resetSplit, swapSplit, updatePaneTitle, setActivePane } from '@/store/panesSlice'
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import { getWsClient } from '@/lib/ws-client'
@@ -10,7 +10,7 @@ import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { collectTerminalPanes, findPaneContent, findPaneByTerminalId } from '@/lib/pane-utils'
+import { collectTerminalPanes, collectSessionPanes, findPaneContent, findPaneByTerminalId } from '@/lib/pane-utils'
 import { getTabDisplayTitle } from '@/lib/tab-title'
 import { getBrowserActions, getEditorActions, getTerminalActions } from '@/lib/pane-action-registry'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
@@ -20,15 +20,10 @@ import type { CodingCliProviderName } from '@/store/types'
 import type { ContextTarget } from './context-menu-types'
 import { ContextMenu } from './ContextMenu'
 import { ContextIds } from './context-menu-constants'
-import type { ContextId } from './context-menu-constants'
 import { buildMenuItems } from './menu-defs'
 import { copyDataset, isTextInputLike, parseContextTarget } from './context-menu-utils'
 
 const CONTEXT_MENU_KEYS = ['ContextMenu']
-const EMPTY_PENDING_REQUESTS: Record<string, never> = {}
-const EMPTY_SESSION_ACTIVITY: Record<string, number> = {}
-const EMPTY_PANE_TITLES: Record<string, Record<string, string>> = {}
-const EMPTY_ACTIVE_PANES: Record<string, string> = {}
 
 
 type MenuState = {
@@ -62,13 +57,10 @@ function findContextElement(start: HTMLElement | null): HTMLElement | null {
   return null
 }
 
-function isContextId(value: string): value is ContextId {
-  return (Object.values(ContextIds) as readonly string[]).includes(value)
-}
-
-function resolveContextId(value: string | undefined): ContextId {
+function resolveContextId(value: string | undefined): string {
   if (!value) return ContextIds.Global
-  return isContextId(value) ? value : ContextIds.Global
+  const allowed = new Set(Object.values(ContextIds))
+  return allowed.has(value) ? value : ContextIds.Global
 }
 
 export function ContextMenuProvider({
@@ -81,10 +73,10 @@ export function ContextMenuProvider({
   const dispatch = useAppDispatch()
   const tabsState = useAppSelector((s) => s.tabs)
   const panes = useAppSelector((s) => s.panes.layouts)
-  const paneTitles = useAppSelector((s) => s.panes?.paneTitles) ?? EMPTY_PANE_TITLES
-  const activePanes = useAppSelector((s) => s.panes?.activePane) ?? EMPTY_ACTIVE_PANES
-  const pendingRequests = useAppSelector((s) => s.codingCli?.pendingRequests) ?? EMPTY_PENDING_REQUESTS
-  const sessionActivity = useAppSelector((s) => s.sessionActivity?.sessions) ?? EMPTY_SESSION_ACTIVITY
+  const paneTitles = useAppSelector((s) => s.panes.paneTitles)
+  const activePanes = useAppSelector((s) => s.panes.activePane)
+  const pendingRequests = useAppSelector((s) => s.codingCli.pendingRequests)
+  const sessionActivity = useAppSelector((s) => s.sessionActivity.sessions)
   const sessions = useAppSelector((s) => s.sessions.projects)
   const expandedProjects = useAppSelector((s) => s.sessions.expandedProjects)
   const platform = useAppSelector((s) => s.connection?.platform ?? null)
@@ -335,6 +327,23 @@ export function ContextMenuProvider({
         ? menuState?.target.runningTerminalId
         : undefined
     const layout = panes[activeTabId]
+    if (layout) {
+      const terminalPanes = collectTerminalPanes(layout)
+      terminalPanes.forEach((terminal) => {
+        if (terminal.content.terminalId) {
+          ws.send({ type: 'terminal.detach', terminalId: terminal.content.terminalId })
+        }
+      })
+      const sessionPanes = collectSessionPanes(layout)
+      sessionPanes.forEach((sessionPane) => {
+        const sessionId = sessionPane.content.sessionId
+        if (pendingRequests[sessionId]) {
+          dispatch(cancelCodingCliRequest({ requestId: sessionId }))
+        } else {
+          ws.send({ type: 'codingcli.kill', sessionId })
+        }
+      })
+    }
     dispatch(updateTab({
       id: activeTabId,
       updates: {
@@ -342,22 +351,17 @@ export function ContextMenuProvider({
         titleSetByUser: false,
       },
     }))
-    const newContent = {
-      kind: 'terminal' as const,
-      mode,
-      resumeSessionId: session.sessionId,
-      initialCwd: session.cwd,
-      terminalId: runningTerminalId || undefined,
-      status: runningTerminalId ? ('running' as const) : ('creating' as const),
-    }
-
-    if (!layout) {
-      dispatch(resetLayout({ tabId: activeTabId, content: newContent }))
-      return
-    }
-
-    // Preserve existing panes and add a new one for the opened session.
-    dispatch(addPane({ tabId: activeTabId, newContent }))
+    dispatch(resetLayout({
+      tabId: activeTabId,
+      content: {
+        kind: 'terminal',
+        mode,
+        resumeSessionId: session.sessionId,
+        initialCwd: session.cwd,
+        terminalId: runningTerminalId || undefined,
+        status: runningTerminalId ? 'running' : 'creating',
+      },
+    }))
   }, [tabsState.activeTabId, dispatch, getSessionInfo, openSessionInNewTab, panes, ws, pendingRequests, menuState?.target])
 
   const renameSession = useCallback(async (sessionId: string, provider?: string, withSummary?: boolean) => {

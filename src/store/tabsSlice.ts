@@ -96,8 +96,7 @@ export const tabsSlice = createSlice({
     },
     hydrateTabs: (state, action: PayloadAction<TabsState>) => {
       // Basic sanity: ensure dates exist.
-      const tabs = Array.isArray(action.payload.tabs) ? action.payload.tabs : []
-      state.tabs = tabs.map((t) => {
+      state.tabs = (action.payload.tabs || []).map((t) => {
         return {
           ...t,
           createdAt: t.createdAt || Date.now(),

@@ -92,6 +92,7 @@ describe('TabBar accessibility', () => {
       </Provider>
     )
 
-    expect(screen.getByRole('button', { name: /new tab/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /new shell tab/i })).toBeInTheDocument()
   })
 })
+

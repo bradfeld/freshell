@@ -1,4 +1,5 @@
 import type { Middleware } from '@reduxjs/toolkit'
+import type { RootState } from './store'
 import { nanoid } from 'nanoid'
 
 const STORAGE_KEY = 'freshell.tabs.v1'
@@ -46,11 +47,10 @@ function registerFlushCallback(cb: () => void) {
   attachFlushListeners()
 }
 
-function stripTabVolatileFields(tab: unknown) {
-  if (!tab || typeof tab !== 'object') return tab
-  // Strip any runtime-added volatile fields that shouldn't be persisted.
+function stripTabVolatileFields(tab: RootState['tabs']['tabs'][number]) {
+  // Strip any runtime-added volatile fields that shouldn't be persisted
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { lastInputAt, ...rest } = tab as Record<string, unknown> & { lastInputAt?: number }
+  const { lastInputAt, ...rest } = tab as typeof tab & { lastInputAt?: number }
   return rest
 }
 
@@ -222,7 +222,7 @@ export function loadPersistedPanes(): any | null {
   }
 }
 
-export const persistMiddleware: Middleware = (store) => {
+export const persistMiddleware: Middleware<{}, RootState> = (store) => {
   let tabsDirty = false
   let panesDirty = false
   let flushTimer: ReturnType<typeof setTimeout> | null = null
@@ -234,7 +234,7 @@ export const persistMiddleware: Middleware = (store) => {
     if (!canUseStorage()) return
     if (!tabsDirty && !panesDirty) return
 
-    const state = store.getState() as any
+    const state = store.getState()
 
     if (tabsDirty) {
       const tabsPayload = {
@@ -289,21 +289,19 @@ export const persistMiddleware: Middleware = (store) => {
 
   registerFlushCallback(flushNow)
 
-  return (next) => (action: unknown) => {
-    const result = next(action as any)
+  return (next) => (action) => {
+    const result = next(action)
 
-    const meta = (action as any)?.meta
-    if (meta?.skipPersist) {
+    if (action?.meta?.skipPersist) {
       return result
     }
 
-    const actionType = (action as any)?.type
-    if (typeof actionType === 'string') {
-      if (actionType.startsWith('tabs/')) {
+    if (typeof action?.type === 'string') {
+      if (action.type.startsWith('tabs/')) {
         tabsDirty = true
         scheduleFlush()
       }
-      if (actionType.startsWith('panes/')) {
+      if (action.type.startsWith('panes/')) {
         panesDirty = true
         scheduleFlush()
       }

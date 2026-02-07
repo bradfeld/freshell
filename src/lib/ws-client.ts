@@ -12,7 +12,6 @@ const perfConfig = getClientPerfConfig()
 export class WsClient {
   private ws: WebSocket | null = null
   private _state: ConnectionState = 'disconnected'
-  private connectPromise: Promise<void> | null = null
   private messageHandlers = new Set<MessageHandler>()
   private reconnectHandlers = new Set<ReconnectHandler>()
   private pendingMessages: unknown[] = []
@@ -47,8 +46,9 @@ export class WsClient {
   }
 
   connect(): Promise<void> {
-    if (this._state === 'ready') return Promise.resolve()
-    if (this.connectPromise) return this.connectPromise
+    if (this._state === 'connecting' || this._state === 'connected' || this._state === 'ready') {
+      return Promise.resolve()
+    }
 
     this.intentionalClose = false
     this._state = 'connecting'
@@ -56,19 +56,17 @@ export class WsClient {
       this.connectStartedAt = performance.now()
     }
 
-    this.connectPromise = new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       let finished = false
       const finishResolve = () => {
         if (!finished) {
           finished = true
-          this.connectPromise = null
           resolve()
         }
       }
       const finishReject = (err: Error) => {
         if (!finished) {
           finished = true
-          this.connectPromise = null
           reject(err)
         }
       }
@@ -175,18 +173,10 @@ export class WsClient {
         this._state = 'disconnected'
         this.ws = null
 
-        if (event.code === 4001) {
+        const AUTH_CLOSE_CODES = [4001, 4002] // NOT_AUTHENTICATED, HELLO_TIMEOUT
+        if (AUTH_CLOSE_CODES.includes(event.code)) {
           this.intentionalClose = true
           finishReject(new Error(`Authentication failed (code ${event.code})`))
-          return
-        }
-
-        if (event.code === 4002) {
-          // HELLO_TIMEOUT: transient handshake issue (treat like a reconnectable timeout).
-          finishReject(new Error('Handshake timeout'))
-          if (!this.intentionalClose) {
-            this.scheduleReconnect()
-          }
           return
         }
 
@@ -197,11 +187,9 @@ export class WsClient {
         }
 
         if (event.code === 4008) {
-          // Backpressure close - surface as warning and reconnect with a minimum delay.
-          finishReject(new Error('Connection closed due to backpressure'))
-          if (!this.intentionalClose) {
-            this.scheduleReconnect({ minDelayMs: 5000 })
-          }
+          // Backpressure close - surface as warning, but don't reconnect aggressively.
+          this.intentionalClose = true
+          finishReject(new Error('Connection too slow (backpressure)'))
           return
         }
 
@@ -229,17 +217,15 @@ export class WsClient {
         }
       }
     })
-    return this.connectPromise
   }
 
-  private scheduleReconnect(options: { minDelayMs?: number } = {}) {
+  private scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('WsClient: max reconnect attempts reached')
       return
     }
 
-    const minDelayMs = options.minDelayMs ?? 0
-    const delay = Math.max(minDelayMs, this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts))
+    const delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts)
     this.reconnectAttempts++
 
     window.setTimeout(() => {

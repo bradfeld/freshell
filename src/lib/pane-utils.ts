@@ -103,7 +103,7 @@ export function findPaneBySessionId(
   return null
 }
 
-export function findPaneContent(node: PaneNode, paneId: string): PaneContent | null {
+export function findPaneContent(node: PaneNode, paneId: string) {
   if (node.type === 'leaf') {
     return node.id === paneId ? node.content : null
   }

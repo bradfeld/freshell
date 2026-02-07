@@ -11,7 +11,7 @@ import {
   resetWsSnapshotReceived,
 } from '@/store/sessionsSlice'
 import { switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
-import { closeTabWithCleanup, createTabWithPane } from '@/store/tabThunks'
+import { createTabWithPane } from '@/store/tabThunks'
 import { api } from '@/lib/api'
 import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'

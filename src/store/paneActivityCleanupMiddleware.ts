@@ -1,4 +1,5 @@
 import type { Middleware } from '@reduxjs/toolkit'
+import type { RootState } from './store'
 import { removePaneActivity } from './terminalActivitySlice'
 import type { PaneNode, PaneContent } from './paneTypes'
 
@@ -21,20 +22,16 @@ function collectPaneKindMap(layouts: Record<string, PaneNode>): Record<string, P
   return map
 }
 
-export const paneActivityCleanupMiddleware: Middleware = (store) => (next) => (action) => {
-  const actionType =
-    typeof (action as { type?: unknown })?.type === 'string'
-      ? (action as { type: string }).type
-      : null
-  const isPaneAction = !!actionType && actionType.startsWith('panes/')
+export const paneActivityCleanupMiddleware: Middleware<{}, RootState> = (store) => (next) => (action) => {
+  const isPaneAction = typeof action?.type === 'string' && action.type.startsWith('panes/')
   if (!isPaneAction) return next(action)
 
-  const prevLayouts = (store.getState() as any).panes.layouts as Record<string, PaneNode>
+  const prevLayouts = store.getState().panes.layouts
   const prevMap = collectPaneKindMap(prevLayouts)
 
   const result = next(action)
 
-  const nextLayouts = (store.getState() as any).panes.layouts as Record<string, PaneNode>
+  const nextLayouts = store.getState().panes.layouts
   const nextMap = collectPaneKindMap(nextLayouts)
 
   for (const [paneId, kind] of Object.entries(prevMap)) {
