@@ -341,9 +341,10 @@ Steps:
 4) Pane stress (do this once):
    - Create a new Freshell in-app tab (not a browser tab) that you will use for this stress check.
    - Rename that in-app tab to: Stress test
-     - Right-click the tab and choose "Rename tab" from the context menu.
+     - Double-click the tab name to start renaming. Use evaluate to dispatch a dblclick event on the tab's text span, e.g.:
+       document.querySelector('[role="tab"][aria-selected="true"] span').dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}}))
      - An editable text field will appear in place of the tab name.
-     - Select all / clear the existing text, type the new name, and press Enter to confirm.
+     - Use the input action on that text field with clear=true to replace the text with the new name, then press Enter to confirm.
      - Verify the tab now displays the new name before moving on.
    - Add shell panes until this tab has {args.pane_target} panes total.
      - Do it one pane at a time: click "Add pane" once, then pick ONE shell type in the picker.
@@ -351,7 +352,7 @@ Steps:
 
 5) Mixed panes on a new in-app tab:
    - Create another new in-app shell tab using the '+' button in the top tab bar (tooltip: "New shell tab").
-   - Rename it to: Test mixed panes (same rename approach: right-click → "Rename tab" → clear → type name → Enter → verify).
+   - Rename it to: Test mixed panes (same rename approach: evaluate dblclick on active tab span → input with clear=true → Enter → verify).
    - On this tab, build a 3-pane layout with EXACTLY:
      - one Editor pane
      - one shell pane
@@ -406,7 +407,7 @@ Steps:
 
 10) Coding CLI panes (best-effort):
    - Create a new in-app tab with the '+' button.
-   - Rename it to: Coding CLIs (same rename approach: right-click → "Rename tab" → clear → type name → Enter → verify).
+   - Rename it to: Coding CLIs (same rename approach: evaluate dblclick on active tab span → input with clear=true → Enter → verify).
    - You should see a pane type picker. Look at the options.
      - If you see "Claude": click it to create a Claude Code pane. Wait a few seconds for it to initialize.
      - Split once ("Add pane") to get another picker.
