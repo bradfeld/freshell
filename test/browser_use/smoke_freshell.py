@@ -341,8 +341,7 @@ Steps:
 4) Pane stress (do this once):
    - Create a new Freshell in-app tab (not a browser tab) that you will use for this stress check.
    - Rename that in-app tab to: Stress test
-     - Double-click the tab name to start renaming. Use evaluate to dispatch a dblclick event on the tab's text span, e.g.:
-       document.querySelector('[role="tab"][aria-selected="true"] span').dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}}))
+     - Use the double_click action on the tab name text to start renaming.
      - An editable text field will appear in place of the tab name.
      - Use the input action on that text field with clear=true to replace the text with the new name, then press Enter to confirm.
      - Verify the tab now displays the new name before moving on.
@@ -352,7 +351,7 @@ Steps:
 
 5) Mixed panes on a new in-app tab:
    - Create another new in-app shell tab using the '+' button in the top tab bar (tooltip: "New shell tab").
-   - Rename it to: Test mixed panes (same rename approach: evaluate dblclick on active tab span → input with clear=true → Enter → verify).
+   - Rename it to: Test mixed panes (same rename approach: double_click tab name → input with clear=true → Enter → verify).
    - On this tab, build a 3-pane layout with EXACTLY:
      - one Editor pane
      - one shell pane
@@ -407,7 +406,7 @@ Steps:
 
 10) Coding CLI panes (best-effort):
    - Create a new in-app tab with the '+' button.
-   - Rename it to: Coding CLIs (same rename approach: evaluate dblclick on active tab span → input with clear=true → Enter → verify).
+   - Rename it to: Coding CLIs (same rename approach: double_click tab name → input with clear=true → Enter → verify).
    - You should see a pane type picker. Look at the options.
      - If you see "Claude": click it to create a Claude Code pane. Wait a few seconds for it to initialize.
      - Split once ("Add pane") to get another picker.
@@ -446,6 +445,22 @@ Finish:
       return ActionResult(extracted_content=memory, long_term_memory=memory)
     except Exception as e:
       return ActionResult(error=f"Failed to insert text: {type(e).__name__}: {e}")
+
+  class DoubleClickAction(BaseModel):
+    index: int
+
+  @tools.registry.action("Double-click an element by index (dispatches a dblclick MouseEvent).", param_model=DoubleClickAction)
+  async def double_click(params: DoubleClickAction, browser_session):  # type: ignore[no-untyped-def]
+    try:
+      state = await browser_session.get_state()
+      element = state.selector_map.get(params.index)
+      if element is None:
+        return ActionResult(error=f"Element index {params.index} not found in selector map")
+      await element.dispatch_event("dblclick")
+      memory = f"Double-clicked element at index {params.index}"
+      return ActionResult(extracted_content=memory, long_term_memory=memory)
+    except Exception as e:
+      return ActionResult(error=f"Failed to double-click: {type(e).__name__}: {e}")
 
   agent = Agent(
     task=task.strip(),
