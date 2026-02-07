@@ -452,11 +452,23 @@ Finish:
   @tools.registry.action("Double-click an element by index (dispatches a dblclick MouseEvent).", param_model=DoubleClickAction)
   async def double_click(params: DoubleClickAction, browser_session):  # type: ignore[no-untyped-def]
     try:
-      state = await browser_session.get_state()
-      element = state.selector_map.get(params.index)
+      element = await browser_session.get_element_by_index(params.index)
       if element is None:
-        return ActionResult(error=f"Element index {params.index} not found in selector map")
-      await element.dispatch_event("dblclick")
+        return ActionResult(error=f"Element index {params.index} not found")
+      cdp_session = await browser_session.get_or_create_cdp_session(target_id=None, focus=True)
+      sid = cdp_session.session_id
+      resolved = await cdp_session.cdp_client.send.DOM.resolveNode(
+        params={"backendNodeId": element.backend_node_id}, session_id=sid,
+      )
+      object_id = resolved["object"]["objectId"]
+      await cdp_session.cdp_client.send.Runtime.callFunctionOn(
+        params={
+          "objectId": object_id,
+          "functionDeclaration": "function() { this.dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); }",
+          "returnByValue": True,
+        },
+        session_id=sid,
+      )
       memory = f"Double-clicked element at index {params.index}"
       return ActionResult(extracted_content=memory, long_term_memory=memory)
     except Exception as e:
