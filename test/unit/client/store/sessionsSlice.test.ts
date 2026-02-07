@@ -4,6 +4,7 @@ import sessionsReducer, {
   setProjects,
   clearProjects,
   mergeProjects,
+  applySessionsPatch,
   toggleProjectExpanded,
   setProjectExpanded,
   collapseAll,
@@ -244,6 +245,37 @@ describe('sessionsSlice', () => {
         '/project/two',
         '/project/three',
       ])
+    })
+  })
+
+  describe('applySessionsPatch', () => {
+    it('upserts projects and removes deleted project paths', () => {
+      const starting = sessionsReducer(undefined, setProjects([
+        { projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 1 }] },
+        { projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', projectPath: '/p2', updatedAt: 2 }] },
+      ] as any))
+
+      const next = sessionsReducer(starting, applySessionsPatch({
+        upsertProjects: [{ projectPath: '/p3', sessions: [{ provider: 'claude', sessionId: 's3', projectPath: '/p3', updatedAt: 3 }] }],
+        removeProjectPaths: ['/p1'],
+      }))
+
+      expect(next.projects.map((p) => p.projectPath).sort()).toEqual(['/p2', '/p3'])
+    })
+
+    it('keeps HistoryView project ordering stable by sorting projects by newest session updatedAt', () => {
+      const starting = sessionsReducer(undefined, setProjects([
+        { projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', projectPath: '/p2', updatedAt: 20 }] },
+        { projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 10 }] },
+      ] as any))
+
+      const next = sessionsReducer(starting, applySessionsPatch({
+        upsertProjects: [{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', projectPath: '/p1', updatedAt: 30 }] }],
+        removeProjectPaths: [],
+      }))
+
+      expect(next.projects[0]?.projectPath).toBe('/p1')
+      expect(next.projects[1]?.projectPath).toBe('/p2')
     })
   })
 
