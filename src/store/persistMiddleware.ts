@@ -59,6 +59,10 @@ export function resetPersistFlushListenersForTests() {
   flushCallbacks.clear()
 }
 
+export function resetPersistedPanesCacheForTests() {
+  cachedPersistedPanes = undefined
+}
+
 export function loadPersistedTabs(): any | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -162,7 +166,17 @@ function migrateNode(node: any): any {
   return node
 }
 
+let cachedPersistedPanes: any | null | undefined
+
 export function loadPersistedPanes(): any | null {
+  // Memoize: legacy migrations generate nanoid() values, so both callers
+  // (panesSlice and terminal-restore) must see the same result.
+  if (cachedPersistedPanes !== undefined) return cachedPersistedPanes
+  cachedPersistedPanes = loadPersistedPanesUncached()
+  return cachedPersistedPanes
+}
+
+function loadPersistedPanesUncached(): any | null {
   try {
     const raw = localStorage.getItem(PANES_STORAGE_KEY)
     if (!raw) return null

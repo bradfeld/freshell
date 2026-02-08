@@ -192,6 +192,60 @@ describe('crossTabSync', () => {
     expect(content.status).toBe('running')
   })
 
+  it('propagates exit state from remote even when local has terminalId', () => {
+    const store = configureStore({
+      reducer: { tabs: tabsReducer, panes: panesReducer },
+    })
+
+    // Local state: terminal is running with terminalId
+    store.dispatch(hydratePanes({
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: {
+            kind: 'terminal',
+            mode: 'shell',
+            createRequestId: 'req-1',
+            status: 'running',
+            terminalId: 'local-terminal-123',
+          },
+        } as any,
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+    }))
+
+    // Remote: terminal has exited (no terminalId, status: exited)
+    const remoteRaw = JSON.stringify({
+      version: 4,
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: {
+            kind: 'terminal',
+            mode: 'shell',
+            createRequestId: 'req-1',
+            status: 'exited',
+            // NO terminalId — terminal exited
+          },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+      paneTitles: {},
+      paneTitleSetByUser: {},
+    })
+
+    cleanups.push(installCrossTabSync(store as any))
+    window.dispatchEvent(new StorageEvent('storage', { key: PANES_STORAGE_KEY, newValue: remoteRaw }))
+
+    // Exit state should propagate — local should NOT keep stale terminalId
+    const content = (store.getState().panes.layouts['tab-1'] as any).content
+    expect(content.status).toBe('exited')
+    expect(content.terminalId).toBeUndefined()
+  })
+
   it('does not crash on malformed remote pane layout (corrupted localStorage)', () => {
     const store = configureStore({
       reducer: { tabs: tabsReducer, panes: panesReducer },

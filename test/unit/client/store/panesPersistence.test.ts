@@ -24,6 +24,7 @@ import {
   loadPersistedTabs,
   persistMiddleware,
   resetPersistFlushListenersForTests,
+  resetPersistedPanesCacheForTests,
 } from '../../../../src/store/persistMiddleware'
 import { PANES_SCHEMA_VERSION } from '../../../../src/store/persistedState'
 
@@ -33,6 +34,7 @@ describe('Panes Persistence Integration', () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
     resetPersistFlushListenersForTests()
+    resetPersistedPanesCacheForTests()
   })
 
   afterEach(() => {
@@ -259,6 +261,7 @@ describe('Panes Persistence Integration', () => {
 describe('PaneContent migration', () => {
   beforeEach(() => {
     localStorageMock.clear()
+    resetPersistedPanesCacheForTests()
   })
 
   it('migrates old terminal pane content to include lifecycle fields', () => {
@@ -311,6 +314,31 @@ describe('PaneContent migration', () => {
     expect(layout.children[0].content.createRequestId).toBeDefined()
     expect(layout.children[1].content.createRequestId).toBeDefined()
     expect(layout.children[0].content.createRequestId).not.toBe(layout.children[1].content.createRequestId)
+  })
+
+  it('returns identical nanoid values for legacy data across multiple loadPersistedPanes calls', () => {
+    const oldPanesState = {
+      layouts: {
+        'tab1': {
+          type: 'leaf',
+          id: 'pane1',
+          content: { kind: 'terminal', mode: 'shell' },
+        },
+      },
+      activePane: { 'tab1': 'pane1' },
+    }
+
+    localStorage.setItem('freshell.panes.v1', JSON.stringify(oldPanesState))
+
+    const first = loadPersistedPanes()
+    const second = loadPersistedPanes()
+
+    // Both calls must return the same object (memoized)
+    expect(first).toBe(second)
+    // And the migrated createRequestId must be consistent
+    expect(first.layouts['tab1'].content.createRequestId).toBeDefined()
+    expect(first.layouts['tab1'].content.createRequestId)
+      .toBe(second.layouts['tab1'].content.createRequestId)
   })
 
   it('does not re-migrate already migrated content', () => {
@@ -390,6 +418,7 @@ describe('PaneContent migration', () => {
 describe('version 3 migration', () => {
   beforeEach(() => {
     localStorageMock.clear()
+    resetPersistedPanesCacheForTests()
   })
 
   it('adds empty paneTitles when migrating from version 2', () => {
@@ -594,6 +623,7 @@ describe('legacy tab resumeSessionId migration', () => {
 describe('loadInitialPanesState consistency', () => {
   beforeEach(() => {
     localStorageMock.clear()
+    resetPersistedPanesCacheForTests()
   })
 
   it('initial pane state matches loadPersistedPanes output for migrated data', async () => {
@@ -633,6 +663,7 @@ describe('loadInitialPanesState consistency', () => {
 describe('orphaned layout cleanup', () => {
   beforeEach(() => {
     localStorageMock.clear()
+    resetPersistedPanesCacheForTests()
   })
 
   it('removes pane layouts for tabs that no longer exist', async () => {
@@ -676,6 +707,7 @@ describe('schema version consistency', () => {
     localStorageMock.clear()
     vi.useFakeTimers()
     resetPersistFlushListenersForTests()
+    resetPersistedPanesCacheForTests()
   })
 
   afterEach(() => {

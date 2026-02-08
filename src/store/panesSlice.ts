@@ -312,8 +312,13 @@ function mergeTerminalState(incoming: PaneNode, local: PaneNode): PaneNode {
       local.content?.kind === 'terminal' &&
       incoming.content.createRequestId === local.content.createRequestId
     ) {
-      // Local has terminalId, incoming doesn't → keep local terminal state
-      if (local.content.terminalId && !incoming.content.terminalId) {
+      // Local has terminalId, incoming doesn't → keep local terminal state,
+      // but only if incoming is still creating (not exited). An exited state
+      // from another tab must propagate to avoid stale "running" displays.
+      if (
+        local.content.terminalId && !incoming.content.terminalId &&
+        incoming.content.status !== 'exited'
+      ) {
         return { ...incoming, content: local.content }
       }
     }
