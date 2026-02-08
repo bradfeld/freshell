@@ -561,3 +561,141 @@ describe('Codex Session-Terminal Association via CodingCliSessionIndexer', () =>
     registry.shutdown()
   })
 })
+
+describe('Startup association race condition fix', () => {
+  /**
+   * Simulates the startup association pass that runs after codingCliIndexer.start() completes.
+   * This matches the logic that should exist in server/index.ts.
+   */
+  function runStartupAssociationPass(
+    registry: TerminalRegistry,
+    indexer: CodingCliSessionIndexer,
+    broadcasts: any[],
+  ) {
+    const projects = indexer.getProjects()
+    for (const project of projects) {
+      for (const session of project.sessions) {
+        if (session.provider === 'claude') continue
+        if (!modeSupportsResume(session.provider)) continue
+        if (!session.cwd) continue
+
+        const unassociated = registry.findUnassociatedTerminals(session.provider, session.cwd)
+        if (unassociated.length === 0) continue
+
+        const term = unassociated[0]
+        const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
+        if (!associated) continue
+        broadcasts.push({
+          type: 'terminal.session.associated',
+          terminalId: term.terminalId,
+          sessionId: session.sessionId,
+        })
+      }
+    }
+  }
+
+  it('associates codex terminals with sessions that were already known at startup', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    // Simulate: terminal is created during startup
+    const term = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    expect(term.resumeSessionId).toBeUndefined()
+
+    // Simulate: initial scan found this session (so it's in knownSessionKeys before initialized=true)
+    // This mirrors what happens when Codex creates the session file immediately at spawn time,
+    // and the coding CLI indexer's slow initial scan picks it up.
+    const session: CodingCliSession = {
+      provider: 'codex',
+      sessionId: 'codex-session-startup-race',
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }
+    // detectNewSessions with initialized=false => session added to knownSessionKeys but no event
+    indexer['detectNewSessions']([session])
+    expect(broadcasts).toHaveLength(0) // No onNewSession fired
+
+    // Now indexer is initialized (normal flow)
+    indexer['initialized'] = true
+
+    // A subsequent refresh with the same session does NOT fire onNewSession (it's already known)
+    indexer['detectNewSessions']([session])
+    expect(broadcasts).toHaveLength(0) // Still no event!
+
+    // The startup association pass should catch this
+    // We need to set up the projects data so getProjects() returns the session
+    indexer['projects'] = [{
+      projectPath: '/home/user/project',
+      sessions: [session],
+    }]
+
+    runStartupAssociationPass(registry, indexer, broadcasts)
+
+    // NOW the terminal should be associated
+    expect(registry.get(term.terminalId)?.resumeSessionId).toBe('codex-session-startup-race')
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0]).toEqual({
+      type: 'terminal.session.associated',
+      terminalId: term.terminalId,
+      sessionId: 'codex-session-startup-race',
+    })
+
+    registry.shutdown()
+  })
+
+  it('does not double-associate terminals that already have a resumeSessionId', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    // Terminal already associated (from previous server session, persisted in client)
+    const term = registry.create({ mode: 'codex', cwd: '/home/user/project', resumeSessionId: 'existing-session' })
+    expect(term.resumeSessionId).toBe('existing-session')
+
+    indexer['projects'] = [{
+      projectPath: '/home/user/project',
+      sessions: [{
+        provider: 'codex',
+        sessionId: 'different-session',
+        projectPath: '/home/user/project',
+        updatedAt: Date.now(),
+        cwd: '/home/user/project',
+      }],
+    }]
+
+    runStartupAssociationPass(registry, indexer, broadcasts)
+
+    // Should NOT change the existing association
+    expect(registry.get(term.terminalId)?.resumeSessionId).toBe('existing-session')
+    expect(broadcasts).toHaveLength(0)
+
+    registry.shutdown()
+  })
+
+  it('skips claude sessions in startup pass (handled by claudeIndexer)', () => {
+    const registry = new TerminalRegistry()
+    const indexer = new CodingCliSessionIndexer([])
+    const broadcasts: any[] = []
+
+    registry.create({ mode: 'claude', cwd: '/home/user/project' })
+
+    indexer['projects'] = [{
+      projectPath: '/home/user/project',
+      sessions: [{
+        provider: 'claude',
+        sessionId: SESSION_ID_ONE,
+        projectPath: '/home/user/project',
+        updatedAt: Date.now(),
+        cwd: '/home/user/project',
+      }],
+    }]
+
+    runStartupAssociationPass(registry, indexer, broadcasts)
+
+    expect(broadcasts).toHaveLength(0)
+
+    registry.shutdown()
+  })
+})

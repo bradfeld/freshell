@@ -608,13 +608,10 @@ async function main() {
     }
   })
 
-  // Session association for non-Claude coding CLI providers (e.g. Codex)
-  // Mirrors the claudeIndexer.onNewSession pattern above, but uses the generic
-  // CodingCliSessionIndexer which covers all providers.
-  codingCliIndexer.onNewSession((session) => {
-    // Skip Claude - handled by the battle-tested claudeIndexer path above
+  // Associate a coding CLI session with the oldest unassociated terminal of matching mode/cwd.
+  // Used both by the onNewSession handler and the startup association pass.
+  function associateCodingCliSession(session: { provider: string; sessionId: string; cwd?: string }, context: string) {
     if (session.provider === 'claude') return
-    // Skip providers that don't support session resume
     if (!modeSupportsResume(session.provider)) return
     if (!session.cwd) return
 
@@ -622,10 +619,10 @@ async function main() {
     if (unassociated.length === 0) return
 
     const term = unassociated[0]
-    log.info({ terminalId: term.terminalId, sessionId: session.sessionId, provider: session.provider }, 'Associating terminal with new coding CLI session')
+    log.info({ terminalId: term.terminalId, sessionId: session.sessionId, provider: session.provider }, `${context}: associating terminal with coding CLI session`)
     const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
     if (!associated) {
-      log.warn({ terminalId: term.terminalId, sessionId: session.sessionId, provider: session.provider }, 'Skipping invalid coding CLI session association')
+      log.warn({ terminalId: term.terminalId, sessionId: session.sessionId, provider: session.provider }, `${context}: skipping invalid session association`)
       return
     }
     try {
@@ -635,8 +632,13 @@ async function main() {
         sessionId: session.sessionId,
       })
     } catch (err) {
-      log.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
+      log.warn({ err, terminalId: term.terminalId }, `${context}: failed to broadcast session association`)
     }
+  }
+
+  // Session association for non-Claude coding CLI providers (e.g. Codex)
+  codingCliIndexer.onNewSession((session) => {
+    associateCodingCliSession(session, 'onNewSession')
   })
 
   const startBackgroundTasks = () => {
@@ -663,6 +665,15 @@ async function main() {
       .then(() => {
         startupState.markReady('codingCliIndexer')
         logger.info({ task: 'codingCliIndexer' }, 'Startup task ready')
+
+        // Startup association pass: associate terminals spawned during the initial scan.
+        // Codex creates session files immediately at spawn, so the slow initial scan
+        // picks them up as "already known" and onNewSession never fires for them.
+        for (const project of codingCliIndexer.getProjects()) {
+          for (const session of project.sessions) {
+            associateCodingCliSession(session, 'Startup pass')
+          }
+        }
       })
       .catch((err) => {
         logger.error({ err }, 'Coding CLI indexer failed to start')
