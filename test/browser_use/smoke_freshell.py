@@ -109,7 +109,9 @@ Steps:
      {known_text_file}
    - Use the "Enter file path..." box, paste/type the full path, and press Enter.
    - Prove the preview toggle works:
-     - click "Source", then click "Preview".
+     - Click Source to open source view.
+     - Click Preview to return to preview view.
+     - Continue only when preview is visible.
    - Confirm "Quick Start" appears in the editor by using your find_text action to search for it.
      - find_text is the right tool here because it proves on-screen visibility.
      - If find_text does not find "Quick Start", output:
