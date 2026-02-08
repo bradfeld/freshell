@@ -168,7 +168,7 @@ describe('TerminalView keyboard handling', () => {
   })
 
   describe('Ctrl+V paste', () => {
-    it('handles Ctrl+V by reading clipboard and sending input', async () => {
+    it('Ctrl+V returns false and does not send input directly', async () => {
       const { store, tabId, paneId, paneContent } = createTestStore('term-1')
 
       render(
@@ -181,28 +181,15 @@ describe('TerminalView keyboard handling', () => {
         expect(capturedKeyHandler).not.toBeNull()
       })
 
+      const wsSendCountBefore = wsMocks.send.mock.calls.length
       const event = createKeyboardEvent('v', { ctrlKey: true })
       const result = capturedKeyHandler!(event)
-
-      // Handler should return false to prevent xterm from processing the key
       expect(result).toBe(false)
-
-      // Wait for async clipboard read
-      await waitFor(() => {
-        expect(clipboardMocks.readText).toHaveBeenCalled()
-      })
-
-      // Should send terminal input with pasted content
-      await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
-          type: 'terminal.input',
-          terminalId: 'term-1',
-          data: 'pasted content',
-        })
-      })
+      expect(clipboardMocks.readText).not.toHaveBeenCalled()
+      expect(wsMocks.send).toHaveBeenCalledTimes(wsSendCountBefore)
     })
 
-    it('handles Ctrl+Shift+V by reading clipboard and sending input', async () => {
+    it('Cmd+V (Meta+V) returns false and does not send input directly', async () => {
       const { store, tabId, paneId, paneContent } = createTestStore('term-1')
 
       render(
@@ -215,22 +202,13 @@ describe('TerminalView keyboard handling', () => {
         expect(capturedKeyHandler).not.toBeNull()
       })
 
-      const event = createKeyboardEvent('V', { ctrlKey: true, shiftKey: true })
+      const wsSendCountBefore = wsMocks.send.mock.calls.length
+      const event = createKeyboardEvent('v', { metaKey: true })
       const result = capturedKeyHandler!(event)
 
       expect(result).toBe(false)
-
-      await waitFor(() => {
-        expect(clipboardMocks.readText).toHaveBeenCalled()
-      })
-
-      await waitFor(() => {
-        expect(wsMocks.send).toHaveBeenCalledWith({
-          type: 'terminal.input',
-          terminalId: 'term-1',
-          data: 'pasted content',
-        })
-      })
+      expect(clipboardMocks.readText).not.toHaveBeenCalled()
+      expect(wsMocks.send).toHaveBeenCalledTimes(wsSendCountBefore)
     })
 
     it('does not paste on keyup events', async () => {

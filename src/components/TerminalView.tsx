@@ -10,6 +10,7 @@ import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
 import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
 import { consumeTerminalRestoreRequestId } from '@/lib/terminal-restore'
+import { isTerminalPasteShortcut } from '@/lib/terminal-input-policy'
 import {
   createTurnCompleteSignalParserState,
   extractTurnCompleteSignals,
@@ -207,15 +208,9 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         return false
       }
 
-      // Ctrl+V or Ctrl+Shift+V to paste
-      // xterm.js does NOT have a built-in paste handler - we must handle it explicitly
-      if (event.ctrlKey && (event.key === 'v' || event.key === 'V') && event.type === 'keydown' && !event.repeat) {
-        void readText().then((text) => {
-          if (!text) return
-          const tid = terminalIdRef.current
-          if (!tid) return
-          ws.send({ type: 'terminal.input', terminalId: tid, data: text })
-        })
+      if (isTerminalPasteShortcut(event)) {
+        // Policy-only: block xterm key translation (for example Ctrl+V -> ^V)
+        // and allow native/browser paste path to feed xterm.
         return false
       }
 
