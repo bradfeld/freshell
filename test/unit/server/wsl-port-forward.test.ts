@@ -363,6 +363,9 @@ Address         Port        Address         Port
     beforeEach(() => {
       vi.clearAllMocks()
       process.env = { ...originalEnv }
+      // Ensure this suite is deterministic regardless of caller shell env.
+      process.env.PORT = '3001'
+      process.env.NODE_ENV = 'test'
       // Default: not WSL2
       vi.mocked(fs.readFileSync).mockReturnValue('Linux version 5.10.0')
     })
