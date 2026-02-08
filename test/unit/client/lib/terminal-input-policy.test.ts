@@ -32,8 +32,12 @@ describe('isTerminalPasteShortcut', () => {
     expect(isTerminalPasteShortcut(e({ shiftKey: true, key: 'Insert', code: 'Insert' }))).toBe(true)
   })
 
-  it('ignores non-keydown and repeats', () => {
+  it('ignores non-keydown', () => {
     expect(isTerminalPasteShortcut(e({ ctrlKey: true, key: 'v', code: 'KeyV', type: 'keyup' }))).toBe(false)
-    expect(isTerminalPasteShortcut(e({ ctrlKey: true, key: 'v', code: 'KeyV', repeat: true }))).toBe(false)
+  })
+
+  it('matches repeated keydown shortcuts to keep xterm translation blocked', () => {
+    expect(isTerminalPasteShortcut(e({ ctrlKey: true, key: 'v', code: 'KeyV', repeat: true }))).toBe(true)
+    expect(isTerminalPasteShortcut(e({ metaKey: true, key: 'v', code: 'KeyV', repeat: true }))).toBe(true)
   })
 })

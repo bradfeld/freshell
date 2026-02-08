@@ -18,6 +18,7 @@ const wsMocks = vi.hoisted(() => ({
 
 let keyHandler: ((event: KeyboardEvent) => boolean) | null = null
 let onDataCb: ((data: string) => void) | null = null
+let openedElement: HTMLElement | null = null
 
 vi.mock('@/lib/ws-client', () => ({
   getWsClient: () => wsMocks,
@@ -28,13 +29,26 @@ vi.mock('xterm', () => {
     cols = 80
     rows = 24
     options: Record<string, unknown> = {}
-    open = vi.fn()
+    pasteListener: ((event: ClipboardEvent) => void) | null = null
+    open = vi.fn((element: HTMLElement) => {
+      openedElement = element
+      this.pasteListener = (event: ClipboardEvent) => {
+        const text = event.clipboardData?.getData('text/plain') || ''
+        this.paste(text)
+      }
+      element.addEventListener('paste', this.pasteListener)
+    })
     loadAddon = vi.fn()
     write = vi.fn()
     writeln = vi.fn()
     clear = vi.fn()
     reset = vi.fn()
-    dispose = vi.fn()
+    dispose = vi.fn(() => {
+      if (openedElement && this.pasteListener) {
+        openedElement.removeEventListener('paste', this.pasteListener)
+      }
+      this.pasteListener = null
+    })
     onTitleChange = vi.fn(() => ({ dispose: vi.fn() }))
     getSelection = vi.fn(() => '')
     selectAll = vi.fn()
@@ -65,6 +79,16 @@ class MockResizeObserver {
   observe = vi.fn()
   disconnect = vi.fn()
   unobserve = vi.fn()
+}
+
+function createPasteEvent(text: string): ClipboardEvent {
+  const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+  Object.defineProperty(event, 'clipboardData', {
+    value: {
+      getData: (mimeType: string) => (mimeType === 'text/plain' ? text : ''),
+    } as Pick<DataTransfer, 'getData'>,
+  })
+  return event
 }
 
 function createStore() {
@@ -127,6 +151,7 @@ describe('terminal paste single-ingress (e2e)', () => {
   beforeEach(() => {
     keyHandler = null
     onDataCb = null
+    openedElement = null
     wsMocks.send.mockClear()
     vi.stubGlobal('ResizeObserver', MockResizeObserver)
     localStorage.clear()
@@ -137,7 +162,7 @@ describe('terminal paste single-ingress (e2e)', () => {
     vi.unstubAllGlobals()
   })
 
-  it('does not send on keydown paste shortcut; sends once when xterm emits data', async () => {
+  it('does not send on keydown paste shortcut; sends once on paste event', async () => {
     const store = createStore()
     const paneContent: TerminalPaneContent = {
       kind: 'terminal',
@@ -178,7 +203,8 @@ describe('terminal paste single-ingress (e2e)', () => {
     expect(blocked).toBe(false)
     expect(wsMocks.send).not.toHaveBeenCalled()
 
-    onDataCb!('paste payload')
+    expect(openedElement).not.toBeNull()
+    openedElement!.dispatchEvent(createPasteEvent('paste payload'))
 
     expect(wsMocks.send).toHaveBeenCalledTimes(1)
     expect(wsMocks.send).toHaveBeenCalledWith({

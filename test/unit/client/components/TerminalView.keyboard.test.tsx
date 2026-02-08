@@ -152,9 +152,17 @@ function createTestStore(terminalId?: string) {
 }
 
 function createKeyboardEvent(key: string, modifiers: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean; metaKey?: boolean } = {}, type = 'keydown'): KeyboardEvent {
+  const codeByKey: Record<string, string> = {
+    v: 'KeyV',
+    V: 'KeyV',
+    '[': 'BracketLeft',
+    ']': 'BracketRight',
+    Insert: 'Insert',
+  }
+
   return {
     key,
-    code: key === 'v' ? 'KeyV' : key === 'V' ? 'KeyV' : key === '[' ? 'BracketLeft' : key === ']' ? 'BracketRight' : `Key${key.toUpperCase()}`,
+    code: codeByKey[key] || `Key${key.toUpperCase()}`,
     ctrlKey: modifiers.ctrlKey ?? false,
     shiftKey: modifiers.shiftKey ?? false,
     altKey: modifiers.altKey ?? false,
@@ -218,6 +226,50 @@ describe('TerminalView keyboard handling', () => {
 
       const wsSendCountBefore = wsMocks.send.mock.calls.length
       const event = createKeyboardEvent('v', { metaKey: true })
+      const result = capturedKeyHandler!(event)
+
+      expect(result).toBe(false)
+      expect(clipboardMocks.readText).not.toHaveBeenCalled()
+      expect(wsMocks.send).toHaveBeenCalledTimes(wsSendCountBefore)
+    })
+
+    it('repeated Ctrl+V keydown stays blocked and does not send input directly', async () => {
+      const { store, tabId, paneId, paneContent } = createTestStore('term-1')
+
+      render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(capturedKeyHandler).not.toBeNull()
+      })
+
+      const wsSendCountBefore = wsMocks.send.mock.calls.length
+      const event = { ...createKeyboardEvent('v', { ctrlKey: true }), repeat: true } as KeyboardEvent
+      const result = capturedKeyHandler!(event)
+
+      expect(result).toBe(false)
+      expect(clipboardMocks.readText).not.toHaveBeenCalled()
+      expect(wsMocks.send).toHaveBeenCalledTimes(wsSendCountBefore)
+    })
+
+    it('Shift+Insert returns false and does not send input directly', async () => {
+      const { store, tabId, paneId, paneContent } = createTestStore('term-1')
+
+      render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(capturedKeyHandler).not.toBeNull()
+      })
+
+      const wsSendCountBefore = wsMocks.send.mock.calls.length
+      const event = createKeyboardEvent('Insert', { shiftKey: true })
       const result = capturedKeyHandler!(event)
 
       expect(result).toBe(false)
