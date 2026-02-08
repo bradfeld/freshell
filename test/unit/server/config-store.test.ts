@@ -423,6 +423,45 @@ describe('ConfigStore', () => {
     })
   })
 
+  describe('recent directories', () => {
+    it('prepends newest directory and deduplicates existing entries', async () => {
+      const store = new ConfigStore()
+      await store.load()
+
+      await store.pushRecentDirectory('/projects/a')
+      await store.pushRecentDirectory('/projects/b')
+      await store.pushRecentDirectory('/projects/a')
+
+      const snapshot = await store.snapshot()
+      expect(snapshot.recentDirectories).toEqual(['/projects/a', '/projects/b'])
+    })
+
+    it('caps recent directories at 20 entries', async () => {
+      const store = new ConfigStore()
+      await store.load()
+
+      for (let i = 0; i < 25; i += 1) {
+        await store.pushRecentDirectory(`/projects/${i}`)
+      }
+
+      const snapshot = await store.snapshot()
+      expect(snapshot.recentDirectories).toHaveLength(20)
+      expect(snapshot.recentDirectories?.[0]).toBe('/projects/24')
+      expect(snapshot.recentDirectories?.[19]).toBe('/projects/5')
+    })
+
+    it('ignores empty or whitespace-only paths', async () => {
+      const store = new ConfigStore()
+      await store.load()
+
+      await store.pushRecentDirectory('   ')
+      await store.pushRecentDirectory('')
+
+      const snapshot = await store.snapshot()
+      expect(snapshot.recentDirectories).toEqual([])
+    })
+  })
+
   describe('session overrides', () => {
     it('getSessionOverride returns undefined for non-existent session', async () => {
       const store = new ConfigStore()

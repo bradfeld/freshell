@@ -66,6 +66,7 @@ export type AppSettings = {
       sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'
       permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions'
       maxTurns?: number
+      cwd?: string
     }>>
   }
 }
@@ -90,6 +91,7 @@ export type UserConfig = {
   sessionOverrides: Record<string, SessionOverride>
   terminalOverrides: Record<string, TerminalOverride>
   projectColors: Record<string, string>
+  recentDirectories?: string[]
 }
 
 export function resolveDefaultLoggingDebug(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -321,6 +323,9 @@ export class ConfigStore {
         sessionOverrides: existing.sessionOverrides || {},
         terminalOverrides: existing.terminalOverrides || {},
         projectColors: existing.projectColors || {},
+        recentDirectories: Array.isArray(existing.recentDirectories)
+          ? existing.recentDirectories.filter((dir) => typeof dir === 'string' && dir.trim().length > 0)
+          : [],
       }
       return this.cache
     }
@@ -336,6 +341,7 @@ export class ConfigStore {
       sessionOverrides: {},
       terminalOverrides: {},
       projectColors: {},
+      recentDirectories: [],
     }
     await this.saveInternal(this.cache)
     return this.cache
@@ -434,6 +440,26 @@ export class ConfigStore {
   async getProjectColors(): Promise<Record<string, string>> {
     const cfg = await this.load()
     return cfg.projectColors || {}
+  }
+
+  async pushRecentDirectory(dir: string): Promise<string[]> {
+    const trimmed = typeof dir === 'string' ? dir.trim() : ''
+    if (!trimmed) {
+      const cfg = await this.load()
+      return cfg.recentDirectories || []
+    }
+
+    return this.writeMutex.acquire(async () => {
+      const cfg = await this.load()
+      const existing = cfg.recentDirectories || []
+      const next = [trimmed, ...existing.filter((value) => value !== trimmed)].slice(0, 20)
+      const updated: UserConfig = {
+        ...cfg,
+        recentDirectories: next,
+      }
+      await this.saveInternal(updated)
+      return next
+    })
   }
 
   async snapshot(): Promise<UserConfig> {

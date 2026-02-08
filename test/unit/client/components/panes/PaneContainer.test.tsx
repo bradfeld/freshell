@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import PaneContainer from '@/components/panes/PaneContainer'
@@ -10,11 +10,14 @@ import type { PanesState } from '@/store/panesSlice'
 import type { PaneNode, PaneContent, EditorPaneContent } from '@/store/paneTypes'
 
 // Hoist mock functions so vi.mock can reference them
-const { mockSend, mockTerminalView } = vi.hoisted(() => ({
+const { mockSend, mockTerminalView, mockApiGet, mockApiPost, mockApiPatch } = vi.hoisted(() => ({
   mockSend: vi.fn(),
   mockTerminalView: vi.fn(({ tabId, paneId, hidden }: { tabId: string; paneId: string; hidden?: boolean }) => (
     <div data-testid={`terminal-${paneId}`} data-hidden={String(hidden)}>Terminal for {tabId}/{paneId}</div>
   )),
+  mockApiGet: vi.fn(),
+  mockApiPost: vi.fn(),
+  mockApiPatch: vi.fn(),
 }))
 
 // Mock the ws-client module
@@ -22,6 +25,14 @@ vi.mock('@/lib/ws-client', () => ({
   getWsClient: () => ({
     send: mockSend,
   }),
+}))
+
+vi.mock('@/lib/api', () => ({
+  api: {
+    get: (path: string) => mockApiGet(path),
+    post: (path: string, body: unknown) => mockApiPost(path, body),
+    patch: (path: string, body: unknown) => mockApiPatch(path, body),
+  },
 }))
 
 // Mock lucide-react icons
@@ -141,6 +152,12 @@ describe('PaneContainer', () => {
   beforeEach(() => {
     mockSend.mockClear()
     mockTerminalView.mockClear()
+    mockApiGet.mockReset()
+    mockApiPost.mockReset()
+    mockApiPatch.mockReset()
+    mockApiGet.mockResolvedValue({ directories: [] })
+    mockApiPost.mockResolvedValue({ valid: true, resolvedPath: '/resolved/path' })
+    mockApiPatch.mockResolvedValue({})
     // Mock fetch for EditorPane's /api/terminals call
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/terminals') return createMockResponse([])
@@ -891,9 +908,11 @@ describe('PaneContainer', () => {
       }
     })
 
-    it('passes initialCwd from provider settings when CLI is selected', () => {
-      const node = createPickerNode('pane-1')
-      const store = configureStore({
+    function createStoreWithClaude(
+      node: PaneNode,
+      providerSettings?: { cwd?: string; permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions' }
+    ) {
+      return configureStore({
         reducer: {
           panes: panesReducer,
           settings: settingsReducer,
@@ -927,9 +946,7 @@ describe('PaneContainer', () => {
               panes: { defaultNewPane: 'ask' as const },
               codingCli: {
                 enabledProviders: ['claude'] as any[],
-                providers: {
-                  claude: { cwd: '/home/user/projects' },
-                },
+                providers: providerSettings ? { claude: providerSettings } : {},
               },
               logging: { debug: false },
             },
@@ -938,6 +955,11 @@ describe('PaneContainer', () => {
           },
         },
       })
+    }
+
+    it('shows directory picker after coding CLI selection', () => {
+      const node = createPickerNode('pane-1')
+      const store = createStoreWithClaude(node, { cwd: '/home/user/projects' })
 
       renderWithStore(
         <PaneContainer tabId="tab-1" node={node} />,
@@ -945,89 +967,67 @@ describe('PaneContainer', () => {
       )
 
       const container = getPickerContainer()
-      // Press 'l' key for Claude
       fireEvent.keyDown(container, { key: 'l' })
       fireEvent.transitionEnd(container)
 
-      // Verify the pane content has initialCwd from provider settings
+      const input = screen.getByLabelText('Starting directory for Claude') as HTMLInputElement
+      expect(input.value).toBe('/home/user/projects')
+
       const state = store.getState().panes
       const paneContent = (state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).content
-      expect(paneContent.kind).toBe('terminal')
-      if (paneContent.kind === 'terminal') {
-        expect(paneContent.mode).toBe('claude')
-        expect(paneContent.initialCwd).toBe('/home/user/projects')
-      }
+      expect(paneContent.kind).toBe('picker')
     })
 
-    it('does not set initialCwd when provider has no cwd configured', () => {
+    it('creates terminal on directory confirm and persists provider cwd', async () => {
       const node = createPickerNode('pane-1')
-      const store = createStore(
-        { layouts: { 'tab-1': node }, activePane: { 'tab-1': 'pane-1' } },
-        { platform: 'linux', availableClis: { claude: true } }
-      )
-
-      // Default store has no provider cwd configured and claude not in enabledProviders
-      // We need to add claude to enabledProviders via the store
-      const storeWithClaude = configureStore({
-        reducer: {
-          panes: panesReducer,
-          settings: settingsReducer,
-          connection: connectionReducer,
-        },
-        preloadedState: {
-          panes: {
-            layouts: { 'tab-1': node },
-            activePane: { 'tab-1': 'pane-1' },
-            paneTitles: {},
-          },
-          connection: {
-            status: 'ready' as const,
-            platform: 'linux',
-            availableClis: { claude: true },
-          },
-          settings: {
-            settings: {
-              theme: 'system' as const,
-              uiScale: 1,
-              terminal: {
-                fontSize: 14,
-                fontFamily: 'monospace',
-                lineHeight: 1.2,
-                cursorBlink: true,
-                scrollback: 5000,
-                theme: 'auto' as const,
-              },
-              safety: { autoKillIdleMinutes: 180, warnBeforeKillMinutes: 5 },
-              sidebar: { sortMode: 'activity' as const, showProjectBadges: true, width: 288, collapsed: false },
-              panes: { defaultNewPane: 'ask' as const },
-              codingCli: {
-                enabledProviders: ['claude'] as any[],
-                providers: {},
-              },
-              logging: { debug: false },
-            },
-            loaded: true,
-            lastSavedAt: null,
-          },
-        },
-      })
+      const store = createStoreWithClaude(node, { cwd: '/home/user/projects', permissionMode: 'plan' })
+      mockApiPost.mockResolvedValueOnce({ valid: true, resolvedPath: '/home/user/new-project' })
 
       renderWithStore(
         <PaneContainer tabId="tab-1" node={node} />,
-        storeWithClaude
+        store
       )
 
       const container = getPickerContainer()
       fireEvent.keyDown(container, { key: 'l' })
       fireEvent.transitionEnd(container)
 
-      const state = storeWithClaude.getState().panes
-      const paneContent = (state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).content
-      expect(paneContent.kind).toBe('terminal')
-      if (paneContent.kind === 'terminal') {
-        expect(paneContent.mode).toBe('claude')
-        expect(paneContent.initialCwd).toBeUndefined()
-      }
+      const input = screen.getByLabelText('Starting directory for Claude')
+      fireEvent.change(input, { target: { value: '/home/user/new-project' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+
+      await waitFor(() => {
+        const state = store.getState().panes
+        const paneContent = (state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).content
+        expect(paneContent.kind).toBe('terminal')
+        if (paneContent.kind === 'terminal') {
+          expect(paneContent.mode).toBe('claude')
+          expect(paneContent.initialCwd).toBe('/home/user/new-project')
+          expect(paneContent.status).toBe('creating')
+        }
+      })
+
+      expect(mockApiPatch).toHaveBeenCalledWith('/api/settings', {
+        codingCli: { providers: { claude: { permissionMode: 'plan', cwd: '/home/user/new-project' } } },
+      })
+    })
+
+    it('returns to pane type picker when back is clicked in directory picker', () => {
+      const node = createPickerNode('pane-1')
+      const store = createStoreWithClaude(node)
+
+      renderWithStore(
+        <PaneContainer tabId="tab-1" node={node} />,
+        store
+      )
+
+      const container = getPickerContainer()
+      fireEvent.keyDown(container, { key: 'l' })
+      fireEvent.transitionEnd(container)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+      expect(screen.getByRole('toolbar', { name: 'Pane type picker' })).toBeInTheDocument()
     })
 
     it('creates terminal with shell=system when shell is selected (non-Windows)', () => {

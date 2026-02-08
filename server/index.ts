@@ -32,6 +32,7 @@ import { detectPlatform, detectAvailableClis } from './platform.js'
 import { resolveVisitPort } from './startup-url.js'
 import { PortForwardManager } from './port-forward.js'
 import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
+import { collectCandidateDirectories } from './candidate-dirs.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -215,6 +216,19 @@ async function main() {
       detectAvailableClis(),
     ])
     res.json({ platform, availableClis })
+  })
+
+  app.get('/api/files/candidate-dirs', async (_req, res) => {
+    const cfg = await configStore.snapshot()
+    const providerCwds = Object.values(cfg.settings?.codingCli?.providers || {}).map((provider) => provider?.cwd)
+    const directories = collectCandidateDirectories({
+      projects: codingCliIndexer.getProjects(),
+      terminals: registry.list(),
+      recentDirectories: cfg.recentDirectories || [],
+      providerCwds,
+      defaultCwd: cfg.settings?.defaultCwd,
+    })
+    res.json({ directories })
   })
 
   const normalizeSettingsPatch = (patch: Record<string, any>) => {

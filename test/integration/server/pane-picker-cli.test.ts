@@ -9,6 +9,10 @@ const TEST_TIMEOUT_MS = 30_000
 const HOOK_TIMEOUT_MS = 30_000
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: HOOK_TIMEOUT_MS })
 
+const { mockPushRecentDirectory } = vi.hoisted(() => ({
+  mockPushRecentDirectory: vi.fn().mockResolvedValue(undefined),
+}))
+
 // Mock the config-store module before importing ws-handler
 vi.mock('../../../server/config-store', () => ({
   configStore: {
@@ -19,6 +23,7 @@ vi.mock('../../../server/config-store', () => ({
       terminalOverrides: {},
       projectColors: {},
     }),
+    pushRecentDirectory: mockPushRecentDirectory,
   },
 }))
 
@@ -241,6 +246,7 @@ describe('Pane Picker CLI Integration', () => {
 
     beforeEach(() => {
       registry.records.clear()
+      mockPushRecentDirectory.mockClear()
     })
 
     afterAll(async () => {
@@ -336,6 +342,29 @@ describe('Pane Picker CLI Integration', () => {
       const rec = registry.get(created.terminalId)
       expect(rec).not.toBeNull()
       expect(rec.cwd).toBe('/tmp/test-project')
+
+      await closeWebSocket(ws)
+    })
+
+    it('records explicit cwd in recent directories for coding CLI terminal create', async () => {
+      const ws = await connectAndAuth()
+
+      const requestId = 'req-claude-recent-dir'
+      ws.send(JSON.stringify({
+        type: 'terminal.create',
+        requestId,
+        mode: 'claude',
+        cwd: '/tmp/recent-dir',
+      }))
+
+      await new Promise<void>((resolve) => {
+        ws.on('message', (data) => {
+          const msg = JSON.parse(data.toString())
+          if (msg.type === 'terminal.created' && msg.requestId === requestId) resolve()
+        })
+      })
+
+      expect(mockPushRecentDirectory).toHaveBeenCalledWith('/tmp/recent-dir')
 
       await closeWebSocket(ws)
     })

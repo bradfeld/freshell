@@ -815,6 +815,13 @@ export class WsHandler {
             resumeSessionId: effectiveResumeSessionId,
           })
 
+          if (m.mode !== 'shell' && typeof m.cwd === 'string' && m.cwd.trim()) {
+            const recentDirectory = m.cwd.trim()
+            void configStore.pushRecentDirectory(recentDirectory).catch((err) => {
+              log.warn({ err, recentDirectory }, 'Failed to record recent directory')
+            })
+          }
+
           state.createdByRequestId.set(m.requestId, record.terminalId)
           terminalId = record.terminalId
 

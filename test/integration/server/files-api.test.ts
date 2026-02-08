@@ -217,6 +217,18 @@ describe('Files API Integration', () => {
       }
     })
 
+    it('returns only directories when dirs=true is provided', async () => {
+      const res = await request(app)
+        .get('/api/files/complete')
+        .query({ prefix: path.join(tempDir, ''), dirs: 'true' })
+        .set('x-auth-token', TEST_AUTH_TOKEN)
+
+      expect(res.status).toBe(200)
+      expect(res.body.suggestions.length).toBeGreaterThan(0)
+      expect(res.body.suggestions.every((s: any) => s.isDirectory)).toBe(true)
+      expect(res.body.suggestions.some((s: any) => s.path.endsWith('package.json'))).toBe(false)
+    })
+
     it('limits to 20 results', async () => {
       // Create 25 files
       for (let i = 0; i < 25; i++) {
@@ -248,6 +260,28 @@ describe('Files API Integration', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.suggestions).toEqual([])
+    })
+
+    it('expands ~ prefixes to the user home directory', async () => {
+      const homeTempDir = await fsp.mkdtemp(path.join(os.homedir(), '.freshell-home-complete-'))
+      const homeNestedDir = path.join(homeTempDir, 'alpha')
+      await fsp.mkdir(homeNestedDir, { recursive: true })
+
+      const homeRelative = path.relative(os.homedir(), homeTempDir).split(path.sep).join('/')
+      const prefix = `~/${homeRelative}/a`
+
+      try {
+        const res = await request(app)
+          .get('/api/files/complete')
+          .query({ prefix, dirs: 'true' })
+          .set('x-auth-token', TEST_AUTH_TOKEN)
+
+        expect(res.status).toBe(200)
+        const paths = res.body.suggestions.map((s: any) => s.path)
+        expect(paths).toContain(homeNestedDir)
+      } finally {
+        await fsp.rm(homeTempDir, { recursive: true, force: true }).catch(() => {})
+      }
     })
   })
 

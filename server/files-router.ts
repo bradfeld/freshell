@@ -2,7 +2,7 @@ import express from 'express'
 import fsp from 'fs/promises'
 import path from 'path'
 import { spawn } from 'child_process'
-import { isReachableDirectory } from './path-utils.js'
+import { isReachableDirectory, resolveUserPath } from './path-utils.js'
 
 export const filesRouter = express.Router()
 
@@ -64,11 +64,12 @@ filesRouter.post('/write', async (req, res) => {
 
 filesRouter.get('/complete', async (req, res) => {
   const prefix = req.query.prefix as string
+  const dirsOnly = req.query.dirs === 'true' || req.query.dirs === '1'
   if (!prefix) {
     return res.status(400).json({ error: 'prefix query parameter required' })
   }
 
-  const resolved = path.resolve(prefix)
+  const resolved = resolveUserPath(prefix)
 
   try {
     // Check if prefix is a directory - if so, list all files in it
@@ -94,6 +95,7 @@ filesRouter.get('/complete', async (req, res) => {
 
     const matches = entries
       .filter((entry) => entry.name.startsWith(basename))
+      .filter((entry) => !dirsOnly || entry.isDirectory())
       .map((entry) => ({
         path: path.join(dir, entry.name),
         isDirectory: entry.isDirectory(),

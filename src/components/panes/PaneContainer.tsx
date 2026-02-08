@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo } from 'react'
+import { useRef, useCallback, useMemo, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { closePane, setActivePane, resizePanes, updatePaneContent } from '@/store/panesSlice'
 import type { PaneNode, PaneContent } from '@/store/paneTypes'
@@ -8,12 +8,16 @@ import TerminalView from '../TerminalView'
 import BrowserPane from './BrowserPane'
 import EditorPane from './EditorPane'
 import PanePicker, { type PanePickerType } from './PanePicker'
-import { isCodingCliProviderName } from '@/lib/coding-cli-utils'
+import DirectoryPicker from './DirectoryPicker'
+import { getProviderLabel, isCodingCliProviderName } from '@/lib/coding-cli-utils'
 import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
+import { api } from '@/lib/api'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
 import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
+import type { CodingCliProviderName } from '@/lib/coding-cli-types'
+import { updateSettingsLocal } from '@/store/settingsSlice'
 
 // Stable empty object to avoid selector memoization issues
 const EMPTY_PANE_TITLES: Record<string, string> = {}
@@ -135,84 +139,121 @@ function PickerWrapper({
 }) {
   const dispatch = useAppDispatch()
   const settings = useAppSelector((s) => s.settings?.settings)
+  const [step, setStep] = useState<
+    | { step: 'type' }
+    | { step: 'directory'; providerType: CodingCliProviderName }
+  >({ step: 'type' })
 
-  const handleSelect = useCallback((type: PanePickerType) => {
-    let newContent: PaneContent
-
+  const createContentForType = useCallback((type: PanePickerType, cwd?: string): PaneContent => {
     if (isCodingCliProviderName(type)) {
-      const providerCwd = settings?.codingCli?.providers?.[type]?.cwd
-      newContent = {
+      return {
         kind: 'terminal',
         mode: type,
         shell: 'system',
         createRequestId: nanoid(),
         status: 'creating',
-        ...(providerCwd ? { initialCwd: providerCwd } : {}),
-      }
-    } else {
-      switch (type) {
-        case 'shell':
-          newContent = {
-            kind: 'terminal',
-            mode: 'shell',
-            shell: 'system',
-            createRequestId: nanoid(),
-            status: 'creating',
-          }
-          break
-        case 'cmd':
-          newContent = {
-            kind: 'terminal',
-            mode: 'shell',
-            shell: 'cmd',
-            createRequestId: nanoid(),
-            status: 'creating',
-          }
-          break
-        case 'powershell':
-          newContent = {
-            kind: 'terminal',
-            mode: 'shell',
-            shell: 'powershell',
-            createRequestId: nanoid(),
-            status: 'creating',
-          }
-          break
-        case 'wsl':
-          newContent = {
-            kind: 'terminal',
-            mode: 'shell',
-            shell: 'wsl',
-            createRequestId: nanoid(),
-            status: 'creating',
-          }
-          break
-        case 'browser':
-          newContent = {
-            kind: 'browser',
-            url: '',
-            devToolsOpen: false,
-          }
-          break
-        case 'editor':
-          newContent = {
-            kind: 'editor',
-            filePath: null,
-            language: null,
-            readOnly: false,
-            content: '',
-            viewMode: 'source',
-          }
-          break
+        ...(cwd ? { initialCwd: cwd } : {}),
       }
     }
 
+    switch (type) {
+      case 'shell':
+        return {
+          kind: 'terminal',
+          mode: 'shell',
+          shell: 'system',
+          createRequestId: nanoid(),
+          status: 'creating',
+        }
+      case 'cmd':
+        return {
+          kind: 'terminal',
+          mode: 'shell',
+          shell: 'cmd',
+          createRequestId: nanoid(),
+          status: 'creating',
+        }
+      case 'powershell':
+        return {
+          kind: 'terminal',
+          mode: 'shell',
+          shell: 'powershell',
+          createRequestId: nanoid(),
+          status: 'creating',
+        }
+      case 'wsl':
+        return {
+          kind: 'terminal',
+          mode: 'shell',
+          shell: 'wsl',
+          createRequestId: nanoid(),
+          status: 'creating',
+        }
+      case 'browser':
+        return {
+          kind: 'browser',
+          url: '',
+          devToolsOpen: false,
+        }
+      case 'editor':
+        return {
+          kind: 'editor',
+          filePath: null,
+          language: null,
+          readOnly: false,
+          content: '',
+          viewMode: 'source',
+        }
+      default:
+        throw new Error(`Unsupported pane type: ${String(type)}`)
+    }
+  }, [])
+
+  const handleSelect = useCallback((type: PanePickerType) => {
+    if (isCodingCliProviderName(type)) {
+      setStep({ step: 'directory', providerType: type })
+      return
+    }
+
+    const newContent = createContentForType(type)
     dispatch(updatePaneContent({ tabId, paneId, content: newContent }))
-  }, [dispatch, tabId, paneId, settings])
+  }, [createContentForType, dispatch, tabId, paneId])
+
+  const handleDirectoryConfirm = useCallback((cwd: string) => {
+    if (step.step !== 'directory') return
+
+    const providerType = step.providerType
+    const newContent = createContentForType(providerType, cwd)
+    dispatch(updatePaneContent({ tabId, paneId, content: newContent }))
+
+    const existingProviderSettings = settings?.codingCli?.providers?.[providerType] || {}
+    const patch = {
+      codingCli: { providers: { [providerType]: { ...existingProviderSettings, cwd } } },
+    }
+    dispatch(updateSettingsLocal(patch as any))
+    void api.patch('/api/settings', patch).catch((err) => {
+      console.warn('Failed to save provider starting directory', err)
+    })
+  }, [createContentForType, dispatch, paneId, settings, step, tabId])
 
   const handleCancel = useCallback(() => {
     dispatch(closePane({ tabId, paneId }))
   }, [dispatch, tabId, paneId])
+
+  if (step.step === 'directory') {
+    const providerType = step.providerType
+    const providerLabel = getProviderLabel(providerType)
+    const defaultCwd = settings?.codingCli?.providers?.[providerType]?.cwd
+    return (
+      <DirectoryPicker
+        providerType={providerType}
+        providerLabel={providerLabel}
+        defaultCwd={defaultCwd}
+        onConfirm={handleDirectoryConfirm}
+        onBack={() => setStep({ step: 'type' })}
+      />
+    )
+  }
 
   return (
     <PanePicker
