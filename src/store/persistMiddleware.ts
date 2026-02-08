@@ -4,13 +4,11 @@ import type { PanesState } from './paneTypes'
 import type { Tab } from './types'
 import { nanoid } from 'nanoid'
 import { broadcastPersistedRaw } from './persistBroadcast'
+import { PANES_SCHEMA_VERSION } from './persistedState.js'
 
 const STORAGE_KEY = 'freshell.tabs.v1'
 const PANES_STORAGE_KEY = 'freshell.panes.v1'
 export const PERSIST_DEBOUNCE_MS = 500
-
-// Current panes schema version
-const PANES_SCHEMA_VERSION = 3
 
 const flushCallbacks = new Set<() => void>()
 let flushListenersAttached = false

@@ -25,6 +25,7 @@ import {
   persistMiddleware,
   resetPersistFlushListenersForTests,
 } from '../../../../src/store/persistMiddleware'
+import { PANES_SCHEMA_VERSION } from '../../../../src/store/persistedState'
 
 describe('Panes Persistence Integration', () => {
   beforeEach(() => {
@@ -282,7 +283,7 @@ describe('PaneContent migration', () => {
     expect(layout.content.createRequestId).toBeDefined()
     expect(layout.content.status).toBe('creating')
     expect(layout.content.shell).toBe('system')
-    expect(loaded.version).toBe(3) // Migrated version
+    expect(loaded.version).toBe(PANES_SCHEMA_VERSION) // Migrated version
   })
 
   it('migrates nested split panes recursively', () => {
@@ -402,7 +403,7 @@ describe('version 3 migration', () => {
 
     const result = loadPersistedPanes()
 
-    expect(result.version).toBe(3)
+    expect(result.version).toBe(PANES_SCHEMA_VERSION)
     expect(result.paneTitles).toEqual({})
   })
 
@@ -587,5 +588,34 @@ describe('legacy tab resumeSessionId migration', () => {
     const store = configureStore({ reducer: { tabs: tabsReducer, panes: panesReducer } })
     const layout = store.getState().panes.layouts['tab-1'] as any
     expect(layout.content.resumeSessionId).toBeUndefined()
+  })
+})
+
+describe('schema version consistency', () => {
+  beforeEach(() => {
+    localStorageMock.clear()
+    vi.useFakeTimers()
+    resetPersistFlushListenersForTests()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('persists panes with the same version that persistedState accepts', () => {
+    const store = configureStore({
+      reducer: { tabs: tabsReducer, panes: panesReducer },
+      middleware: (getDefault) => getDefault().concat(persistMiddleware as any),
+    })
+
+    store.dispatch(addTab({ mode: 'shell' }))
+    const tabId = store.getState().tabs.tabs[0].id
+    store.dispatch(initLayout({ tabId, content: { kind: 'terminal', mode: 'shell' } }))
+    vi.runAllTimers()
+
+    const raw = localStorage.getItem('freshell.panes.v1')!
+    const parsed = JSON.parse(raw)
+    // The version written by persist middleware must match persistedState's version
+    expect(parsed.version).toBe(PANES_SCHEMA_VERSION)
   })
 })
