@@ -591,6 +591,45 @@ describe('legacy tab resumeSessionId migration', () => {
   })
 })
 
+describe('loadInitialPanesState consistency', () => {
+  beforeEach(() => {
+    localStorageMock.clear()
+  })
+
+  it('initial pane state matches loadPersistedPanes output for migrated data', async () => {
+    // Simulate v1 data (no lifecycle fields) that needs migration
+    localStorageMock.clear()
+    localStorage.setItem('freshell.panes.v1', JSON.stringify({
+      layouts: {
+        'tab-1': {
+          type: 'leaf',
+          id: 'pane-1',
+          content: { kind: 'terminal', mode: 'shell' },
+        },
+      },
+      activePane: { 'tab-1': 'pane-1' },
+    }))
+
+    // loadPersistedPanes runs migrations (generates createRequestId)
+    const migrated = loadPersistedPanes()
+    expect(migrated).not.toBeNull()
+    const migratedContent = (migrated!.layouts['tab-1'] as any).content
+    expect(migratedContent.createRequestId).toBeDefined()
+
+    // Re-import panesSlice to trigger fresh loadInitialPanesState
+    vi.resetModules()
+    const { default: freshPanesReducer } = await import('../../../../src/store/panesSlice')
+    const store = configureStore({ reducer: { panes: freshPanesReducer } })
+
+    const initialContent = (store.getState().panes.layouts['tab-1'] as any)?.content
+
+    // The key assertion: initial state should have lifecycle fields
+    // (even if createRequestId values differ, both must be defined)
+    expect(initialContent?.createRequestId).toBeDefined()
+    expect(initialContent?.status).toBeDefined()
+  })
+})
+
 describe('schema version consistency', () => {
   beforeEach(() => {
     localStorageMock.clear()

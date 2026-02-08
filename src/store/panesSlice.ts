@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import type { PanesState, PaneContent, PaneContentInput, PaneNode } from './paneTypes'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
 import { isValidClaudeSessionId } from '@/lib/claude-session-id'
+import { loadPersistedPanes } from './persistMiddleware.js'
 
 /**
  * Normalize terminal input to full PaneContent with defaults.
@@ -114,7 +115,9 @@ function applyLegacyResumeSessionIds(state: PanesState): PanesState {
 }
 
 // Load persisted panes state directly at module initialization time
-// This ensures the initial state includes persisted data BEFORE the store is created
+// This ensures the initial state includes persisted data BEFORE the store is created.
+// Delegates to loadPersistedPanes() so that both Redux initial state and
+// terminal-restore.ts see identically migrated data.
 function loadInitialPanesState(): PanesState {
   const defaultState: PanesState = {
     layouts: {},
@@ -123,16 +126,16 @@ function loadInitialPanesState(): PanesState {
   }
 
   try {
-    const raw = localStorage.getItem('freshell.panes.v1')
-    if (!raw) return defaultState
-    const parsed = JSON.parse(raw) as PanesState
+    const loaded = loadPersistedPanes()
+    if (!loaded) return defaultState
+
     if (import.meta.env.MODE === 'development') {
-      console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(parsed.layouts || {}))
+      console.log('[PanesSlice] Loaded initial state from localStorage:', Object.keys(loaded.layouts || {}))
     }
-    const state = {
-      layouts: parsed.layouts || {},
-      activePane: parsed.activePane || {},
-      paneTitles: parsed.paneTitles || {},
+    const state: PanesState = {
+      layouts: loaded.layouts || {},
+      activePane: loaded.activePane || {},
+      paneTitles: loaded.paneTitles || {},
     }
     return applyLegacyResumeSessionIds(state)
   } catch (err) {
