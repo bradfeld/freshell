@@ -9,7 +9,7 @@ import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
 import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
-import { consumeTerminalRestoreRequestId } from '@/lib/terminal-restore'
+import { consumeTerminalRestoreRequestId, addTerminalRestoreRequestId } from '@/lib/terminal-restore'
 import { isTerminalPasteShortcut } from '@/lib/terminal-input-policy'
 import {
   createTurnCompleteSignalParserState,
@@ -545,6 +545,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           if (currentTerminalId && current?.status !== 'exited') {
             term.writeln('\r\n[Reconnecting...]\r\n')
             const newRequestId = nanoid()
+            // Preserve the restore flag so the re-creation bypasses rate limiting.
+            // The original createRequestId's flag was never consumed (we went
+            // through attach, not sendCreate), so check the old ID first.
+            const wasRestore = consumeTerminalRestoreRequestId(requestIdRef.current)
+            if (wasRestore) {
+              addTerminalRestoreRequestId(newRequestId)
+            }
             requestIdRef.current = newRequestId
             terminalIdRef.current = undefined
             updateContent({ terminalId: undefined, createRequestId: newRequestId, status: 'creating' })

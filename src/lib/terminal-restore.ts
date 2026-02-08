@@ -35,3 +35,7 @@ export function consumeTerminalRestoreRequestId(requestId: string): boolean {
   restoredCreateRequestIds.delete(requestId)
   return true
 }
+
+export function addTerminalRestoreRequestId(requestId: string): void {
+  restoredCreateRequestIds.add(requestId)
+}
