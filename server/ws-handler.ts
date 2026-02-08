@@ -99,6 +99,9 @@ export function chunkProjects(projects: ProjectGroup[], maxBytes: number): Proje
 const HelloSchema = z.object({
   type: z.literal('hello'),
   token: z.string().optional(),
+  capabilities: z.object({
+    sessionsPatchV1: z.boolean().optional(),
+  }).optional(),
   sessions: z.object({
     active: z.string().optional(),
     visible: z.array(z.string()).optional(),
@@ -200,6 +203,8 @@ const ClientMessageSchema = z.discriminatedUnion('type', [
 
 type ClientState = {
   authenticated: boolean
+  supportsSessionsPatchV1: boolean
+  sessionsSnapshotSent: boolean
   attachedTerminalIds: Set<string>
   createdByRequestId: Map<string, string>
   terminalCreateTimestamps: number[]
@@ -382,6 +387,8 @@ export class WsHandler {
 
     const state: ClientState = {
       authenticated: false,
+      supportsSessionsPatchV1: false,
+      sessionsSnapshotSent: false,
       attachedTerminalIds: new Set(),
       createdByRequestId: new Map(),
       terminalCreateTimestamps: [],
@@ -553,14 +560,14 @@ export class WsHandler {
     })
   }
 
-  private scheduleHandshakeSnapshot(ws: LiveWebSocket) {
+  private scheduleHandshakeSnapshot(ws: LiveWebSocket, state: ClientState) {
     if (!this.handshakeSnapshotProvider) return
     setTimeout(() => {
-      void this.sendHandshakeSnapshot(ws)
+      void this.sendHandshakeSnapshot(ws, state)
     }, 0)
   }
 
-  private async sendHandshakeSnapshot(ws: LiveWebSocket) {
+  private async sendHandshakeSnapshot(ws: LiveWebSocket, state: ClientState) {
     if (!this.handshakeSnapshotProvider) return
     try {
       const snapshot = await this.handshakeSnapshotProvider()
@@ -569,6 +576,7 @@ export class WsHandler {
       }
       if (snapshot.projects) {
         await this.sendChunkedSessions(ws, snapshot.projects)
+        state.sessionsSnapshotSent = true
       }
       if (typeof snapshot.perfLogging === 'boolean') {
         this.safeSend(ws, { type: 'perf.logging', enabled: snapshot.perfLogging })
@@ -615,7 +623,6 @@ export class WsHandler {
       }
     }
   }
-
   private async onMessage(ws: LiveWebSocket, state: ClientState, data: WebSocket.RawData) {
     const endMessageTimer = startPerfTimer(
       'ws_message',
@@ -625,7 +632,8 @@ export class WsHandler {
     let messageType: string | undefined
     let payloadBytes: number | undefined
     if (perfConfig.enabled) {
-      if (Array.isArray(data)) payloadBytes = data.reduce((sum, item) => sum + item.length, 0)
+      if (typeof data === 'string') payloadBytes = data.length
+      else if (Array.isArray(data)) payloadBytes = data.reduce((sum, item) => sum + item.length, 0)
       else if (Buffer.isBuffer(data)) payloadBytes = data.length
       else if (data instanceof ArrayBuffer) payloadBytes = data.byteLength
     }
@@ -663,6 +671,7 @@ export class WsHandler {
           return
         }
         state.authenticated = true
+        state.supportsSessionsPatchV1 = !!m.capabilities?.sessionsPatchV1
         if (state.helloTimer) clearTimeout(state.helloTimer)
 
         log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')
@@ -683,7 +692,7 @@ export class WsHandler {
         }
 
         this.send(ws, { type: 'ready', timestamp: nowIso() })
-        this.scheduleHandshakeSnapshot(ws)
+        this.scheduleHandshakeSnapshot(ws, state)
         return
       }
 
@@ -1077,6 +1086,27 @@ export class WsHandler {
         // Fire and forget - each client handles its own backpressure
         void this.sendChunkedSessions(ws, projects)
       }
+    }
+  }
+
+  broadcastSessionsUpdatedToLegacy(projects: ProjectGroup[]): void {
+    for (const ws of this.connections) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      const state = this.clientStates.get(ws)
+      if (!state?.authenticated) continue
+      if (state.supportsSessionsPatchV1 && state.sessionsSnapshotSent) continue
+      void this.sendChunkedSessions(ws, projects)
+    }
+  }
+
+  broadcastSessionsPatch(msg: { type: 'sessions.patch'; upsertProjects: ProjectGroup[]; removeProjectPaths: string[] }): void {
+    for (const ws of this.connections) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      const state = this.clientStates.get(ws)
+      if (!state?.authenticated) continue
+      if (!state.supportsSessionsPatchV1) continue
+      if (!state.sessionsSnapshotSent) continue
+      this.safeSend(ws, msg)
     }
   }
 

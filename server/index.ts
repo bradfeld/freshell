@@ -14,6 +14,7 @@ import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
 import { configStore } from './config-store.js'
 import { TerminalRegistry } from './terminal-registry.js'
 import { WsHandler } from './ws-handler.js'
+import { SessionsSyncService } from './sessions-sync/service.js'
 import { claudeIndexer } from './claude-indexer.js'
 import { CodingCliSessionIndexer } from './coding-cli/session-indexer.js'
 import { CodingCliSessionManager } from './coding-cli/session-manager.js'
@@ -88,13 +89,13 @@ async function main() {
 
     // Check if it's a file (not a directory)
     const stat = fs.statSync(resolved)
-    if (stat.isDirectory()) {
-      return res.status(400).json({ error: 'Cannot serve directories' })
-    }
+	    if (stat.isDirectory()) {
+	      return res.status(400).json({ error: 'Cannot serve directories' })
+	    }
 
-  // Send the file with appropriate content type
-  res.sendFile(resolved)
-  })
+	    // Send the file with appropriate content type
+	    res.sendFile(resolved)
+	  })
 
   const startupState = createStartupState()
 
@@ -153,6 +154,7 @@ async function main() {
       perfLogging: perfConfig.enabled,
     }
   })
+  const sessionsSync = new SessionsSyncService(wsHandler)
 
   registry.on('terminal.idle.warning', (payload) => {
     wsHandler.broadcast({ type: 'terminal.idle.warning', ...(payload as any) })
@@ -231,18 +233,17 @@ async function main() {
     registry.setSettings(migrated)
     applyDebugLogging(!!migrated.logging?.debug, 'settings')
     wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-    await withPerfSpan(
-      'coding_cli_refresh',
-      () => codingCliIndexer.refresh(),
-      {},
-      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-    )
-    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
-    await withPerfSpan(
-      'claude_refresh',
-      () => claudeIndexer.refresh(),
-      {},
-      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+	    await withPerfSpan(
+	      'coding_cli_refresh',
+	      () => codingCliIndexer.refresh(),
+	      {},
+	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+	    )
+	    await withPerfSpan(
+	      'claude_refresh',
+	      () => claudeIndexer.refresh(),
+	      {},
+	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
     )
     res.json(migrated)
   })
@@ -255,18 +256,17 @@ async function main() {
     registry.setSettings(migrated)
     applyDebugLogging(!!migrated.logging?.debug, 'settings')
     wsHandler.broadcast({ type: 'settings.updated', settings: migrated })
-    await withPerfSpan(
-      'coding_cli_refresh',
-      () => codingCliIndexer.refresh(),
-      {},
-      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
-    )
-    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
-    await withPerfSpan(
-      'claude_refresh',
-      () => claudeIndexer.refresh(),
-      {},
-      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+	    await withPerfSpan(
+	      'coding_cli_refresh',
+	      () => codingCliIndexer.refresh(),
+	      {},
+	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
+	    )
+	    await withPerfSpan(
+	      'claude_refresh',
+	      () => claudeIndexer.refresh(),
+	      {},
+	      { minDurationMs: perfConfig.slowSessionRefreshMs, level: 'warn' },
     )
     res.json(migrated)
   })
@@ -349,39 +349,36 @@ async function main() {
       return trimmed ? trimmed : undefined
     }
     const { titleOverride, summaryOverride, deleted, archived, createdAtOverride } = parsed.data
-    const next = await configStore.patchSessionOverride(compositeKey, {
-      titleOverride: cleanString(titleOverride),
-      summaryOverride: cleanString(summaryOverride),
-      deleted,
-      archived,
-      createdAtOverride,
-    })
-    await codingCliIndexer.refresh()
-    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
-    await claudeIndexer.refresh()
-    res.json(next)
-  })
+	    const next = await configStore.patchSessionOverride(compositeKey, {
+	      titleOverride: cleanString(titleOverride),
+	      summaryOverride: cleanString(summaryOverride),
+	      deleted,
+	      archived,
+	      createdAtOverride,
+	    })
+	    await codingCliIndexer.refresh()
+	    await claudeIndexer.refresh()
+	    res.json(next)
+	  })
 
   app.delete('/api/sessions/:sessionId', async (req, res) => {
     const rawId = req.params.sessionId
     const provider = (req.query.provider as CodingCliProviderName) || 'claude'
-    const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
-    await configStore.deleteSession(compositeKey)
-    await codingCliIndexer.refresh()
-    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
-    await claudeIndexer.refresh()
-    res.json({ ok: true })
-  })
+	    const compositeKey = rawId.includes(':') ? rawId : makeSessionKey(provider, rawId)
+	    await configStore.deleteSession(compositeKey)
+	    await codingCliIndexer.refresh()
+	    await claudeIndexer.refresh()
+	    res.json({ ok: true })
+	  })
 
   app.put('/api/project-colors', async (req, res) => {
-    const { projectPath, color } = req.body || {}
-    if (!projectPath || !color) return res.status(400).json({ error: 'projectPath and color required' })
-    await configStore.setProjectColor(projectPath, color)
-    await codingCliIndexer.refresh()
-    wsHandler.broadcastSessionsUpdated(codingCliIndexer.getProjects())
-    await claudeIndexer.refresh()
-    res.json({ ok: true })
-  })
+	    const { projectPath, color } = req.body || {}
+	    if (!projectPath || !color) return res.status(400).json({ error: 'projectPath and color required' })
+	    await configStore.setProjectColor(projectPath, color)
+	    await codingCliIndexer.refresh()
+	    await claudeIndexer.refresh()
+	    res.json({ ok: true })
+	  })
 
   // --- API: terminals ---
   app.get('/api/terminals', async (_req, res) => {
@@ -493,7 +490,7 @@ async function main() {
 
   // Coding CLI watcher hooks
   codingCliIndexer.onUpdate((projects) => {
-    wsHandler.broadcastSessionsUpdated(projects)
+    sessionsSync.publish(projects)
 
     // Auto-update terminal titles based on session data
     for (const project of projects) {

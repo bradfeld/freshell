@@ -101,6 +101,7 @@ function createTestStore() {
       sessions: {
         projects: [],
         expandedProjects: new Set<string>(),
+        wsSnapshotReceived: false,
         isLoading: false,
         error: null,
       },
@@ -129,28 +130,12 @@ function renderApp(store = createTestStore()) {
 
 describe('App Component - Share Button', () => {
   const originalNavigator = global.navigator
-  const originalSessionStorage = global.sessionStorage
 
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    // Reset sessionStorage mock - key must be 'auth-token' to match ws-client.ts
-    const sessionStorageMock: Record<string, string> = {
-      'auth-token': 'test-token-abc123',
-    }
-    Object.defineProperty(global, 'sessionStorage', {
-      value: {
-        getItem: vi.fn((key: string) => sessionStorageMock[key] || null),
-        setItem: vi.fn((key: string, value: string) => {
-          sessionStorageMock[key] = value
-        }),
-        removeItem: vi.fn((key: string) => {
-          delete sessionStorageMock[key]
-        }),
-        clear: vi.fn(),
-      },
-      writable: true,
-    })
+    // Auth token is now stored in localStorage via @/lib/auth
+    localStorage.setItem('freshell.auth-token', 'test-token-abc123')
     // Mock API responses
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/settings') return Promise.resolve(defaultSettings)
@@ -167,10 +152,6 @@ describe('App Component - Share Button', () => {
     cleanup()
     Object.defineProperty(global, 'navigator', {
       value: originalNavigator,
-      writable: true,
-    })
-    Object.defineProperty(global, 'sessionStorage', {
-      value: originalSessionStorage,
       writable: true,
     })
   })
@@ -262,16 +243,8 @@ describe('App Component - Share Button', () => {
   })
 
   it('handles missing auth token gracefully (non-Windows)', async () => {
-    // Override sessionStorage to return null for auth-token
-    Object.defineProperty(global, 'sessionStorage', {
-      value: {
-        getItem: vi.fn().mockReturnValue(null),
-        setItem: vi.fn(),
-        removeItem: vi.fn(),
-        clear: vi.fn(),
-      },
-      writable: true,
-    })
+    // Remove auth token from localStorage
+    localStorage.removeItem('freshell.auth-token')
 
     const mockShare = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(global, 'navigator', {
@@ -664,7 +637,6 @@ describe('App Component - Mobile Sidebar', () => {
     expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument()
   })
 })
-
 describe('App Bootstrap', () => {
   const originalSessionStorage = global.sessionStorage
 
@@ -734,6 +706,118 @@ describe('App Bootstrap', () => {
   })
 })
 
+describe('App WS message handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
+      return Promise.resolve({})
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('merges chunked sessions.updated messages (clear/append) instead of replacing', async () => {
+    let handler: ((msg: any) => void) | null = null
+    mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
+      handler = cb
+      return () => { handler = null }
+    })
+
+    const store = createTestStore()
+    renderApp(store)
+
+    await waitFor(() => expect(handler).not.toBeNull())
+
+    handler!({
+      type: 'sessions.updated',
+      clear: true,
+      projects: [{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', updatedAt: 1 }] }],
+    })
+    handler!({
+      type: 'sessions.updated',
+      append: true,
+      projects: [{ projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', updatedAt: 2 }] }],
+    })
+
+    await waitFor(() => {
+      expect(store.getState().sessions.projects.map((p: any) => p.projectPath).sort()).toEqual(['/p1', '/p2'])
+    })
+  })
+
+  it('ignores sessions.patch messages until a WS sessions.updated snapshot is received', async () => {
+    let handler: ((msg: any) => void) | null = null
+    mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
+      handler = cb
+      return () => { handler = null }
+    })
+
+    const store = createTestStore()
+    renderApp(store)
+    await waitFor(() => expect(handler).not.toBeNull())
+
+    handler!({
+      type: 'sessions.patch',
+      upsertProjects: [{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', updatedAt: 1 }] }],
+      removeProjectPaths: [],
+    })
+
+    await waitFor(() => {
+      expect(store.getState().sessions.projects).toEqual([])
+    })
+
+    handler!({
+      type: 'sessions.updated',
+      projects: [{ projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', updatedAt: 2 }] }],
+    })
+
+    handler!({
+      type: 'sessions.patch',
+      upsertProjects: [{ projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', updatedAt: 3 }] }],
+      removeProjectPaths: [],
+    })
+
+    await waitFor(() => {
+      expect(store.getState().sessions.projects.map((p: any) => p.projectPath).sort()).toEqual(['/p1', '/p2'])
+    })
+  })
+
+  it('applies sessions.patch messages (upsert + remove) without clearing all sessions', async () => {
+    let handler: ((msg: any) => void) | null = null
+    mockOnMessage.mockImplementation((cb: (msg: any) => void) => {
+      handler = cb
+      return () => { handler = null }
+    })
+
+    const store = createTestStore()
+    renderApp(store)
+    await waitFor(() => expect(handler).not.toBeNull())
+
+    // Seed state via a full snapshot (existing behavior).
+    handler!({
+      type: 'sessions.updated',
+      projects: [
+        { projectPath: '/p1', sessions: [{ provider: 'claude', sessionId: 's1', updatedAt: 1 }] },
+        { projectPath: '/p2', sessions: [{ provider: 'claude', sessionId: 's2', updatedAt: 2 }] },
+      ],
+    })
+
+    handler!({
+      type: 'sessions.patch',
+      upsertProjects: [{ projectPath: '/p3', sessions: [{ provider: 'claude', sessionId: 's3', updatedAt: 3 }] }],
+      removeProjectPaths: ['/p1'],
+    })
+
+    await waitFor(() => {
+      expect(store.getState().sessions.projects.map((p: any) => p.projectPath).sort()).toEqual(['/p2', '/p3'])
+    })
+  })
+})
+
 describe('Tab Switching Keyboard Shortcuts', () => {
   const originalSessionStorage = global.sessionStorage
 
@@ -774,6 +858,7 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         sessions: {
           projects: [],
           expandedProjects: new Set<string>(),
+          wsSnapshotReceived: false,
           isLoading: false,
           error: null,
         },
@@ -815,52 +900,43 @@ describe('Tab Switching Keyboard Shortcuts', () => {
     })
   })
 
-  describe('Ctrl+Shift+[ and Ctrl+Shift+] (bracket shortcuts)', () => {
-    it('Ctrl+Shift+] switches to next tab', async () => {
-      const store = createStoreWithTabs(3, 0)
-      renderApp(store)
+  it('Ctrl+Shift+[ switches to previous tab', () => {
+    const store = createStoreWithTabs(3, 1) // active tab-2
+    renderApp(store)
 
-      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
 
-      expect(store.getState().tabs.activeTabId).toBe('tab-2')
-    })
+    expect(store.getState().tabs.activeTabId).toBe('tab-1')
+  })
 
-    it('Ctrl+Shift+[ switches to previous tab', async () => {
-      const store = createStoreWithTabs(3, 1)
-      renderApp(store)
+  it('Ctrl+Shift+] switches to next tab', () => {
+    const store = createStoreWithTabs(3, 1) // active tab-2
+    renderApp(store)
 
-      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
 
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
+    expect(store.getState().tabs.activeTabId).toBe('tab-3')
+  })
 
-    it('Ctrl+Shift+] wraps to first tab when on last tab', async () => {
-      const store = createStoreWithTabs(3, 2)
-      renderApp(store)
+  it('wraps around when switching past the ends', () => {
+    const store = createStoreWithTabs(3, 2) // active tab-3
+    renderApp(store)
 
-      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
+    expect(store.getState().tabs.activeTabId).toBe('tab-1')
 
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
+    fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+    expect(store.getState().tabs.activeTabId).toBe('tab-3')
+  })
 
-    it('Ctrl+Shift+[ wraps to last tab when on first tab', async () => {
-      const store = createStoreWithTabs(3, 0)
-      renderApp(store)
+  it('does nothing with a single tab', () => {
+    const store = createStoreWithTabs(1, 0)
+    renderApp(store)
 
-      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
+    expect(store.getState().tabs.activeTabId).toBe('tab-1')
 
-      expect(store.getState().tabs.activeTabId).toBe('tab-3')
-    })
-
-    it('does nothing with single tab', async () => {
-      const store = createStoreWithTabs(1, 0)
-      renderApp(store)
-
-      fireEvent.keyDown(window, { code: 'BracketRight', ctrlKey: true, shiftKey: true })
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-
-      fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
-      expect(store.getState().tabs.activeTabId).toBe('tab-1')
-    })
+    fireEvent.keyDown(window, { code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+    expect(store.getState().tabs.activeTabId).toBe('tab-1')
   })
 })

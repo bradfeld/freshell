@@ -221,7 +221,7 @@ describe('EditorPane', () => {
   describe('file loading', () => {
     it('loads file content from server when path is entered', async () => {
       const user = userEvent.setup()
-      sessionStorage.setItem('auth-token', 'test-token')
+      localStorage.setItem('freshell.auth-token', 'test-token')
       mockFetch.mockImplementation(createRoutedFetch({ read: { content: 'const x = 42' } }) as any)
 
       render(
@@ -252,7 +252,7 @@ describe('EditorPane', () => {
 
     it('sends file read request when path is entered', async () => {
       const user = userEvent.setup()
-      sessionStorage.setItem('auth-token', 'my-secret-token')
+      localStorage.setItem('freshell.auth-token', 'my-secret-token')
       mockFetch.mockImplementation(createRoutedFetch({ read: { content: 'file content' } }) as any)
 
       render(
@@ -505,7 +505,7 @@ describe('EditorPane', () => {
 
     it('auto-fetches file content on mount when filePath is set but content is empty (restoration)', async () => {
       // This simulates restoration from localStorage where content is stripped
-      sessionStorage.setItem('auth-token', 'test-token')
+      localStorage.setItem('freshell.auth-token', 'test-token')
       mockFetch.mockImplementation(
         createRoutedFetch({
           read: { content: 'restored file content', language: 'typescript' },
@@ -536,7 +536,7 @@ describe('EditorPane', () => {
     })
 
     it('does not auto-fetch on mount when content is already present', async () => {
-      sessionStorage.setItem('auth-token', 'test-token')
+      localStorage.setItem('freshell.auth-token', 'test-token')
 
       render(
         <Provider store={store}>

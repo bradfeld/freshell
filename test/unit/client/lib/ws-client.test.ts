@@ -43,7 +43,7 @@ describe('WsClient.connect', () => {
     MockWebSocket.instances = []
     // @ts-expect-error - test override
     globalThis.WebSocket = MockWebSocket
-    sessionStorage.setItem('auth-token', 't')
+    localStorage.setItem('freshell.auth-token', 't')
 
     // Some Vitest environments provide a minimal window without timer fns.
     ;(window as any).setTimeout = globalThis.setTimeout

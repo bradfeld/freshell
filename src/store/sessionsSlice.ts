@@ -18,21 +18,56 @@ function normalizeProjects(payload: unknown): ProjectGroup[] {
   return out
 }
 
+function projectNewestUpdatedAt(project: ProjectGroup): number {
+  // Sessions are expected sorted by updatedAt desc from the server, but don't rely on it.
+  let max = 0
+  for (const s of project.sessions || []) {
+    if (typeof (s as any).updatedAt === 'number') max = Math.max(max, (s as any).updatedAt)
+  }
+  return max
+}
+
+function sortProjectsByRecency(projects: ProjectGroup[]): ProjectGroup[] {
+  const newestByPath = new Map<string, number>()
+  const newest = (project: ProjectGroup): number => {
+    if (newestByPath.has(project.projectPath)) return newestByPath.get(project.projectPath)!
+    const time = projectNewestUpdatedAt(project)
+    newestByPath.set(project.projectPath, time)
+    return time
+  }
+
+  return [...projects].sort((a, b) => {
+    const diff = newest(b) - newest(a)
+    if (diff !== 0) return diff
+    if (a.projectPath < b.projectPath) return -1
+    if (a.projectPath > b.projectPath) return 1
+    return 0
+  })
+}
+
 export interface SessionsState {
   projects: ProjectGroup[]
   expandedProjects: Set<string>
+  wsSnapshotReceived: boolean
   lastLoadedAt?: number
 }
 
 const initialState: SessionsState = {
   projects: [],
   expandedProjects: new Set<string>(),
+  wsSnapshotReceived: false,
 }
 
 export const sessionsSlice = createSlice({
   name: 'sessions',
   initialState,
   reducers: {
+    markWsSnapshotReceived: (state) => {
+      state.wsSnapshotReceived = true
+    },
+    resetWsSnapshotReceived: (state) => {
+      state.wsSnapshotReceived = false
+    },
     setProjects: (state, action: PayloadAction<ProjectGroup[]>) => {
       state.projects = normalizeProjects(action.payload)
       state.lastLoadedAt = Date.now()
@@ -42,6 +77,7 @@ export const sessionsSlice = createSlice({
     clearProjects: (state) => {
       state.projects = []
       state.expandedProjects = new Set()
+      state.wsSnapshotReceived = false
     },
     mergeProjects: (state, action: PayloadAction<ProjectGroup[]>) => {
       const incoming = normalizeProjects(action.payload)
@@ -52,6 +88,25 @@ export const sessionsSlice = createSlice({
       }
       state.projects = Array.from(projectMap.values())
       state.lastLoadedAt = Date.now()
+      const valid = new Set(state.projects.map((p) => p.projectPath))
+      state.expandedProjects = new Set(Array.from(state.expandedProjects).filter((k) => valid.has(k)))
+    },
+    applySessionsPatch: (
+      state,
+      action: PayloadAction<{ upsertProjects: ProjectGroup[]; removeProjectPaths: string[] }>
+    ) => {
+      if (!state.wsSnapshotReceived) return
+      const remove = new Set(action.payload.removeProjectPaths || [])
+      const incoming = normalizeProjects(action.payload.upsertProjects)
+
+      const projectMap = new Map(state.projects.map((p) => [p.projectPath, p]))
+
+      for (const key of remove) projectMap.delete(key)
+      for (const project of incoming) projectMap.set(project.projectPath, project)
+
+      state.projects = sortProjectsByRecency(Array.from(projectMap.values()))
+      state.lastLoadedAt = Date.now()
+
       const valid = new Set(state.projects.map((p) => p.projectPath))
       state.expandedProjects = new Set(Array.from(state.expandedProjects).filter((k) => valid.has(k)))
     },
@@ -74,7 +129,18 @@ export const sessionsSlice = createSlice({
   },
 })
 
-export const { setProjects, clearProjects, mergeProjects, toggleProjectExpanded, setProjectExpanded, collapseAll, expandAll } =
+export const {
+  markWsSnapshotReceived,
+  resetWsSnapshotReceived,
+  setProjects,
+  clearProjects,
+  mergeProjects,
+  applySessionsPatch,
+  toggleProjectExpanded,
+  setProjectExpanded,
+  collapseAll,
+  expandAll,
+} =
   sessionsSlice.actions
 
 export default sessionsSlice.reducer

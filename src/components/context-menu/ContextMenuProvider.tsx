@@ -5,6 +5,7 @@ import { addPane, closePane, initLayout, resetSplit, swapSplit, updatePaneTitle 
 import { setProjects, setProjectExpanded } from '@/store/sessionsSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
+import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
 import { collectTerminalIds, findPaneContent } from '@/lib/pane-utils'
@@ -116,7 +117,7 @@ export function ContextMenuProvider({
       // ignore
     }
 
-    const token = sessionStorage.getItem('auth-token')
+    const token = getAuthToken() ?? null
     return buildShareUrl({
       currentUrl: window.location.href,
       lanIp,

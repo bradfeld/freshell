@@ -2,9 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { setStatus, setError, setPlatform, setAvailableClis } from '@/store/connectionSlice'
 import { setSettings } from '@/store/settingsSlice'
-import { setProjects, clearProjects, mergeProjects } from '@/store/sessionsSlice'
+import {
+  setProjects,
+  clearProjects,
+  mergeProjects,
+  applySessionsPatch,
+  markWsSnapshotReceived,
+  resetWsSnapshotReceived,
+} from '@/store/sessionsSlice'
 import { addTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { api } from '@/lib/api'
+import { getAuthToken } from '@/lib/auth'
 import { buildShareUrl } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { getSessionsForHello } from '@/lib/session-utils'
@@ -12,6 +20,7 @@ import { setClientPerfEnabled } from '@/lib/perf-logger'
 import { applyLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import { store } from '@/store/store'
 import { useThemeEffect } from '@/hooks/useTheme'
+import { installCrossTabSync } from '@/store/crossTabSync'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
 import TabContent from '@/components/TabContent'
@@ -19,6 +28,7 @@ import HistoryView from '@/components/HistoryView'
 import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
 import PaneDivider from '@/components/panes/PaneDivider'
+import { AuthRequiredModal } from '@/components/AuthRequiredModal'
 import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
@@ -48,6 +58,11 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(false)
   const mainContentRef = useRef<HTMLDivElement>(null)
   const userOpenedSidebarOnMobileRef = useRef(false)
+
+  // Keep this tab's Redux state in sync with persisted writes from other browser tabs.
+  useEffect(() => {
+    return installCrossTabSync(store)
+  }, [])
 
   // Sidebar width from settings (or local state during drag)
   const sidebarWidth = settings.sidebar?.width ?? 288
@@ -125,7 +140,7 @@ export default function App() {
       // Fall back to current host if LAN info unavailable
     }
 
-    const token = sessionStorage.getItem('auth-token')
+    const token = getAuthToken() ?? null
     const shareUrl = buildShareUrl({
       currentUrl: window.location.href,
       lanIp,
@@ -221,6 +236,7 @@ export default function App() {
           // Treat 'ready' as the source of truth for connection status.
           dispatch(setError(undefined))
           dispatch(setStatus('ready'))
+          dispatch(resetWsSnapshotReceived())
         }
         if (msg.type === 'sessions.updated') {
           // Support chunked sessions for mobile browsers with limited WebSocket buffers
@@ -235,6 +251,13 @@ export default function App() {
             // Full update (broadcasts, legacy): replace all
             dispatch(setProjects(msg.projects || []))
           }
+          dispatch(markWsSnapshotReceived())
+        }
+        if (msg.type === 'sessions.patch') {
+          dispatch(applySessionsPatch({
+            upsertProjects: msg.upsertProjects || [],
+            removeProjectPaths: msg.removeProjectPaths || [],
+          }))
         }
         if (msg.type === 'settings.updated') {
           dispatch(setSettings(applyLocalTerminalFontFamily(msg.settings)))
@@ -514,6 +537,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <AuthRequiredModal />
       </div>
     </ContextMenuProvider>
   )

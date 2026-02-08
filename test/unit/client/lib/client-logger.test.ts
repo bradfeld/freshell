@@ -1,21 +1,19 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 
 const mockFetch = vi.fn()
 
 global.fetch = mockFetch
-
-const mockSessionStorage: Record<string, string> = {}
-vi.stubGlobal('sessionStorage', {
-  getItem: (key: string) => mockSessionStorage[key] || null,
-  setItem: (key: string, value: string) => { mockSessionStorage[key] = value },
-})
 
 import { createClientLogger } from '@/lib/client-logger'
 
 describe('client logger', () => {
   beforeEach(() => {
     mockFetch.mockReset()
-    mockSessionStorage['auth-token'] = 'test-token'
+    localStorage.setItem('freshell.auth-token', 'test-token')
+  })
+
+  afterEach(() => {
+    localStorage.clear()
   })
 
   it('forwards console warnings to the server', async () => {

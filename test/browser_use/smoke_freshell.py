@@ -276,7 +276,7 @@ async def _run(args: argparse.Namespace) -> int:
       pass
     # Wait for the SPA to fully bootstrap auth:
     # - token removed from URL
-    # - auth-token stored in sessionStorage
+    # - auth-token stored in localStorage
     # - terminal view rendered (Add Pane button present)
     #
     # Without this, the agent may refresh/navigate and lose auth, causing flaky failures.
@@ -285,7 +285,7 @@ async def _run(args: argparse.Namespace) -> int:
     while time.monotonic() < deadline:
       try:
         # These checks intentionally avoid reading the token value to keep it out of any debug logs.
-        auth_present = await page.evaluate("() => !!sessionStorage.getItem('auth-token')")
+        auth_present = await page.evaluate("() => !!localStorage.getItem('freshell.auth-token')")
         token_removed = await page.evaluate("() => !new URLSearchParams(window.location.search).has('token')")
         has_add_pane = await page.evaluate("() => !!document.querySelector('button[aria-label=\"Add pane\"]')")
         has_connected = await page.evaluate("() => !!document.querySelector('[title=\"Connected\"]')")
@@ -317,65 +317,108 @@ async def _run(args: argparse.Namespace) -> int:
   task = f"""
 You are running a browser smoke test for a local Freshell dev instance.
 
-The app is already opened and authenticated in the current tab.
+The app is already opened and authenticated in the current browser tab.
 
-Important constraints:
+Non-negotiable constraints:
 - Do not create or write any files during this run.
-- Do everything in a single browser window and a single browser tab. Do not open any new windows or browser tabs.
+- Stay in ONE browser window and ONE browser tab. Do not open any new browser tabs or windows.
 
-Requirements:
-1) Wait until the page is fully loaded and the top bar is visible.
-   - If you see an "Empty DOM tree" / blank page, make sure you are looking at the Freshell page ({base_url}) and continue from there. Do not navigate away to other sites.
-2) Verify the app header contains the text "freshell".
-3) Verify the connection indicator shows the app is connected (not disconnected).
-   - If it says "Disconnected", wait up to ~10 seconds for it to become connected, then re-check.
-   - If it stays disconnected, FAIL with a short reason.
-4) Pane stress:
-   - Open a new tab in Freshell (an in-app tab, not a browser tab) to use for this test
-   - Rename the tab by double clicking on it 'Stress test'
-   - Add shell panes to Stress test tab until there are {args.pane_target} panes.
-   - Do this one pane at a time (avoid stale element errors): click "Add pane" once, then choose a shell option once ("Shell", "CMD", "PowerShell", or "WSL"). If there are multiple shell choices, rotate your choice each pane.
+Treat this like a careful human QA pass. If something is hard to read, it is OK to zoom in a bit, scroll inside the relevant pane, or take a screenshot to inspect details.
+
+Steps:
+1) Wait for the app to finish loading.
+   - You should see the tab bar at the top and the sidebar on the left.
+   - If you get a blank page / "Empty DOM tree", make sure you're still on the Freshell page ({base_url}). Do not navigate away to other sites.
+
+2) Confirm the header says "freshell".
+
+3) Confirm the app is connected.
+   - Look for the connection indicator and make sure it says Connected (not Disconnected).
+   - If it says Disconnected, wait up to ~10 seconds and check again.
+   - If it stays Disconnected, output:
+     SMOKE_RESULT: FAIL - disconnected
+
+4) Pane stress (do this once):
+   - Create a new Freshell in-app tab (not a browser tab) that you will use for this stress check.
+   - Rename that in-app tab to: Stress test
+     - Use the double_click action on the tab name text to start renaming.
+     - An editable text field will appear in place of the tab name.
+     - Use the input action on that text field with clear=true to replace the text with the new name, then press Enter to confirm.
+     - Verify the tab now displays the new name before moving on.
+   - Add shell panes until this tab has {args.pane_target} panes total.
+     - Do it one pane at a time: click "Add pane" once, then pick ONE shell type in the picker.
+     - If you have multiple shell choices (CMD / PowerShell / WSL), rotate them as you go.
+
 5) Mixed panes on a new in-app tab:
-   - Create a new Freshell in-app shell tab using the '+' button in the top tab bar (tooltip: "New shell tab").
-   - Rename the tab by double clicking on it 'Test mixed panes'
-   - On this new in-app tab, create a 3-pane layout with EXACTLY one of each type: Editor, shell, Browser.
-     - Use the "Add pane" button to split, then pick the pane type in the new pane chooser.
-6) Verify the Editor pane:
-   - In the Editor pane: open this file path: {known_text_file}.
-     - Click the "Enter file path..." input in the editor toolbar, clear it, type/paste the full file path, then press Enter to load it.
-     - Ensure Preview mode works:
-       - Click the "Source" button and then the "Preview" button (in that order) to prove mode switching works.
-     - Use `find_text` to confirm "Quick Start" is visible (this ensures file content actually loaded).
-7) Verify the shell pane:
-   - In the shell pane:
-     - Wait for the terminal to be ready (not stuck on "Starting terminal..." / "Reconnecting...").
-       - If it is still stuck after ~15 seconds, close just the shell pane and re-create a shell pane once, then wait again.
-       - If it is still stuck, FAIL with a short reason.
-     - Then run `node -v` (or `git --version` if node is unavailable).
-     - WAIT for the command to finish and then check that the terminal output contains a version-looking string (examples: `v20.11.0` or `git version 2.44.0`).
-     - Terminal input reliability rules:
-       - Do NOT send `{{Enter}}` as part of the text (it often gets typed literally).
-       - Do NOT use `send_keys` to type command text into the terminal (it can double-type in xterm).
-       - Instead, click the terminal pane to focus it, then use the `insert_text` tool to insert the command text, then `send_keys` with `Enter`.
-8) Verify the Browser pane:
-   - In the Browser pane: open example.com.
-   - Verify visually (inside the Browser pane content) that the heading "Example Domain" is visible.
-   - Do NOT rely on `find_text` for this (the Browser pane renders cross-origin content).
+   - Create another new in-app shell tab using the '+' button in the top tab bar (tooltip: "New shell tab").
+   - Rename it to: Test mixed panes (same rename approach: double_click tab name → input with clear=true → Enter → verify).
+   - On this tab, build a 3-pane layout with EXACTLY:
+     - one Editor pane
+     - one shell pane
+     - one Browser pane
+   - Use the "Add pane" button to split, then pick the pane type in the new pane chooser.
+
+6) Editor pane check:
+   - In the Editor pane, open this file:
+     {known_text_file}
+   - Use the "Enter file path..." box, paste/type the full path, and press Enter.
+   - Prove the preview toggle works:
+     - click "Source", then click "Preview".
+   - Confirm "Quick Start" appears in the editor by using your find_text action to search for it.
+     - find_text is the right tool here because it proves on-screen visibility.
+     - If find_text does not find "Quick Start", output:
+       SMOKE_RESULT: FAIL - editor did not load file
+
+7) Shell pane check:
+   - In the shell pane, wait until it is actually ready (not stuck on "Starting terminal..." or "Reconnecting...").
+     - If it's stuck for ~15 seconds, close just that shell pane and recreate it once.
+     - If it is still stuck, output:
+       SMOKE_RESULT: FAIL - terminal stuck
+   - Run a simple version command:
+     - Try: node -v
+     - If that doesn't work, try: git --version
+   - Make sure you are typing into the shell pane:
+     - Click inside the terminal area first.
+     - When you type, you should see the characters appear in the terminal, not in the editor or the browser URL field.
+   - After pressing Enter, look for output that looks like a version string (examples: v20.11.0, or git version 2.44.0).
+     - If you can't read the output clearly, take a screenshot and inspect it.
+     - If you still can't find a version-looking string, output:
+       SMOKE_RESULT: FAIL - version output missing
+   - Input reliability:
+     - Do not type a literal "{{Enter}}".
+     - Use insert_text for the command, then send_keys with Enter.
+
+8) Browser pane check:
+   - In the Browser pane, open: example.com
+   - Verify visually inside the Browser pane that you see "Example Domain".
+     - Do not rely on find_text for this (cross-origin content).
+     - If you don't see it after waiting a moment, output:
+       SMOKE_RESULT: FAIL - example.com not visible
+
 9) Settings navigation:
-   - Stay on the current in-app tab.
-   - Open the sidebar (if it is collapsed) using the top-left toggle button.
-   - Click "Settings" in the sidebar.
-   - Confirm "Terminal preview" is visible by using `find_text`. If `find_text` fails, FAIL.
-   - Navigate back to the terminal view by opening the sidebar and clicking "Terminal".
+   - Open the sidebar (if it's collapsed) with the top-left toggle button.
+   - Click "Settings".
+   - Use find_text to confirm "Terminal preview" is visible.
+     - If it isn't visible, output:
+       SMOKE_RESULT: FAIL - settings missing terminal preview
+   - Return to the terminal view by clicking "Terminal" in the left sidebar (the first item, above "Settings").
+     - You should see your previously created tabs (Stress test, Test mixed panes, etc.) reappear in the tab bar.
 
-Strict success rules:
-- If any verification fails, you MUST output `SMOKE_RESULT: FAIL - <short reason>`.
+10) Coding CLI panes (best-effort):
+   - Create a new in-app tab with the '+' button.
+   - Rename it to: Coding CLIs (same rename approach: double_click tab name → input with clear=true → Enter → verify).
+   - You should see a pane type picker. Look at the options.
+     - If you see "Claude": click it to create a Claude Code pane. Wait a few seconds for it to initialize.
+     - Split once ("Add pane") to get another picker.
+     - If you see "Codex": click it to create a Codex pane. Wait a few seconds.
+     - If neither "Claude" nor "Codex" is visible, pick "Shell" instead. This is NOT a failure; it just means the CLIs are not installed on this system.
+   - Confirm this tab ends up with at least 2 panes.
 
-Output:
-At the end, output exactly one line:
-SMOKE_RESULT: PASS
-or
-SMOKE_RESULT: FAIL - <short reason>
+Finish:
+- If everything above checks out, output exactly one line:
+  SMOKE_RESULT: PASS
+- If anything fails, output exactly one line:
+  SMOKE_RESULT: FAIL - <short reason>
 """
 
   log.info("Agent init start", event="agent_init_start")
@@ -402,6 +445,34 @@ SMOKE_RESULT: FAIL - <short reason>
       return ActionResult(extracted_content=memory, long_term_memory=memory)
     except Exception as e:
       return ActionResult(error=f"Failed to insert text: {type(e).__name__}: {e}")
+
+  class DoubleClickAction(BaseModel):
+    index: int
+
+  @tools.registry.action("Double-click an element by index (dispatches a dblclick MouseEvent).", param_model=DoubleClickAction)
+  async def double_click(params: DoubleClickAction, browser_session):  # type: ignore[no-untyped-def]
+    try:
+      element = await browser_session.get_element_by_index(params.index)
+      if element is None:
+        return ActionResult(error=f"Element index {params.index} not found")
+      cdp_session = await browser_session.get_or_create_cdp_session(target_id=None, focus=True)
+      sid = cdp_session.session_id
+      resolved = await cdp_session.cdp_client.send.DOM.resolveNode(
+        params={"backendNodeId": element.backend_node_id}, session_id=sid,
+      )
+      object_id = resolved["object"]["objectId"]
+      await cdp_session.cdp_client.send.Runtime.callFunctionOn(
+        params={
+          "objectId": object_id,
+          "functionDeclaration": "function() { this.dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); }",
+          "returnByValue": True,
+        },
+        session_id=sid,
+      )
+      memory = f"Double-clicked element at index {params.index}"
+      return ActionResult(extracted_content=memory, long_term_memory=memory)
+    except Exception as e:
+      return ActionResult(error=f"Failed to double-click: {type(e).__name__}: {e}")
 
   agent = Agent(
     task=task.strip(),

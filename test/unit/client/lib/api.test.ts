@@ -1,22 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock fetch globally
 const mockFetch = vi.fn()
 global.fetch = mockFetch
-
-// Mock sessionStorage
-const mockSessionStorage: Record<string, string> = {}
-vi.stubGlobal('sessionStorage', {
-  getItem: (key: string) => mockSessionStorage[key] || null,
-  setItem: (key: string, value: string) => { mockSessionStorage[key] = value },
-})
 
 import { api, searchSessions, type SearchResponse } from '@/lib/api'
 
 describe('searchSessions()', () => {
   beforeEach(() => {
     mockFetch.mockReset()
-    mockSessionStorage['auth-token'] = 'test-token'
+    localStorage.setItem('freshell.auth-token', 'test-token')
+  })
+
+  afterEach(() => {
+    localStorage.clear()
   })
 
   it('calls /api/sessions/search with query', async () => {
