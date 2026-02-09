@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react'
-import { X, Circle } from 'lucide-react'
+import { X, Circle, Maximize2, Minimize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TerminalStatus } from '@/store/types'
 
@@ -25,6 +25,8 @@ interface PaneHeaderProps {
   status: TerminalStatus
   isActive: boolean
   onClose: () => void
+  onToggleZoom?: () => void
+  isZoomed?: boolean
   isRenaming?: boolean
   renameValue?: string
   onRenameChange?: (value: string) => void
@@ -38,6 +40,8 @@ export default function PaneHeader({
   status,
   isActive,
   onClose,
+  onToggleZoom,
+  isZoomed,
   isRenaming,
   renameValue,
   onRenameChange,
@@ -81,6 +85,21 @@ export default function PaneHeader({
         <span className="flex-1 truncate" title={title}>
           {title}
         </span>
+      )}
+
+      {onToggleZoom && (
+        <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleZoom()
+          }}
+          className="p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
+          title={isZoomed ? 'Restore pane' : 'Maximize pane'}
+          aria-label={isZoomed ? 'Restore pane' : 'Maximize pane'}
+        >
+          {isZoomed ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+        </button>
       )}
 
       <button

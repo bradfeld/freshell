@@ -55,7 +55,7 @@ vi.mock('lucide-react', () => ({
   PanelLeftOpen: ({ className }: { className?: string }) => (
     <svg data-testid="panel-left-open-icon" className={className} />
   ),
-Circle: ({ className }: { className?: string }) => (
+  Circle: ({ className }: { className?: string }) => (
     <svg data-testid="circle-icon" className={className} />
   ),
   FolderOpen: ({ className }: { className?: string }) => (
@@ -69,6 +69,12 @@ Circle: ({ className }: { className?: string }) => (
   ),
   FileText: ({ className }: { className?: string }) => (
     <svg data-testid="file-text-icon" className={className} />
+  ),
+  Maximize2: ({ className }: { className?: string }) => (
+    <svg data-testid="maximize-icon" className={className} />
+  ),
+  Minimize2: ({ className }: { className?: string }) => (
+    <svg data-testid="minimize-icon" className={className} />
   ),
 }))
 
@@ -123,6 +129,10 @@ function createStore(
         layouts: {},
         activePane: {},
         paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+        zoomedPane: {},
         ...initialPanesState,
       },
       connection: {
@@ -923,6 +933,10 @@ describe('PaneContainer', () => {
             layouts: { 'tab-1': node },
             activePane: { 'tab-1': 'pane-1' },
             paneTitles: {},
+            paneTitleSetByUser: {},
+            renameRequestTabId: null,
+            renameRequestPaneId: null,
+            zoomedPane: {},
           },
           connection: {
             status: 'ready' as const,

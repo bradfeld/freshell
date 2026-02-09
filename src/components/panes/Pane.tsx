@@ -13,6 +13,8 @@ interface PaneProps {
   status?: TerminalStatus
   onClose: () => void
   onFocus: () => void
+  onToggleZoom?: () => void
+  isZoomed?: boolean
   children: React.ReactNode
   isRenaming?: boolean
   renameValue?: string
@@ -31,6 +33,8 @@ export default function Pane({
   status,
   onClose,
   onFocus,
+  onToggleZoom,
+  isZoomed,
   children,
   isRenaming,
   renameValue,
@@ -67,6 +71,8 @@ export default function Pane({
             status={status || 'creating'}
             isActive={isActive}
             onClose={onClose}
+            onToggleZoom={onToggleZoom}
+            isZoomed={isZoomed}
             isRenaming={isRenaming}
             renameValue={renameValue}
             onRenameChange={onRenameChange}

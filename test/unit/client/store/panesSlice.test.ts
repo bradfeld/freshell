@@ -12,6 +12,7 @@ import panesReducer, {
   updatePaneTitle,
   requestPaneRename,
   clearPaneRenameRequest,
+  toggleZoom,
   PanesState,
 } from '../../../../src/store/panesSlice'
 import type { PaneNode, PaneContent, TerminalPaneContent, BrowserPaneContent, EditorPaneContent } from '../../../../src/store/paneTypes'
@@ -35,6 +36,7 @@ describe('panesSlice', () => {
       paneTitleSetByUser: {},
       renameRequestTabId: null,
       renameRequestPaneId: null,
+      zoomedPane: {},
     }
     mockIdCounter = 0
     vi.clearAllMocks()
@@ -1207,6 +1209,7 @@ describe('panesSlice', () => {
         paneTitleSetByUser: {},
         renameRequestTabId: null,
         renameRequestPaneId: null,
+        zoomedPane: {},
       }
 
       const state = panesReducer(initialState, hydratePanes(savedState))
@@ -1258,6 +1261,7 @@ describe('panesSlice', () => {
         paneTitleSetByUser: {},
         renameRequestTabId: null,
         renameRequestPaneId: null,
+        zoomedPane: {},
       }
 
       const state = panesReducer(initialState, hydratePanes(savedState))
@@ -2102,6 +2106,138 @@ describe('panesSlice', () => {
       const root = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
       const editorPane = root.children[1] as Extract<PaneNode, { type: 'leaf' }>
       expect(editorPane.content.kind).toBe('editor')
+    })
+  })
+
+  describe('toggleZoom', () => {
+    function terminalContent(createRequestId: string): PaneContent {
+      return { kind: 'terminal', createRequestId, status: 'running', mode: 'shell' }
+    }
+
+    function makeZoomState(
+      layouts: Record<string, PaneNode>,
+      activePane: Record<string, string>,
+      zoomedPane: Record<string, string | undefined> = {}
+    ): PanesState {
+      return {
+        layouts,
+        activePane,
+        paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+        zoomedPane,
+      }
+    }
+
+    it('sets zoomedPane when not zoomed', () => {
+      const tabId = 'tab1'
+      const leaf: PaneNode = { type: 'leaf', id: 'pane-a', content: terminalContent('a-req') }
+      const state = makeZoomState({ [tabId]: leaf }, { [tabId]: 'pane-a' })
+
+      const result = panesReducer(state, toggleZoom({ tabId, paneId: 'pane-a' }))
+
+      expect(result.zoomedPane[tabId]).toBe('pane-a')
+    })
+
+    it('clears zoomedPane when same pane already zoomed (toggle off)', () => {
+      const tabId = 'tab1'
+      const leaf: PaneNode = { type: 'leaf', id: 'pane-a', content: terminalContent('a-req') }
+      const state = makeZoomState(
+        { [tabId]: leaf },
+        { [tabId]: 'pane-a' },
+        { [tabId]: 'pane-a' }
+      )
+
+      const result = panesReducer(state, toggleZoom({ tabId, paneId: 'pane-a' }))
+
+      expect(result.zoomedPane[tabId]).toBeUndefined()
+    })
+
+    it('switches zoom to different pane', () => {
+      const tabId = 'tab1'
+      const a: PaneNode = { type: 'leaf', id: 'pane-a', content: terminalContent('a-req') }
+      const b: PaneNode = { type: 'leaf', id: 'pane-b', content: terminalContent('b-req') }
+      const root: PaneNode = {
+        type: 'split', id: 'split1', direction: 'horizontal',
+        sizes: [50, 50], children: [a, b],
+      }
+      const state = makeZoomState(
+        { [tabId]: root },
+        { [tabId]: 'pane-a' },
+        { [tabId]: 'pane-a' }
+      )
+
+      const result = panesReducer(state, toggleZoom({ tabId, paneId: 'pane-b' }))
+
+      expect(result.zoomedPane[tabId]).toBe('pane-b')
+    })
+
+    it('does not affect other tabs', () => {
+      const a: PaneNode = { type: 'leaf', id: 'pane-a', content: terminalContent('a-req') }
+      const b: PaneNode = { type: 'leaf', id: 'pane-b', content: terminalContent('b-req') }
+      const state = makeZoomState(
+        { 'tab1': a, 'tab2': b },
+        { 'tab1': 'pane-a', 'tab2': 'pane-b' },
+        { 'tab2': 'pane-b' }
+      )
+
+      const result = panesReducer(state, toggleZoom({ tabId: 'tab1', paneId: 'pane-a' }))
+
+      expect(result.zoomedPane['tab1']).toBe('pane-a')
+      expect(result.zoomedPane['tab2']).toBe('pane-b')
+    })
+  })
+
+  describe('closePane clears zoom', () => {
+    function terminalContent(createRequestId: string): PaneContent {
+      return { kind: 'terminal', createRequestId, status: 'running', mode: 'shell' }
+    }
+
+    it('clears zoom when zoomed pane is closed', () => {
+      const tabId = 'tab1'
+      const a: PaneNode = { type: 'leaf', id: 'pane-a', content: terminalContent('a-req') }
+      const b: PaneNode = { type: 'leaf', id: 'pane-b', content: terminalContent('b-req') }
+      const root: PaneNode = {
+        type: 'split', id: 'split1', direction: 'horizontal',
+        sizes: [50, 50], children: [a, b],
+      }
+      const state: PanesState = {
+        layouts: { [tabId]: root },
+        activePane: { [tabId]: 'pane-b' },
+        paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+        zoomedPane: { [tabId]: 'pane-b' },
+      }
+
+      const result = panesReducer(state, closePane({ tabId, paneId: 'pane-b' }))
+
+      expect(result.zoomedPane[tabId]).toBeUndefined()
+    })
+
+    it('preserves zoom when non-zoomed pane is closed', () => {
+      const tabId = 'tab1'
+      const a: PaneNode = { type: 'leaf', id: 'pane-a', content: terminalContent('a-req') }
+      const b: PaneNode = { type: 'leaf', id: 'pane-b', content: terminalContent('b-req') }
+      const root: PaneNode = {
+        type: 'split', id: 'split1', direction: 'horizontal',
+        sizes: [50, 50], children: [a, b],
+      }
+      const state: PanesState = {
+        layouts: { [tabId]: root },
+        activePane: { [tabId]: 'pane-a' },
+        paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+        zoomedPane: { [tabId]: 'pane-a' },
+      }
+
+      const result = panesReducer(state, closePane({ tabId, paneId: 'pane-b' }))
+
+      expect(result.zoomedPane[tabId]).toBe('pane-a')
     })
   })
 })

@@ -172,6 +172,7 @@ function loadInitialPanesState(): PanesState {
     paneTitleSetByUser: {},
     renameRequestTabId: null,
     renameRequestPaneId: null,
+    zoomedPane: {},
   }
 
   try {
@@ -188,6 +189,7 @@ function loadInitialPanesState(): PanesState {
       paneTitleSetByUser: loaded.paneTitleSetByUser || {},
       renameRequestTabId: null,
       renameRequestPaneId: null,
+      zoomedPane: {},
     }
     state = applyLegacyResumeSessionIds(state)
     state = cleanOrphanedLayouts(state)
@@ -498,6 +500,11 @@ export const panesSlice = createSlice({
         if (state.paneTitleSetByUser?.[tabId]?.[paneId]) {
           delete state.paneTitleSetByUser[tabId][paneId]
         }
+
+        // Clear zoom if the zoomed pane was closed
+        if (state.zoomedPane?.[tabId] === paneId) {
+          delete state.zoomedPane[tabId]
+        }
       }
     },
 
@@ -619,6 +626,9 @@ export const panesSlice = createSlice({
       delete state.layouts[tabId]
       delete state.activePane[tabId]
       delete state.paneTitles[tabId]
+      if (state.zoomedPane) {
+        delete state.zoomedPane[tabId]
+      }
       if (state.paneTitleSetByUser) {
         delete state.paneTitleSetByUser[tabId]
       }
@@ -653,6 +663,7 @@ export const panesSlice = createSlice({
       // Ephemeral signals must never be hydrated from remote
       state.renameRequestTabId = null
       state.renameRequestPaneId = null
+      state.zoomedPane = {}
     },
 
     updatePaneTitle: (
@@ -691,6 +702,20 @@ export const panesSlice = createSlice({
       state.renameRequestTabId = null
       state.renameRequestPaneId = null
     },
+
+    toggleZoom: (
+      state,
+      action: PayloadAction<{ tabId: string; paneId: string }>
+    ) => {
+      const { tabId, paneId } = action.payload
+      if (state.zoomedPane[tabId] === paneId) {
+        // Same pane already zoomed -> unzoom
+        delete state.zoomedPane[tabId]
+      } else {
+        // Different pane or not zoomed -> zoom it
+        state.zoomedPane[tabId] = paneId
+      }
+    },
   },
 })
 
@@ -710,6 +735,7 @@ export const {
   updatePaneTitle,
   requestPaneRename,
   clearPaneRenameRequest,
+  toggleZoom,
 } = panesSlice.actions
 
 export default panesSlice.reducer

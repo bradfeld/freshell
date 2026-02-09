@@ -1,6 +1,6 @@
 import { useRef, useCallback, useMemo, useState, useEffect } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { closePane, setActivePane, resizePanes, updatePaneContent, updatePaneTitle, clearPaneRenameRequest } from '@/store/panesSlice'
+import { closePane, setActivePane, resizePanes, updatePaneContent, updatePaneTitle, clearPaneRenameRequest, toggleZoom } from '@/store/panesSlice'
 import type { PaneNode, PaneContent } from '@/store/paneTypes'
 import Pane from './Pane'
 import PaneDivider from './PaneDivider'
@@ -32,6 +32,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] ?? EMPTY_PANE_TITLES)
+  const zoomedPaneId = useAppSelector((s) => s.panes.zoomedPane?.[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
 
@@ -97,6 +98,10 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     dispatch(setActivePane({ tabId, paneId }))
   }, [dispatch, tabId])
 
+  const handleToggleZoom = useCallback((paneId: string) => {
+    dispatch(toggleZoom({ tabId, paneId }))
+  }, [dispatch, tabId])
+
   const handleResize = useCallback((splitId: string, delta: number, direction: 'horizontal' | 'vertical') => {
     if (!containerRef.current) return
 
@@ -135,6 +140,8 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         status={paneStatus}
         onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
+        onToggleZoom={() => handleToggleZoom(node.id)}
+        isZoomed={zoomedPaneId === node.id}
         isRenaming={isRenaming}
         renameValue={isRenaming ? renameValue : undefined}
         onRenameChange={isRenaming ? setRenameValue : undefined}

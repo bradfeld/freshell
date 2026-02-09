@@ -37,11 +37,17 @@ vi.mock('lucide-react', () => ({
   Terminal: ({ className }: { className?: string }) => (
     <svg data-testid="terminal-icon" className={className} />
   ),
-Circle: ({ className }: { className?: string }) => (
+  Circle: ({ className }: { className?: string }) => (
     <svg data-testid="circle-icon" className={className} />
   ),
   FileText: ({ className }: { className?: string }) => (
     <svg data-testid="file-text-icon" className={className} />
+  ),
+  Maximize2: ({ className }: { className?: string }) => (
+    <svg data-testid="maximize-icon" className={className} />
+  ),
+  Minimize2: ({ className }: { className?: string }) => (
+    <svg data-testid="minimize-icon" className={className} />
   ),
 }))
 
@@ -82,6 +88,10 @@ function createStore(initialPanesState: Partial<PanesState> = {}) {
         layouts: {},
         activePane: {},
         paneTitles: {},
+        paneTitleSetByUser: {},
+        renameRequestTabId: null,
+        renameRequestPaneId: null,
+        zoomedPane: {},
         ...initialPanesState,
       },
     },
