@@ -37,11 +37,21 @@ vi.mock('lucide-react', () => ({
   Terminal: ({ className }: { className?: string }) => (
     <svg data-testid="terminal-icon" className={className} />
   ),
-Circle: ({ className }: { className?: string }) => (
+  Circle: ({ className }: { className?: string }) => (
     <svg data-testid="circle-icon" className={className} />
   ),
   FileText: ({ className }: { className?: string }) => (
     <svg data-testid="file-text-icon" className={className} />
+  ),
+  LayoutGrid: ({ className }: { className?: string }) => (
+    <svg data-testid="layout-grid-icon" className={className} />
+  ),
+}))
+
+// Mock PaneIcon to avoid transitive dependency issues
+vi.mock('@/components/icons/PaneIcon', () => ({
+  default: ({ content, className }: { content: any; className?: string }) => (
+    <svg data-testid="pane-icon" data-content-kind={content.kind} className={className} />
   ),
 }))
 

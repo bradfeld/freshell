@@ -34,6 +34,7 @@ export const defaultSettings: AppSettings = {
   },
   panes: {
     defaultNewPane: 'ask' as const,
+    iconsOnTabs: true,
   },
   codingCli: {
     enabledProviders: ['claude', 'codex'],

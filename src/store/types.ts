@@ -143,5 +143,6 @@ export interface AppSettings {
   codingCli: CodingCliSettings
   panes: {
     defaultNewPane: DefaultNewPane
+    iconsOnTabs: boolean
   }
 }

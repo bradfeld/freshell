@@ -4,6 +4,7 @@ import settingsReducer, {
   updateSettingsLocal,
   markSaved,
   defaultSettings,
+  mergeSettings,
   resolveDefaultLoggingDebug,
   SettingsState,
 } from '../../../../src/store/settingsSlice'
@@ -44,6 +45,10 @@ describe('settingsSlice', () => {
         showNoninteractiveSessions: false,
         width: 288,
         collapsed: false,
+      })
+      expect(state.settings.panes).toEqual({
+        defaultNewPane: 'ask',
+        iconsOnTabs: true,
       })
       expect(state.settings.codingCli).toEqual({
         enabledProviders: ['claude', 'codex'],
@@ -112,6 +117,7 @@ describe('settingsSlice', () => {
         },
         panes: {
           defaultNewPane: 'shell',
+          iconsOnTabs: true,
         },
       }
 
@@ -399,6 +405,37 @@ describe('settingsSlice', () => {
       expect(defaultSettings).toHaveProperty('safety')
       expect(defaultSettings).toHaveProperty('sidebar')
       expect(defaultSettings).toHaveProperty('codingCli')
+    })
+
+    it('defaultSettings includes panes.iconsOnTabs as true', () => {
+      expect(defaultSettings.panes.iconsOnTabs).toBe(true)
+    })
+  })
+
+  describe('panes mergeSettings', () => {
+    it('mergeSettings preserves iconsOnTabs when patching panes', () => {
+      const result = mergeSettings(defaultSettings, { panes: { defaultNewPane: 'shell' } } as any)
+      expect(result.panes.iconsOnTabs).toBe(true)
+    })
+
+    it('mergeSettings allows overriding iconsOnTabs to false', () => {
+      const result = mergeSettings(defaultSettings, { panes: { iconsOnTabs: false } } as any)
+      expect(result.panes.iconsOnTabs).toBe(false)
+    })
+
+    it('deep merges panes settings via updateSettingsLocal', () => {
+      const initialState: SettingsState = {
+        settings: defaultSettings,
+        loaded: true,
+      }
+
+      const state = settingsReducer(
+        initialState,
+        updateSettingsLocal({ panes: { iconsOnTabs: false } } as any)
+      )
+
+      expect(state.settings.panes.iconsOnTabs).toBe(false)
+      expect(state.settings.panes.defaultNewPane).toBe('ask')
     })
   })
 })

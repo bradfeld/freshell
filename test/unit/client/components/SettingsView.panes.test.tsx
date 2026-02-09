@@ -30,6 +30,9 @@ function createTestStore(defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor' 
             scrollback: 5000,
             theme: 'auto',
           },
+          logging: {
+            debug: false,
+          },
           safety: {
             autoKillIdleMinutes: 180,
             warnBeforeKillMinutes: 5,
@@ -37,11 +40,18 @@ function createTestStore(defaultNewPane: 'ask' | 'shell' | 'browser' | 'editor' 
           sidebar: {
             sortMode: 'activity',
             showProjectBadges: true,
+            showSubagents: false,
+            showNoninteractiveSessions: false,
             width: 288,
             collapsed: false,
           },
           panes: {
             defaultNewPane,
+            iconsOnTabs: true,
+          },
+          codingCli: {
+            enabledProviders: ['claude', 'codex'],
+            providers: {},
           },
         },
         loaded: true,
