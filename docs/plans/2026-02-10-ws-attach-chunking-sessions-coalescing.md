@@ -150,6 +150,7 @@ Add tests for `chunkTerminalSnapshot(snapshot, maxBytes, terminalId)`:
 - throws clear error when `maxBytes` is too small for minimal chunk envelope.
 - preserves empty snapshot behavior (`[]`) so caller can choose inline path.
 - runs within practical performance bounds for a 2MB snapshot payload.
+- enforces explicit perf threshold: <= 200ms for 2MB serialized payload at default chunk size.
 
 Use exact envelope check in test:
 
@@ -217,6 +218,17 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, termin
       if (prevIsHigh && nextIsLow) best -= 1
     }
 
+    if (best === cursor) {
+      // Final safety: always advance by one full code point or fail.
+      const cp = snapshot.codePointAt(cursor)
+      const next = cursor + (cp !== undefined && cp > 0xffff ? 2 : 1)
+      const candidate = snapshot.slice(cursor, next)
+      if (payloadBytes(candidate) > maxBytes) {
+        throw new Error('Unable to advance chunk cursor safely within max byte budget')
+      }
+      best = next
+    }
+
     chunks.push(snapshot.slice(cursor, best))
     cursor = best
   }
@@ -253,6 +265,8 @@ In `test/server/ws-edge-cases.test.ts`, add tests asserting:
 4. If connection closes mid-chunk stream, snapshot stream aborts and no attach-finalization flush occurs for that connection.
 5. Empty snapshots always use inline path and never advertise `snapshotChunked: true`.
 6. Concurrent attach/create attempts for the same terminal+connection do not interleave chunk streams.
+   - Use a controllable barrier in send/attach sequencing so a second attach starts while first is in-flight.
+   - Assert each attach stream still emits ordered, non-interleaved `start/chunk/end` triplets per request.
 
 Note: this file uses `FakeRegistry.simulateOutput(...)` intentionally (test helper, not production `TerminalRegistry`).
 
@@ -298,6 +312,10 @@ private async sendAttachSnapshotAndFinalize(
   }
 ): Promise<void>
 ```
+
+Implementation safety:
+- Wrap chunking + send sequence in `try/catch`.
+- On chunk helper/send-sequencing exception, log context, abort stream, and avoid `finishAttachSnapshot` for that connection.
 
 Method behavior:
 - Decide inline vs chunked **before** sending any frame.
@@ -367,6 +385,11 @@ Add lifecycle tests for chunk flow:
   - on repeated `terminal.attached.start` for same terminal, previous in-flight chunks are replaced.
 - timeout recovery keeps terminal usable for subsequent live output (no permanent error state).
 - timeout recovery performs one guarded auto-reattach attempt (`terminal.attach` only, no detach) to restore snapshot context; if it fails, continue in degraded live-output-only mode with warning.
+- Explicit timeout coordination:
+  - server in-flight frame timeout: 5s
+  - client chunk completion timeout: 10s
+  - ws reconnect min delay after backpressure close: 5s
+  - client disconnect cleanup runs immediately and clears chunk buffers before timer fallback.
 
 ### Step 2. Implement client behavior
 
@@ -392,6 +415,7 @@ In `TerminalView.tsx`:
 - If `terminal.exit` arrives for the active terminal before `end`, cancel chunk state and transition to exited behavior.
 - Timeout path should not mark pane as errored; keep normal runtime/output handling active.
 - Auto-reattach is attempted at most once per timed-out attach sequence to avoid loops.
+- On any end-of-stream validation failure, clear `isAttaching` immediately and run the same one-shot guarded auto-reattach path.
 
 Suggested local types:
 
