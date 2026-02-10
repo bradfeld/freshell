@@ -886,6 +886,9 @@ export class TerminalRegistry extends EventEmitter {
     })
 
     ptyProc.onExit((e) => {
+      if (record.status === 'exited') {
+        return
+      }
       record.status = 'exited'
       record.exitCode = e.exitCode
       const now = Date.now()
@@ -896,10 +899,12 @@ export class TerminalRegistry extends EventEmitter {
       }
       record.clients.clear()
       record.pendingSnapshotClients.clear()
+      this.emit('terminal.exit', { terminalId, exitCode: e.exitCode })
       this.reapExitedTerminals()
     })
 
     this.terminals.set(terminalId, record)
+    this.emit('terminal.created', record)
     return record
   }
 
@@ -967,6 +972,7 @@ export class TerminalRegistry extends EventEmitter {
   kill(terminalId: string): boolean {
     const term = this.terminals.get(terminalId)
     if (!term) return false
+    if (term.status === 'exited') return true
     try {
       term.pty.kill()
     } catch (err) {
@@ -982,6 +988,7 @@ export class TerminalRegistry extends EventEmitter {
     }
     term.clients.clear()
     term.pendingSnapshotClients.clear()
+    this.emit('terminal.exit', { terminalId, exitCode: term.exitCode })
     this.reapExitedTerminals()
     return true
   }

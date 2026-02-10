@@ -20,7 +20,8 @@ import { CodingCliSessionIndexer } from './coding-cli/session-indexer.js'
 import { CodingCliSessionManager } from './coding-cli/session-manager.js'
 import { claudeProvider } from './coding-cli/providers/claude.js'
 import { codexProvider } from './coding-cli/providers/codex.js'
-import { makeSessionKey, type CodingCliProviderName } from './coding-cli/types.js'
+import { makeSessionKey, type CodingCliProviderName, type CodingCliSession } from './coding-cli/types.js'
+import { TerminalMetadataService } from './terminal-metadata-service.js'
 import { AI_CONFIG, PROMPTS, stripAnsi } from './ai-prompts.js'
 import { migrateSettingsSortMode } from './settings-migrate.js'
 import { filesRouter } from './files-router.js'
@@ -151,22 +152,73 @@ async function main() {
 
   const settings = migrateSettingsSortMode(await configStore.getSettings())
   const registry = new TerminalRegistry(settings)
+  const terminalMetadata = new TerminalMetadataService()
 
   const sessionRepairService = getSessionRepairService()
 
   const server = http.createServer(app)
-  const wsHandler = new WsHandler(server, registry, codingCliSessionManager, sessionRepairService, async () => {
-    const currentSettings = migrateSettingsSortMode(await configStore.getSettings())
-    return {
-      settings: currentSettings,
-      projects: codingCliIndexer.getProjects(),
-      perfLogging: perfConfig.enabled,
-    }
-  })
+  const wsHandler = new WsHandler(
+    server,
+    registry,
+    codingCliSessionManager,
+    sessionRepairService,
+    async () => {
+      const currentSettings = migrateSettingsSortMode(await configStore.getSettings())
+      return {
+        settings: currentSettings,
+        projects: codingCliIndexer.getProjects(),
+        perfLogging: perfConfig.enabled,
+      }
+    },
+    () => terminalMetadata.list(),
+  )
   const sessionsSync = new SessionsSyncService(wsHandler)
+
+  const broadcastTerminalMetaUpserts = (upsert: ReturnType<TerminalMetadataService['list']>) => {
+    if (upsert.length === 0) return
+    wsHandler.broadcastTerminalMetaUpdated({ upsert, remove: [] })
+  }
+
+  const broadcastTerminalMetaRemoval = (terminalId: string) => {
+    wsHandler.broadcastTerminalMetaUpdated({ upsert: [], remove: [terminalId] })
+  }
+
+  const findCodingCliSession = (provider: CodingCliProviderName, sessionId: string): CodingCliSession | undefined => {
+    for (const project of codingCliIndexer.getProjects()) {
+      const found = project.sessions.find((session) => (
+        session.provider === provider && session.sessionId === sessionId
+      ))
+      if (found) return found
+    }
+    return undefined
+  }
+
+  await Promise.all(
+    registry.list().map(async (terminal) => {
+      await terminalMetadata.seedFromTerminal(terminal as any)
+    }),
+  )
 
   registry.on('terminal.idle.warning', (payload) => {
     wsHandler.broadcast({ type: 'terminal.idle.warning', ...(payload as any) })
+  })
+
+  registry.on('terminal.created', (record) => {
+    void terminalMetadata.seedFromTerminal(record as any)
+      .then((upsert) => {
+        if (upsert) broadcastTerminalMetaUpserts([upsert])
+      })
+      .catch((err) => {
+        log.warn({ err, terminalId: (record as any)?.terminalId }, 'Failed to seed terminal metadata')
+      })
+  })
+
+  registry.on('terminal.exit', (payload) => {
+    const terminalId = (payload as { terminalId?: string })?.terminalId
+    if (!terminalId) return
+    if (terminalMetadata.remove(terminalId)) {
+      broadcastTerminalMetaRemoval(terminalId)
+    }
   })
 
   const applyDebugLogging = (enabled: boolean, source: string) => {
@@ -550,6 +602,8 @@ async function main() {
   // Coding CLI watcher hooks
   codingCliIndexer.onUpdate((projects) => {
     sessionsSync.publish(projects)
+    const associationMetaUpserts: ReturnType<TerminalMetadataService['list']> = []
+    const pendingMetadataSync = new Map<string, CodingCliSession>()
 
     for (const project of projects) {
       for (const session of project.sessions) {
@@ -572,6 +626,12 @@ async function main() {
                     terminalId: term.terminalId,
                     sessionId: session.sessionId,
                   })
+                  const metaUpsert = terminalMetadata.associateSession(
+                    term.terminalId,
+                    session.provider,
+                    session.sessionId,
+                  )
+                  if (metaUpsert) associationMetaUpserts.push(metaUpsert)
                 } catch (err) {
                   log.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
                 }
@@ -580,10 +640,12 @@ async function main() {
           }
         }
 
-        // Auto-update terminal titles based on session data
-        if (session.title) {
-          const matchingTerminals = registry.findTerminalsBySession(session.provider, session.sessionId, session.cwd)
-          for (const term of matchingTerminals) {
+        const matchingTerminals = registry.findTerminalsBySession(session.provider, session.sessionId, session.cwd)
+        for (const term of matchingTerminals) {
+          pendingMetadataSync.set(term.terminalId, session)
+
+          // Auto-update terminal titles based on session data
+          if (session.title) {
             const defaultTitle =
               session.provider === 'claude'
                 ? 'Claude'
@@ -601,6 +663,25 @@ async function main() {
           }
         }
       }
+    }
+
+    if (associationMetaUpserts.length > 0) {
+      broadcastTerminalMetaUpserts(associationMetaUpserts)
+    }
+
+    if (pendingMetadataSync.size > 0) {
+      void (async () => {
+        const syncUpserts: ReturnType<TerminalMetadataService['list']> = []
+        for (const [terminalId, session] of pendingMetadataSync.entries()) {
+          const upsert = await terminalMetadata.applySessionMetadata(terminalId, session)
+          if (upsert) syncUpserts.push(upsert)
+        }
+        if (syncUpserts.length > 0) {
+          broadcastTerminalMetaUpserts(syncUpserts)
+        }
+      })().catch((err) => {
+        log.warn({ err }, 'Failed to sync terminal metadata from coding-cli index updates')
+      })
     }
   })
 
@@ -633,9 +714,24 @@ async function main() {
         terminalId: term.terminalId,
         sessionId: session.sessionId,
       })
+      const metaUpsert = terminalMetadata.associateSession(term.terminalId, 'claude', session.sessionId)
+      if (metaUpsert) {
+        broadcastTerminalMetaUpserts([metaUpsert])
+      }
     } catch (err) {
       log.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
     }
+
+    void (async () => {
+      const latestClaudeSession = findCodingCliSession('claude', session.sessionId)
+      if (!latestClaudeSession) return
+      const upsert = await terminalMetadata.applySessionMetadata(term.terminalId, latestClaudeSession)
+      if (upsert) {
+        broadcastTerminalMetaUpserts([upsert])
+      }
+    })().catch((err) => {
+      log.warn({ err, terminalId: term.terminalId, sessionId: session.sessionId }, 'Failed to apply Claude terminal metadata after association')
+    })
   })
 
   const startBackgroundTasks = () => {

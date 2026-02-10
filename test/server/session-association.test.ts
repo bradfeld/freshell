@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { TerminalRegistry, modeSupportsResume } from '../../server/terminal-registry'
 import { ClaudeSessionIndexer, ClaudeSession } from '../../server/claude-indexer'
 import type { CodingCliSession } from '../../server/coding-cli/types'
+import { TerminalMetadataService } from '../../server/terminal-metadata-service'
 
 vi.mock('node-pty', () => ({
   spawn: vi.fn(() => ({
@@ -21,6 +22,202 @@ const SESSION_ID_FIVE = '3a0b2c9f-1e2d-4f6a-8f3a-4b8a9d7c1e20'
 const SESSION_ID_SIX = '4b1c3d2e-5f6a-7b8c-9d0e-1f2a3b4c5d6e'
 const SESSION_ID_SEVEN = '5c2d4e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f'
 const SESSION_ID_EIGHT = '6d3e5f7a-8b9c-0d1e-2f3a-4b5c6d7e8f90'
+
+function createMetadataService() {
+  let now = 1_000
+  return new TerminalMetadataService({
+    now: () => {
+      now += 10
+      return now
+    },
+    git: {
+      resolveCheckoutRoot: async () => '/home/user/project',
+      resolveRepoRoot: async () => '/home/user/project',
+      resolveBranchAndDirty: async () => ({ branch: 'main', isDirty: false }),
+    },
+  })
+}
+
+describe('Session-Terminal metadata broadcasts', () => {
+  it('broadcasts terminal.session.associated and terminal.meta.updated for Codex association flow', async () => {
+    const registry = new TerminalRegistry()
+    const metadata = createMetadataService()
+    const broadcasts: any[] = []
+
+    const terminal = registry.create({ mode: 'codex', cwd: '/home/user/project' })
+    await metadata.seedFromTerminal(registry.list()[0] as any)
+
+    const codexSession: CodingCliSession = {
+      provider: 'codex',
+      sessionId: SESSION_ID_ONE,
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+      gitBranch: 'feature/codex',
+      isDirty: true,
+      tokenUsage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        cachedTokens: 10,
+        totalTokens: 160,
+        contextTokens: 160,
+        compactThresholdTokens: 640,
+        compactPercent: 25,
+      },
+    }
+
+    const unassociated = registry.findUnassociatedTerminals('codex', codexSession.cwd!)
+    expect(unassociated).toHaveLength(1)
+
+    const associated = registry.setResumeSessionId(unassociated[0].terminalId, codexSession.sessionId)
+    expect(associated).toBe(true)
+
+    broadcasts.push({
+      type: 'terminal.session.associated',
+      terminalId: unassociated[0].terminalId,
+      sessionId: codexSession.sessionId,
+    })
+
+    const associatedMeta = metadata.associateSession(unassociated[0].terminalId, 'codex', codexSession.sessionId)
+    if (associatedMeta) {
+      broadcasts.push({
+        type: 'terminal.meta.updated',
+        upsert: [associatedMeta],
+        remove: [],
+      })
+    }
+
+    const sessionMeta = await metadata.applySessionMetadata(unassociated[0].terminalId, codexSession)
+    if (sessionMeta) {
+      broadcasts.push({
+        type: 'terminal.meta.updated',
+        upsert: [sessionMeta],
+        remove: [],
+      })
+    }
+
+    expect(broadcasts).toContainEqual({
+      type: 'terminal.session.associated',
+      terminalId: terminal.terminalId,
+      sessionId: SESSION_ID_ONE,
+    })
+
+    const latestMeta = broadcasts.filter((m) => m.type === 'terminal.meta.updated').at(-1)
+    expect(latestMeta).toBeTruthy()
+    expect(latestMeta.upsert[0]).toMatchObject({
+      terminalId: terminal.terminalId,
+      provider: 'codex',
+      sessionId: SESSION_ID_ONE,
+      branch: 'feature/codex',
+      isDirty: true,
+      tokenUsage: {
+        compactPercent: 25,
+      },
+    })
+
+    registry.shutdown()
+  })
+
+  it('broadcasts terminal.session.associated and terminal.meta.updated for Claude new-session association flow', async () => {
+    const registry = new TerminalRegistry()
+    const metadata = createMetadataService()
+    const indexer = new ClaudeSessionIndexer()
+    const broadcasts: any[] = []
+    const pending: Promise<void>[] = []
+
+    const terminal = registry.create({ mode: 'claude', cwd: '/home/user/project' })
+    await metadata.seedFromTerminal(registry.list()[0] as any)
+
+    const claudeSession: CodingCliSession = {
+      provider: 'claude',
+      sessionId: SESSION_ID_TWO,
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+      gitBranch: 'feature/claude',
+      isDirty: false,
+      tokenUsage: {
+        inputTokens: 20,
+        outputTokens: 9,
+        cachedTokens: 12,
+        totalTokens: 41,
+        contextTokens: 41,
+        compactThresholdTokens: 190000,
+        compactPercent: 0,
+      },
+    }
+
+    const latestSessions = new Map([[SESSION_ID_TWO, claudeSession]])
+
+    indexer.onNewSession((session) => {
+      if (!session.cwd) return
+      const unassociated = registry.findUnassociatedClaudeTerminals(session.cwd)
+      if (unassociated.length === 0) return
+      const term = unassociated[0]
+      if (!registry.setResumeSessionId(term.terminalId, session.sessionId)) return
+
+      broadcasts.push({
+        type: 'terminal.session.associated',
+        terminalId: term.terminalId,
+        sessionId: session.sessionId,
+      })
+
+      const associatedMeta = metadata.associateSession(term.terminalId, 'claude', session.sessionId)
+      if (associatedMeta) {
+        broadcasts.push({
+          type: 'terminal.meta.updated',
+          upsert: [associatedMeta],
+          remove: [],
+        })
+      }
+
+      const latest = latestSessions.get(session.sessionId)
+      if (!latest) return
+
+      pending.push((async () => {
+        const upsert = await metadata.applySessionMetadata(term.terminalId, latest)
+        if (!upsert) return
+        broadcasts.push({
+          type: 'terminal.meta.updated',
+          upsert: [upsert],
+          remove: [],
+        })
+      })())
+    })
+
+    indexer['initialized'] = true
+    indexer['detectNewSessions']([{
+      sessionId: SESSION_ID_TWO,
+      projectPath: '/home/user/project',
+      updatedAt: Date.now(),
+      cwd: '/home/user/project',
+    }])
+    await Promise.all(pending)
+
+    expect(broadcasts).toContainEqual({
+      type: 'terminal.session.associated',
+      terminalId: terminal.terminalId,
+      sessionId: SESSION_ID_TWO,
+    })
+
+    const latestMeta = broadcasts.filter((m) => m.type === 'terminal.meta.updated').at(-1)
+    expect(latestMeta).toBeTruthy()
+    expect(latestMeta.upsert[0]).toMatchObject({
+      terminalId: terminal.terminalId,
+      provider: 'claude',
+      sessionId: SESSION_ID_TWO,
+      branch: 'feature/claude',
+      isDirty: false,
+      tokenUsage: {
+        inputTokens: 20,
+        outputTokens: 9,
+        cachedTokens: 12,
+      },
+    })
+
+    registry.shutdown()
+  })
+})
 
 describe('Session-Terminal Association Integration', () => {
   it('should associate terminal with session when session is created', () => {
