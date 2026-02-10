@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { logger } from './logger.js'
 import { getPerfConfig, logPerfEvent, shouldLog, startPerfTimer } from './perf-logger.js'
 import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed } from './auth.js'
+import { modeSupportsResume } from './terminal-registry.js'
 import type { TerminalRegistry, TerminalMode } from './terminal-registry.js'
 import { configStore, type AppSettings } from './config-store.js'
 import type { CodingCliSessionManager } from './coding-cli/session-manager.js'
@@ -1106,8 +1107,8 @@ export class WsHandler {
             effectiveResumeSessionId = undefined
           }
 
-          if (m.mode === 'claude' && effectiveResumeSessionId) {
-            const existing = this.registry.findRunningClaudeTerminalBySession(effectiveResumeSessionId)
+          if (modeSupportsResume(m.mode as TerminalMode) && effectiveResumeSessionId) {
+            const existing = this.registry.findRunningTerminalBySession(m.mode as TerminalMode, effectiveResumeSessionId)
             if (existing) {
               this.registry.attach(existing.terminalId, ws, { pendingSnapshot: true })
               state.attachedTerminalIds.add(existing.terminalId)
