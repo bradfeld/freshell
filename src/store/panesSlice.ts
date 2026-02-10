@@ -538,6 +538,31 @@ export const panesSlice = createSlice({
       state.layouts[tabId] = updateSizes(root)
     },
 
+    resizeMultipleSplits: (
+      state,
+      action: PayloadAction<{
+        tabId: string
+        resizes: Array<{ splitId: string; sizes: [number, number] }>
+      }>
+    ) => {
+      const { tabId, resizes } = action.payload
+      const root = state.layouts[tabId]
+      if (!root) return
+
+      function applySizes(node: PaneNode): PaneNode {
+        if (node.type === 'leaf') return node
+        const match = resizes.find(r => r.splitId === node.id)
+        const newSizes = match ? match.sizes : node.sizes
+        return {
+          ...node,
+          sizes: newSizes,
+          children: [applySizes(node.children[0]), applySizes(node.children[1])],
+        }
+      }
+
+      state.layouts[tabId] = applySizes(root)
+    },
+
     resetSplit: (
       state,
       action: PayloadAction<{ tabId: string; splitId: string }>
@@ -727,6 +752,7 @@ export const {
   closePane,
   setActivePane,
   resizePanes,
+  resizeMultipleSplits,
   resetSplit,
   swapSplit,
   updatePaneContent,

@@ -6,6 +6,7 @@ import panesReducer, {
   closePane,
   setActivePane,
   resizePanes,
+  resizeMultipleSplits,
   updatePaneContent,
   removeLayout,
   hydratePanes,
@@ -1003,6 +1004,98 @@ describe('panesSlice', () => {
 
       const split = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
       expect(split.sizes).toEqual(originalSizes)
+    })
+  })
+
+  describe('resizeMultipleSplits', () => {
+    it('updates multiple splits at once', () => {
+      // Build a 2x2 grid: V-split(H-split(A, B), H-split(C, D))
+      const stateWithA = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+      const paneAId = (stateWithA.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).id
+
+      // Split A vertically to get top/bottom
+      const stateWithAB = panesReducer(
+        stateWithA,
+        splitPane({ tabId: 'tab-1', paneId: paneAId, direction: 'vertical', newContent: { kind: 'terminal', mode: 'shell' } })
+      )
+      const vSplit = stateWithAB.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const vSplitId = vSplit.id
+      const topPaneId = (vSplit.children[0] as Extract<PaneNode, { type: 'leaf' }>).id
+      const botPaneId = (vSplit.children[1] as Extract<PaneNode, { type: 'leaf' }>).id
+
+      // Split top pane horizontally
+      const stateWithTop = panesReducer(
+        stateWithAB,
+        splitPane({ tabId: 'tab-1', paneId: topPaneId, direction: 'horizontal', newContent: { kind: 'terminal', mode: 'shell' } })
+      )
+      const root1 = stateWithTop.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const topHSplit = root1.children[0] as Extract<PaneNode, { type: 'split' }>
+      const topHSplitId = topHSplit.id
+
+      // Split bottom pane horizontally
+      const stateWithAll = panesReducer(
+        stateWithTop,
+        splitPane({ tabId: 'tab-1', paneId: botPaneId, direction: 'horizontal', newContent: { kind: 'terminal', mode: 'shell' } })
+      )
+      const root2 = stateWithAll.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      const botHSplit = root2.children[1] as Extract<PaneNode, { type: 'split' }>
+      const botHSplitId = botHSplit.id
+
+      // Now resize both H-splits and the V-split in one action
+      const finalState = panesReducer(
+        stateWithAll,
+        resizeMultipleSplits({
+          tabId: 'tab-1',
+          resizes: [
+            { splitId: topHSplitId, sizes: [60, 40] },
+            { splitId: botHSplitId, sizes: [60, 40] },
+            { splitId: vSplitId, sizes: [40, 60] },
+          ],
+        })
+      )
+
+      const finalRoot = finalState.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      expect(finalRoot.sizes).toEqual([40, 60])
+      const finalTopH = finalRoot.children[0] as Extract<PaneNode, { type: 'split' }>
+      expect(finalTopH.sizes).toEqual([60, 40])
+      const finalBotH = finalRoot.children[1] as Extract<PaneNode, { type: 'split' }>
+      expect(finalBotH.sizes).toEqual([60, 40])
+    })
+
+    it('does nothing if tab layout does not exist', () => {
+      const state = panesReducer(
+        initialState,
+        resizeMultipleSplits({
+          tabId: 'non-existent',
+          resizes: [{ splitId: 's1', sizes: [60, 40] }],
+        })
+      )
+      expect(state).toEqual(initialState)
+    })
+
+    it('preserves sizes of splits not in the resizes array', () => {
+      // Build a simple H-split(A, B) with [50,50]
+      const s1 = panesReducer(
+        initialState,
+        initLayout({ tabId: 'tab-1', content: { kind: 'terminal', mode: 'shell' } })
+      )
+      const pId = (s1.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).id
+      const s2 = panesReducer(
+        s1,
+        splitPane({ tabId: 'tab-1', paneId: pId, direction: 'horizontal', newContent: { kind: 'terminal', mode: 'shell' } })
+      )
+      const splitId = (s2.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>).id
+
+      // Resize with empty array - nothing changes
+      const s3 = panesReducer(
+        s2,
+        resizeMultipleSplits({ tabId: 'tab-1', resizes: [] })
+      )
+      const split = s3.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      expect(split.sizes).toEqual([50, 50])
     })
   })
 

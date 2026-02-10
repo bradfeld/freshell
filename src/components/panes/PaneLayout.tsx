@@ -4,6 +4,7 @@ import { initLayout, addPane, toggleZoom } from '@/store/panesSlice'
 import type { PaneContentInput, PaneNode } from '@/store/paneTypes'
 import PaneContainer from './PaneContainer'
 import FloatingActionButton from './FloatingActionButton'
+import IntersectionDragOverlay from './IntersectionDragOverlay'
 
 /** Find a leaf node by id in the pane tree. */
 function findLeaf(node: PaneNode, id: string): Extract<PaneNode, { type: 'leaf' }> | null {
@@ -71,6 +72,9 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
   return (
     <div ref={containerRef} className="relative h-full w-full">
       <PaneContainer tabId={tabId} node={nodeToRender} hidden={hidden} />
+      {!zoomedPaneId && (
+        <IntersectionDragOverlay tabId={tabId} containerRef={containerRef} />
+      )}
       <FloatingActionButton onAdd={handleAddPane} />
     </div>
   )
