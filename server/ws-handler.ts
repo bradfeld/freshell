@@ -19,6 +19,9 @@ const PING_INTERVAL_MS = Number(process.env.PING_INTERVAL_MS || 30_000)
 const MAX_WS_BUFFERED_AMOUNT = Number(process.env.MAX_WS_BUFFERED_AMOUNT || 2 * 1024 * 1024)
 // Max payload size per WebSocket message for mobile browser compatibility (500KB)
 const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
+const ATTACH_CHUNK_BYTES = Number(process.env.MAX_WS_ATTACH_CHUNK_BYTES || process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
+const MIN_ATTACH_CHUNK_BYTES = 16 * 1024
+const ATTACH_FRAME_SEND_TIMEOUT_MS = Number(process.env.WS_ATTACH_FRAME_SEND_TIMEOUT_MS || 30_000)
 // Rate limit: max terminal.create requests per client within a sliding window
 const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 10)
 const TERMINAL_CREATE_RATE_WINDOW_MS = Number(process.env.TERMINAL_CREATE_RATE_WINDOW_MS || 10_000)
@@ -168,6 +171,7 @@ const HelloSchema = z.object({
   token: z.string().optional(),
   capabilities: z.object({
     sessionsPatchV1: z.boolean().optional(),
+    terminalAttachChunkV1: z.boolean().optional(),
   }).optional(),
   sessions: z.object({
     active: z.string().optional(),
@@ -271,6 +275,7 @@ const ClientMessageSchema = z.discriminatedUnion('type', [
 type ClientState = {
   authenticated: boolean
   supportsSessionsPatchV1: boolean
+  supportsTerminalAttachChunkV1: boolean
   sessionsSnapshotSent: boolean
   attachedTerminalIds: Set<string>
   createdByRequestId: Map<string, string>
@@ -293,6 +298,8 @@ export class WsHandler {
   private wss: WebSocketServer
   private connections = new Set<LiveWebSocket>()
   private clientStates = new Map<LiveWebSocket, ClientState>()
+  private attachSendChains = new Map<string, Promise<void>>()
+  private attachChainKeysByConnection = new Map<string, Set<string>>()
   private pingInterval: NodeJS.Timeout | null = null
   private closed = false
   private sessionRepairService?: SessionRepairService
@@ -455,6 +462,7 @@ export class WsHandler {
     const state: ClientState = {
       authenticated: false,
       supportsSessionsPatchV1: false,
+      supportsTerminalAttachChunkV1: false,
       sessionsSnapshotSent: false,
       attachedTerminalIds: new Set(),
       createdByRequestId: new Map(),
@@ -500,6 +508,18 @@ export class WsHandler {
     if (state.helloTimer) clearTimeout(state.helloTimer)
     this.connections.delete(ws)
     this.clientStates.delete(ws)
+
+    const connectionId = ws.connectionId
+    if (connectionId) {
+      const keys = this.attachChainKeysByConnection.get(connectionId)
+      if (keys) {
+        for (const key of keys) {
+          this.attachSendChains.delete(key)
+        }
+        this.attachChainKeysByConnection.delete(connectionId)
+      }
+    }
+
     // Detach from any terminals
     for (const terminalId of state.attachedTerminalIds) {
       this.registry.detach(terminalId, ws)
@@ -534,26 +554,31 @@ export class WsHandler {
     }
   }
 
+  private closeForBackpressureIfNeeded(ws: LiveWebSocket, bufferedOverride?: number): boolean {
+    const buffered = bufferedOverride ?? (ws.bufferedAmount as number | undefined)
+    if (typeof buffered !== 'number' || buffered <= MAX_WS_BUFFERED_AMOUNT) return false
+
+    if (perfConfig.enabled && shouldLog(`ws_backpressure_${ws.connectionId || 'unknown'}`, perfConfig.rateLimitMs)) {
+      logPerfEvent(
+        'ws_backpressure_close',
+        {
+          connectionId: ws.connectionId,
+          bufferedBytes: buffered,
+          limitBytes: MAX_WS_BUFFERED_AMOUNT,
+        },
+        'warn',
+      )
+    }
+    ws.close(CLOSE_CODES.BACKPRESSURE, 'Backpressure')
+    return true
+  }
+
   private send(ws: LiveWebSocket, msg: unknown) {
     try {
       // Backpressure guard.
       // @ts-ignore
       const buffered = ws.bufferedAmount as number | undefined
-      if (typeof buffered === 'number' && buffered > MAX_WS_BUFFERED_AMOUNT) {
-        if (perfConfig.enabled && shouldLog(`ws_backpressure_${ws.connectionId || 'unknown'}`, perfConfig.rateLimitMs)) {
-          logPerfEvent(
-            'ws_backpressure_close',
-            {
-              connectionId: ws.connectionId,
-              bufferedBytes: buffered,
-              limitBytes: MAX_WS_BUFFERED_AMOUNT,
-            },
-            'warn',
-          )
-        }
-        ws.close(CLOSE_CODES.BACKPRESSURE, 'Backpressure')
-        return
-      }
+      if (this.closeForBackpressureIfNeeded(ws, buffered)) return
       let serialized = ''
       let payloadBytes: number | undefined
       let messageType: string | undefined
@@ -625,6 +650,205 @@ export class WsHandler {
       terminalId: params.terminalId,
       timestamp: nowIso(),
     })
+  }
+
+  private queueAttachFrame(ws: LiveWebSocket, msg: unknown): Promise<boolean> {
+    if (ws.readyState !== WebSocket.OPEN) return Promise.resolve(false)
+
+    // @ts-ignore
+    const buffered = ws.bufferedAmount as number | undefined
+    if (this.closeForBackpressureIfNeeded(ws, buffered)) return Promise.resolve(false)
+
+    let serialized = ''
+    try {
+      serialized = JSON.stringify(msg)
+    } catch {
+      return Promise.resolve(false)
+    }
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const onClose = () => settle(false)
+      const timeout = setTimeout(() => {
+        try {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.close(CLOSE_CODES.BACKPRESSURE, 'Attach send timeout')
+          }
+        } catch {
+          // ignore
+        }
+        settle(false)
+      }, ATTACH_FRAME_SEND_TIMEOUT_MS)
+
+      const settle = (result: boolean) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        ws.off('close', onClose)
+        resolve(result)
+      }
+
+      ws.on('close', onClose)
+      try {
+        ws.send(serialized, (err) => settle(!err))
+      } catch {
+        settle(false)
+      }
+    })
+  }
+
+  private async sendAttachSnapshotAndFinalize(
+    ws: LiveWebSocket,
+    state: ClientState,
+    args: {
+      terminalId: string
+      snapshot: string
+      created?: {
+        requestId: string
+        createdAt: number
+        effectiveResumeSessionId?: string
+      }
+    }
+  ): Promise<void> {
+    const { terminalId, snapshot, created } = args
+
+    const sendInline = async (): Promise<boolean> => {
+      if (created) {
+        const createdMsg: {
+          type: 'terminal.created'
+          requestId: string
+          terminalId: string
+          snapshot: string
+          createdAt: number
+          effectiveResumeSessionId?: string
+        } = {
+          type: 'terminal.created',
+          requestId: created.requestId,
+          terminalId,
+          snapshot,
+          createdAt: created.createdAt,
+        }
+        if (created.effectiveResumeSessionId) {
+          createdMsg.effectiveResumeSessionId = created.effectiveResumeSessionId
+        }
+        return await this.queueAttachFrame(ws, createdMsg)
+      }
+      return await this.queueAttachFrame(ws, { type: 'terminal.attached', terminalId, snapshot })
+    }
+
+    try {
+      if (ws.readyState !== WebSocket.OPEN) return
+
+      const shouldTryChunked = state.supportsTerminalAttachChunkV1 && snapshot.length > 0
+      const effectiveAttachChunkBytes = Math.max(ATTACH_CHUNK_BYTES, MIN_ATTACH_CHUNK_BYTES)
+
+      if (!shouldTryChunked) {
+        if (await sendInline()) {
+          this.registry.finishAttachSnapshot(terminalId, ws)
+        }
+        return
+      }
+
+      const chunks = chunkTerminalSnapshot(snapshot, effectiveAttachChunkBytes, terminalId)
+      if (chunks.length <= 1) {
+        if (await sendInline()) {
+          this.registry.finishAttachSnapshot(terminalId, ws)
+        }
+        return
+      }
+
+      if (created) {
+        const createdMsg: {
+          type: 'terminal.created'
+          requestId: string
+          terminalId: string
+          snapshotChunked: true
+          createdAt: number
+          effectiveResumeSessionId?: string
+        } = {
+          type: 'terminal.created',
+          requestId: created.requestId,
+          terminalId,
+          snapshotChunked: true,
+          createdAt: created.createdAt,
+        }
+        if (created.effectiveResumeSessionId) {
+          createdMsg.effectiveResumeSessionId = created.effectiveResumeSessionId
+        }
+        if (!await this.queueAttachFrame(ws, createdMsg)) return
+      }
+
+      const startMsg = {
+        type: 'terminal.attached.start',
+        terminalId,
+        totalCodeUnits: snapshot.length,
+        totalChunks: chunks.length,
+      } as const
+      if (!await this.queueAttachFrame(ws, startMsg)) return
+
+      for (const chunk of chunks) {
+        if (!await this.queueAttachFrame(ws, { type: 'terminal.attached.chunk', terminalId, chunk })) return
+      }
+
+      const endMsg = {
+        type: 'terminal.attached.end',
+        terminalId,
+        totalCodeUnits: snapshot.length,
+        totalChunks: chunks.length,
+      } as const
+      if (!await this.queueAttachFrame(ws, endMsg)) return
+
+      this.registry.finishAttachSnapshot(terminalId, ws)
+    } catch (error) {
+      log.warn(
+        { error, connectionId: ws.connectionId, terminalId, hasCreatedEnvelope: !!created },
+        'Failed to send attach snapshot stream',
+      )
+    }
+  }
+
+  private enqueueAttachSnapshotSend(
+    ws: LiveWebSocket,
+    state: ClientState,
+    args: {
+      terminalId: string
+      snapshot: string
+      created?: {
+        requestId: string
+        createdAt: number
+        effectiveResumeSessionId?: string
+      }
+    }
+  ): void {
+    const connectionId = ws.connectionId || 'unknown'
+    const key = `${connectionId}:${args.terminalId}`
+    const perConnectionKeys = this.attachChainKeysByConnection.get(connectionId) || new Set<string>()
+    perConnectionKeys.add(key)
+    this.attachChainKeysByConnection.set(connectionId, perConnectionKeys)
+
+    const previous = this.attachSendChains.get(key) ?? Promise.resolve()
+
+    let current: Promise<void>
+    current = previous
+      .catch(() => undefined)
+      .then(() => this.sendAttachSnapshotAndFinalize(ws, state, args))
+      .catch((error) => {
+        log.warn({ key, terminalId: args.terminalId, error }, 'attach_snapshot_send_failed')
+      })
+      .finally(() => {
+        if (this.attachSendChains.get(key) === current) {
+          this.attachSendChains.delete(key)
+          const keys = this.attachChainKeysByConnection.get(connectionId)
+          if (keys) {
+            keys.delete(key)
+            if (keys.size === 0) {
+              this.attachChainKeysByConnection.delete(connectionId)
+            }
+          }
+        }
+      })
+
+    this.attachSendChains.set(key, current)
   }
 
   private scheduleHandshakeSnapshot(ws: LiveWebSocket, state: ClientState) {
@@ -739,6 +963,7 @@ export class WsHandler {
         }
         state.authenticated = true
         state.supportsSessionsPatchV1 = !!m.capabilities?.sessionsPatchV1
+        state.supportsTerminalAttachChunkV1 = !!m.capabilities?.terminalAttachChunkV1
         if (state.helloTimer) clearTimeout(state.helloTimer)
 
         log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')
@@ -789,15 +1014,15 @@ export class WsHandler {
               state.attachedTerminalIds.add(existingId)
               terminalId = existingId
               reused = true
-              this.send(ws, {
-                type: 'terminal.created',
-                requestId: m.requestId,
+              this.enqueueAttachSnapshotSend(ws, state, {
                 terminalId: existingId,
                 snapshot: existing.buffer.snapshot(),
-                createdAt: existing.createdAt,
-                effectiveResumeSessionId: existing.resumeSessionId,
+                created: {
+                  requestId: m.requestId,
+                  createdAt: existing.createdAt,
+                  effectiveResumeSessionId: existing.resumeSessionId,
+                },
               })
-              setImmediate(() => this.registry.finishAttachSnapshot(existingId, ws))
               this.broadcast({ type: 'terminal.list.updated' })
               return
             }
@@ -834,15 +1059,15 @@ export class WsHandler {
               state.createdByRequestId.set(m.requestId, existing.terminalId)
               terminalId = existing.terminalId
               reused = true
-              this.send(ws, {
-                type: 'terminal.created',
-                requestId: m.requestId,
+              this.enqueueAttachSnapshotSend(ws, state, {
                 terminalId: existing.terminalId,
                 snapshot: existing.buffer.snapshot(),
-                createdAt: existing.createdAt,
-                effectiveResumeSessionId: existing.resumeSessionId,
+                created: {
+                  requestId: m.requestId,
+                  createdAt: existing.createdAt,
+                  effectiveResumeSessionId: existing.resumeSessionId,
+                },
               })
-              setImmediate(() => this.registry.finishAttachSnapshot(existing.terminalId, ws))
               this.broadcast({ type: 'terminal.list.updated' })
               return
             }
@@ -896,15 +1121,15 @@ export class WsHandler {
           this.registry.attach(record.terminalId, ws, { pendingSnapshot: true })
           state.attachedTerminalIds.add(record.terminalId)
 
-          this.send(ws, {
-            type: 'terminal.created',
-            requestId: m.requestId,
+          this.enqueueAttachSnapshotSend(ws, state, {
             terminalId: record.terminalId,
             snapshot: record.buffer.snapshot(),
-            createdAt: record.createdAt,
-            effectiveResumeSessionId,
+            created: {
+              requestId: m.requestId,
+              createdAt: record.createdAt,
+              effectiveResumeSessionId,
+            },
           })
-          setImmediate(() => this.registry.finishAttachSnapshot(record.terminalId, ws))
 
           // Notify all clients that list changed
           this.broadcast({ type: 'terminal.list.updated' })
@@ -929,8 +1154,10 @@ export class WsHandler {
           return
         }
         state.attachedTerminalIds.add(m.terminalId)
-        this.send(ws, { type: 'terminal.attached', terminalId: m.terminalId, snapshot: rec.buffer.snapshot() })
-        setImmediate(() => this.registry.finishAttachSnapshot(m.terminalId, ws))
+        this.enqueueAttachSnapshotSend(ws, state, {
+          terminalId: m.terminalId,
+          snapshot: rec.buffer.snapshot(),
+        })
         this.broadcast({ type: 'terminal.list.updated' })
         return
       }
