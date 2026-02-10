@@ -90,7 +90,12 @@ vi.mock('@/components/TerminalView', () => ({
   default: ({ paneId }: { paneId: string }) => <div data-testid={`terminal-${paneId}`}>Terminal</div>,
 }))
 
-function createStore() {
+function createStore(options?: {
+  codexTab?: Partial<Tab>
+  claudeTab?: Partial<Tab>
+  codexPane?: Partial<TerminalPaneContent>
+  claudePane?: Partial<TerminalPaneContent>
+}) {
   const codexTab: Tab = {
     id: 'tab-codex',
     createRequestId: 'req-codex',
@@ -100,6 +105,7 @@ function createStore() {
     shell: 'system',
     terminalId: 'term-codex',
     createdAt: Date.now(),
+    ...(options?.codexTab || {}),
   }
 
   const claudeTab: Tab = {
@@ -111,6 +117,7 @@ function createStore() {
     shell: 'system',
     terminalId: 'term-claude',
     createdAt: Date.now(),
+    ...(options?.claudeTab || {}),
   }
 
   const codexPane: TerminalPaneContent = {
@@ -121,6 +128,7 @@ function createStore() {
     shell: 'system',
     terminalId: 'term-codex',
     initialCwd: '/home/user/code/freshell',
+    ...(options?.codexPane || {}),
   }
 
   const claudePane: TerminalPaneContent = {
@@ -131,6 +139,7 @@ function createStore() {
     shell: 'system',
     terminalId: 'term-claude',
     initialCwd: '/home/user/code/freshell',
+    ...(options?.claudePane || {}),
   }
 
   const layouts: Record<string, PaneNode> = {
@@ -404,6 +413,73 @@ describe('pane header runtime metadata flow (e2e)', () => {
         type: 'terminal.meta.list.response',
         requestId,
         terminals: [],
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/freshell \(main\*\)\s+25%/)).toBeInTheDocument()
+    })
+  })
+
+  it('keeps annotation visible after refresh when pane terminalId is missing but tab/session metadata exists', async () => {
+    const store = createStore({
+      codexPane: {
+        terminalId: undefined,
+        resumeSessionId: 'session-codex-refresh',
+      },
+      codexTab: {
+        terminalId: 'term-codex-tab-level',
+      },
+    })
+
+    render(
+      <Provider store={store}>
+        <App />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(wsMocks.connect).toHaveBeenCalled()
+    })
+
+    act(() => {
+      wsMocks.emitMessage({ type: 'ready' })
+    })
+
+    let requestId = ''
+    await waitFor(() => {
+      const metaCall = wsMocks.send.mock.calls
+        .map((call) => call[0])
+        .find((msg) => msg?.type === 'terminal.meta.list')
+      expect(metaCall).toBeDefined()
+      if (!metaCall || typeof metaCall.requestId !== 'string') {
+        throw new Error('Missing terminal.meta.list requestId')
+      }
+      requestId = metaCall.requestId
+    })
+
+    act(() => {
+      wsMocks.emitMessage({
+        type: 'terminal.meta.list.response',
+        requestId,
+        terminals: [
+          {
+            terminalId: 'term-codex-tab-level',
+            provider: 'codex',
+            sessionId: 'session-codex-refresh',
+            displaySubdir: 'freshell',
+            branch: 'main',
+            isDirty: true,
+            tokenUsage: {
+              inputTokens: 10,
+              outputTokens: 5,
+              cachedTokens: 0,
+              totalTokens: 15,
+              compactPercent: 25,
+            },
+            updatedAt: Date.now(),
+          },
+        ],
       })
     })
 

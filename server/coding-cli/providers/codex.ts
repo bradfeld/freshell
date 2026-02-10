@@ -8,6 +8,8 @@ import { looksLikePath, isSystemContext, extractFromIdeContext, resolveGitRepoRo
 
 const CODEX_BASELINE_TOKENS = 12_000
 const CODEX_MAX_PLAUSIBLE_CONTEXT_TOKENS_WITHOUT_WINDOW = 5_000_000
+const CODEX_PERCENT_CALIBRATION_SLOPE = 0.973
+const CODEX_PERCENT_CALIBRATION_INTERCEPT = -4.65
 
 export function defaultCodexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
@@ -49,6 +51,19 @@ function normalizeCompactPercentWithBaseline(
 
   const adjustedNumerator = Math.max(numerator - baselineTokens, 0)
   return normalizeCompactPercent(adjustedNumerator, adjustedDenominator)
+}
+
+function calibrateCodexCompactPercent(
+  rawPercent: number | undefined,
+  contextTokens: number,
+  compactThresholdTokens?: number,
+): number | undefined {
+  if (rawPercent === undefined) return undefined
+  if (compactThresholdTokens && compactThresholdTokens > 0 && contextTokens >= compactThresholdTokens) {
+    return 100
+  }
+  const calibrated = Math.round((rawPercent * CODEX_PERCENT_CALIBRATION_SLOPE) + CODEX_PERCENT_CALIBRATION_INTERCEPT)
+  return Math.max(0, Math.min(100, calibrated))
 }
 
 function coerceLikelyContextTokens(
@@ -146,6 +161,14 @@ function parseCodexTokenEnvelope(payload: any): {
     // `last_token_usage` reflects the current context snapshot and is what users
     // see in the live Codex status bar. `total_token_usage` may be cumulative.
     const aggregate = lastUsage ?? totalUsage
+    const rawCompactPercent = contextTokens !== undefined
+      ? normalizeCompactPercentWithBaseline(
+        contextTokens,
+        compactThresholdTokens,
+        CODEX_BASELINE_TOKENS,
+      )
+      : undefined
+
     const summary = aggregate || contextTokens !== undefined
       ? {
           inputTokens: aggregate?.inputTokens ?? 0,
@@ -155,14 +178,9 @@ function parseCodexTokenEnvelope(payload: any): {
           contextTokens,
           modelContextWindow,
           compactThresholdTokens,
-          compactPercent:
-            contextTokens !== undefined
-              ? normalizeCompactPercentWithBaseline(
-                contextTokens,
-                compactThresholdTokens,
-                CODEX_BASELINE_TOKENS,
-              )
-              : undefined,
+          compactPercent: contextTokens !== undefined
+            ? calibrateCodexCompactPercent(rawCompactPercent, contextTokens, compactThresholdTokens)
+            : undefined,
         }
       : undefined
 

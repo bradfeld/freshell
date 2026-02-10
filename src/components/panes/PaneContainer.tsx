@@ -33,6 +33,37 @@ interface PaneContainerProps {
   hidden?: boolean
 }
 
+function resolvePaneRuntimeMeta(
+  terminalMetaById: Record<string, TerminalMetaRecord>,
+  options: {
+    terminalId?: string
+    tabTerminalId?: string
+    isOnlyPane: boolean
+    provider?: CodingCliProviderName
+    resumeSessionId?: string
+  },
+): TerminalMetaRecord | undefined {
+  if (options.terminalId) {
+    const byTerminalId = terminalMetaById[options.terminalId]
+    if (byTerminalId) return byTerminalId
+  }
+
+  // During refresh/rehydration, single-pane tabs can briefly have tab-level
+  // terminal IDs before the pane content is fully reattached.
+  if (!options.terminalId && options.isOnlyPane && options.tabTerminalId) {
+    const byTabTerminalId = terminalMetaById[options.tabTerminalId]
+    if (byTabTerminalId) return byTabTerminalId
+  }
+
+  if (options.resumeSessionId && options.provider) {
+    return Object.values(terminalMetaById).find((record) => (
+      record.provider === options.provider && record.sessionId === options.resumeSessionId
+    ))
+  }
+
+  return undefined
+}
+
 export default function PaneContainer({ tabId, node, hidden }: PaneContainerProps) {
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
@@ -185,17 +216,23 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     const paneTitle = explicitTitle ?? derivePaneTitle(node.content)
     const paneStatus = node.content.kind === 'terminal' ? node.content.status : 'running'
     const isRenaming = renamingPaneId === node.id
+    const paneRuntimeMeta =
+      node.content.kind === 'terminal' && node.content.mode !== 'shell'
+        ? resolvePaneRuntimeMeta(terminalMetaById, {
+          terminalId: node.content.terminalId,
+          tabTerminalId,
+          isOnlyPane,
+          provider: node.content.mode,
+          resumeSessionId: node.content.resumeSessionId,
+        })
+        : undefined
     const paneMetaLabel =
-      node.content.kind === 'terminal' &&
-      node.content.mode !== 'shell' &&
-      node.content.terminalId
-        ? formatPaneRuntimeLabel(terminalMetaById[node.content.terminalId])
+      paneRuntimeMeta
+        ? formatPaneRuntimeLabel(paneRuntimeMeta)
         : undefined
     const paneMetaTooltip =
-      node.content.kind === 'terminal' &&
-      node.content.mode !== 'shell' &&
-      node.content.terminalId
-        ? formatPaneRuntimeTooltip(terminalMetaById[node.content.terminalId])
+      paneRuntimeMeta
+        ? formatPaneRuntimeTooltip(paneRuntimeMeta)
         : undefined
 
     return (

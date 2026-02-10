@@ -3,6 +3,11 @@ import path from 'path'
 import os from 'os'
 import { codexProvider, defaultCodexHome, parseCodexSessionContent } from '../../../../server/coding-cli/providers/codex'
 
+function calibrateExpectedCodexPercent(rawPercent: number): number {
+  const calibrated = Math.round((rawPercent * 0.973) - 4.65)
+  return Math.max(0, Math.min(100, calibrated))
+}
+
 describe('codex-provider', () => {
   describe('defaultCodexHome()', () => {
     const originalEnv = process.env.CODEX_HOME
@@ -212,7 +217,7 @@ describe('codex-provider', () => {
       contextTokens: 70744,
       modelContextWindow: 200000,
       compactThresholdTokens: explicitLimit,
-      compactPercent: Math.round(((70744 - 12000) / (explicitLimit - 12000)) * 100),
+      compactPercent: calibrateExpectedCodexPercent(Math.round(((70744 - 12000) / (explicitLimit - 12000)) * 100)),
     })
   })
 
@@ -253,8 +258,47 @@ describe('codex-provider', () => {
       contextTokens: 163284,
       modelContextWindow: 258400,
       compactThresholdTokens: expectedLimit,
-      compactPercent: Math.round(((163284 - 12000) / (expectedLimit - 12000)) * 100),
+      compactPercent: calibrateExpectedCodexPercent(Math.round(((163284 - 12000) / (expectedLimit - 12000)) * 100)),
     })
+  })
+
+  it('applies calibrated compact-percent mapping that tracks Codex context-left gauge', () => {
+    const compactLimit = 100000
+    const points = [
+      { totalTokens: 23440, expectedCompactPercent: 8 },  // was 13 before calibration
+      { totalTokens: 38400, expectedCompactPercent: 25 }, // was 30 before calibration
+      { totalTokens: 56000, expectedCompactPercent: 44 }, // was 50 before calibration
+    ]
+
+    for (const point of points) {
+      const content = [
+        JSON.stringify({
+          type: 'session_meta',
+          payload: {
+            id: `session-calibration-${point.totalTokens}`,
+            cwd: '/project/a',
+          },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              last_token_usage: {
+                input_tokens: point.totalTokens,
+                output_tokens: 0,
+                cached_input_tokens: 0,
+                total_tokens: point.totalTokens,
+              },
+              model_auto_compact_token_limit: compactLimit,
+            },
+          },
+        }),
+      ].join('\n')
+
+      const meta = parseCodexSessionContent(content)
+      expect(meta.tokenUsage?.compactPercent).toBe(point.expectedCompactPercent)
+    }
   })
 
   it('prefers last_token_usage snapshot over cumulative total_usage_tokens when context window is missing', () => {
