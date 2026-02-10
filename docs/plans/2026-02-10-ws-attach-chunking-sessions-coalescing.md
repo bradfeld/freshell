@@ -277,8 +277,10 @@ In `server/ws-handler.ts`:
   - this helper is dedicated to attach snapshot sequencing and should not change non-attach send semantics.
 - Add per-terminal-per-connection attach send serialization (promise chaining) so async attach flows cannot interleave.
   - Store chains in `attachSendChains: Map<string, Promise<void>>` keyed by `${connectionId}:${terminalId}`.
+  - Maintain secondary index `attachChainKeysByConnection: Map<string, Set<string>>` for efficient cleanup by connection.
   - On completion/failure, clear map entry in `finally` if it still points to the active promise.
-  - On websocket close, clear all chain keys for that connection ID.
+  - On websocket close, clear all chain keys for that connection ID via the secondary index, then clear the index entry.
+  - Rely on existing websocket close detach behavior to clear `pendingSnapshotClients` server-side for that connection.
 - Add a private class method (inside `WsHandler`) that sends snapshot inline or chunked and finalizes attach only after a complete snapshot send:
 
 ```ts
@@ -305,7 +307,7 @@ Method behavior:
   - If `await queueAttachFrame(...)` returns `true`, schedule `setImmediate(() => this.registry.finishAttachSnapshot(terminalId, ws))`.
 - Chunk path (oversized + capable):
   - Compute chunks first via `chunkTerminalSnapshot(..., effectiveAttachChunkBytes, ...)`.
-  - If chunks are empty, use inline path (do not send `snapshotChunked: true`).
+  - If chunks are empty or a single chunk, use inline path (do not send `snapshotChunked: true`).
   - If `created`, send `terminal.created` with `snapshotChunked: true` and no snapshot body.
   - Send `terminal.attached.start`, each `terminal.attached.chunk`, then `terminal.attached.end` with `totalCodeUnits`, awaiting `queueAttachFrame(...)` at each step.
   - Schedule `setImmediate(() => finishAttachSnapshot(...))` only if all chunk frames were accepted.
@@ -357,12 +359,14 @@ Add lifecycle tests for chunk flow:
 - `totalCodeUnits` mismatch on `terminal.attached.end` drops snapshot (no partial render).
 - `totalChunks` mismatch between advertised and received chunk count drops snapshot (no partial render).
 - `start` vs `end` metadata mismatch (`totalCodeUnits` or `totalChunks`) drops snapshot (no partial render).
+- chunk messages with mismatched `terminalId` for an active chunk sequence are ignored and logged.
+- `terminal.exit` for the same terminal during chunk accumulation cancels the sequence and clears timers/buffers.
 - incomplete stream cleanup:
   - on websocket reconnect/disconnect, buffered chunks for that terminal are dropped.
   - on timeout (no `terminal.attached.end` within `ATTACH_CHUNK_TIMEOUT_MS = 10_000`), buffered chunks are dropped and attach spinner is cleared.
   - on repeated `terminal.attached.start` for same terminal, previous in-flight chunks are replaced.
 - timeout recovery keeps terminal usable for subsequent live output (no permanent error state).
-- timeout recovery performs one guarded auto-reattach attempt (`terminal.detach` then `terminal.attach`) to restore snapshot context; if it fails, continue in degraded live-output-only mode with warning.
+- timeout recovery performs one guarded auto-reattach attempt (`terminal.attach` only, no detach) to restore snapshot context; if it fails, continue in degraded live-output-only mode with warning.
 
 ### Step 2. Implement client behavior
 
@@ -378,11 +382,14 @@ In `TerminalView.tsx`:
 - For `terminal.created`:
   - existing inline snapshot behavior unchanged.
   - if `snapshotChunked: true`, keep attaching state until `terminal.attached.end`.
+- Explicitly skip `setIsAttaching(false)` in the `terminal.created` handler when `snapshotChunked: true`.
 - On reconnect/unmount/detach/terminal change, clear in-flight chunk buffers and timers.
 - On chunk timeout, drop buffered chunks, clear timer, and set `isAttaching` false (do not render partial snapshot).
 - On `terminal.attached.end`, validate `reassembled.length === totalCodeUnits`; if mismatch, discard snapshot and log warning/debug event.
 - On `terminal.attached.end`, validate received chunk count matches `totalChunks`; if mismatch, discard snapshot and log warning/debug event.
 - Validate `start` metadata and `end` metadata agree; on mismatch, discard snapshot and log warning/debug event.
+- Process chunk frames only for the active `terminalId`; ignore unrelated message types and unrelated terminal chunk frames.
+- If `terminal.exit` arrives for the active terminal before `end`, cancel chunk state and transition to exited behavior.
 - Timeout path should not mark pane as errored; keep normal runtime/output handling active.
 - Auto-reattach is attempted at most once per timed-out attach sequence to avoid loops.
 
@@ -473,7 +480,7 @@ Add:
 
 ### Step 3. Wire shutdown
 
-In `server/index.ts` shutdown flow, call `sessionsSync.shutdown()` **before** `wsHandler.close()` so no coalesced timer fires after websocket shutdown starts.
+In `server/index.ts` shutdown flow, call `sessionsSync.shutdown()` as an explicit early shutdown step immediately after `server.close(...)` and before registry/CLI/ws shutdown actions, so no coalesced timer can fire during shutdown.
 
 ### Step 4. Run tests (green)
 
