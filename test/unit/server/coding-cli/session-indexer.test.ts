@@ -247,6 +247,39 @@ describe('CodingCliSessionIndexer', () => {
     expect(sessionId).toBe('canonical-id')
   })
 
+  it('propagates token and git metadata from ParsedSessionMeta into indexed sessions', async () => {
+    const fileA = path.join(tempDir, 'session-a.jsonl')
+    await fsp.writeFile(fileA, JSON.stringify({ cwd: '/project/a', title: 'Title A' }) + '\n')
+
+    const provider: CodingCliProvider = {
+      ...makeProvider([fileA]),
+      parseSessionFile: () => ({
+        cwd: '/project/a',
+        title: 'Title A',
+        messageCount: 1,
+        gitBranch: 'main',
+        isDirty: true,
+        tokenUsage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cachedTokens: 10,
+          totalTokens: 160,
+          contextTokens: 160,
+          compactThresholdTokens: 640,
+          compactPercent: 25,
+        },
+      }),
+    }
+
+    const indexer = new CodingCliSessionIndexer([provider])
+    await indexer.refresh()
+
+    const session = indexer.getProjects()[0]?.sessions[0]
+    expect(session?.gitBranch).toBe('main')
+    expect(session?.isDirty).toBe(true)
+    expect(session?.tokenUsage?.compactPercent).toBe(25)
+  })
+
   it('applies legacy overrides when sessionId differs from filename', async () => {
     const legacyId = 'legacy-id'
     const canonicalId = 'canonical-id'
