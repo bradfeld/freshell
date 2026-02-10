@@ -45,7 +45,8 @@ Read these files before writing code. They define existing behavior to preserve.
 - `src/store/panesSlice.ts` + `src/store/paneTypes.ts` (pane tree state model)
 - `src/components/TerminalView.tsx` (terminal client behavior + reconnect logic)
 - `src/components/panes/BrowserPane.tsx` (browser pane, forwarding, devtools UX)
-- `src/store/crossTabSync.ts` + `src/store/persistMiddleware.ts` (client-local persistence and sync)
+- `src/store/persistMiddleware.ts` (localStorage persistence writes for tabs/panes/workspace state)
+- `src/store/crossTabSync.ts` (cross-tab propagation via storage/broadcast events; separate from persistence)
 - `test/server/*.test.ts`, `test/integration/*`, `test/e2e/*` (behavioral contract)
 
 ## Workspace Setup
@@ -130,8 +131,11 @@ use std::path::PathBuf;
 
 #[test]
 fn rust_smoke_matrix_workflow_exists_and_targets_three_oses() {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../.github/workflows/rust-smoke-matrix.yml");
+    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    while !root.join(".git").exists() {
+        root = root.parent().expect("repo root not found").to_path_buf();
+    }
+    let p = root.join(".github/workflows/rust-smoke-matrix.yml");
     let text = fs::read_to_string(&p).expect("workflow must exist");
     assert!(text.contains("ubuntu-latest"));
     assert!(text.contains("macos-latest"));
@@ -209,6 +213,7 @@ fn ws_schema_covers_all_required_message_families() {
     let server_types = [
         r#"{"type":"ready","timestamp":"2026-02-10T00:00:00Z"}"#,
         r#"{"type":"terminal.created","requestId":"r1","terminalId":"t1","snapshot":"","createdAt":1}"#,
+        r#"{"type":"terminal.attached","terminalId":"t1","snapshot":"hello\n"}"#,
         r#"{"type":"terminal.attached.start","terminalId":"t1","totalBytes":12}"#,
         r#"{"type":"terminal.attached.chunk","terminalId":"t1","seq":0,"data":"aGVsbG8K","isLast":false}"#,
         r#"{"type":"terminal.attached.end","terminalId":"t1","chunks":1}"#,
@@ -357,6 +362,8 @@ pub enum WsServerMessage {
         created_at: u64,
         effective_resume_session_id: Option<String>,
     },
+    #[serde(rename = "terminal.attached")]
+    TerminalAttached { terminal_id: String, snapshot: String },
     #[serde(rename = "terminal.attached.start")]
     TerminalAttachedStart { terminal_id: String, total_bytes: usize },
     #[serde(rename = "terminal.attached.chunk")]
@@ -454,6 +461,7 @@ pub struct TerminalMetaItem {
 ```
 
 Also implement a single outbound WS serializer in `freshell-server` so every server frame, including `terminal.output`, is emitted from `WsServerMessage` instead of ad-hoc JSON payloads.
+Attach compatibility rule: emit `terminal.attached` for non-chunk-capable clients (and small-snapshot fast path), and `terminal.attached.start/chunk/end` for chunk-capable large snapshots.
 
 **Step 4: Run test to verify it passes**
 
@@ -642,7 +650,10 @@ async fn attach_emits_chunked_snapshot_frames_before_live_output() {
     let mut reg = freshell_pty::TerminalRegistry::new_for_test();
     let term_id = reg.create_test_terminal("hello\nworld\n").await;
 
-    let mut stream = reg.attach_stream_for_test(&term_id).await.unwrap();
+    let mut stream = reg
+        .attach_stream_for_test_with_capabilities(&term_id, true)
+        .await
+        .unwrap();
     let start = stream.recv().await.unwrap();
     assert_eq!(start["type"], "terminal.attached.start");
     let first_chunk = stream.recv().await.unwrap();
@@ -654,6 +665,20 @@ async fn attach_emits_chunked_snapshot_frames_before_live_output() {
     let live = stream.recv().await.unwrap();
     assert_eq!(live["type"], "terminal.output");
     assert_eq!(live["data"], "world\n");
+}
+
+#[tokio::test]
+async fn attach_legacy_or_small_snapshot_uses_terminal_attached_variant() {
+    let mut reg = freshell_pty::TerminalRegistry::new_for_test();
+    let term_id = reg.create_test_terminal("tiny\n").await;
+
+    let mut stream = reg
+        .attach_stream_for_test_with_capabilities(&term_id, false)
+        .await
+        .unwrap();
+    let attached = stream.recv().await.unwrap();
+    assert_eq!(attached["type"], "terminal.attached");
+    assert_eq!(attached["terminalId"], term_id);
 }
 
 #[tokio::test]
@@ -685,9 +710,10 @@ Expected: FAIL
 // TerminalRegistry with:
 // - create(mode, shell, cwd, resume_session_id)
 // - chunked attach protocol: terminal.attached.start/chunk/end
+// - fallback attach protocol: terminal.attached for non-chunk-capable clients (and small-snapshot fast path)
 // - attach-begin/finish flow to avoid output loss during snapshot send
 // - detach, input, resize, kill
-// - ring buffer (char-count based, default 64 KiB, configurable)
+// - ring buffer sized by character count (default 64 * 1024 chars, not bytes)
 // - pending snapshot queue + bounded overflow handling
 // - negotiated chunking via hello.capabilities.terminalAttachChunkV1
 ```
@@ -726,6 +752,15 @@ async fn ws_rejects_without_valid_hello_token() {
 
     assert_eq!(close.code, 4001);
 }
+
+#[tokio::test]
+async fn ws_closes_with_4009_on_server_shutdown() {
+    let harness = freshell_server::tests::WsHarness::spawn().await;
+    let mut client = harness.authed_client().await;
+    harness.trigger_shutdown_for_test().await;
+    let close = client.wait_close().await;
+    assert_eq!(close.code, 4009);
+}
 ```
 
 **Step 2: Run test to verify it fails**
@@ -741,7 +776,7 @@ Expected: FAIL
 // - start hello timer (default 5s)
 // - parse hello, verify token, store capabilities (sessionsPatchV1 + terminalAttachChunkV1)
 // - send ready + initial snapshot messages
-// - close with 4001/4002/4003/4008 codes as needed
+// - close with 4001/4002/4003/4008/4009 codes as needed
 ```
 
 **Step 4: Run test to verify it passes**
@@ -772,13 +807,13 @@ git commit -m "feat(ws): implement authenticated hello/ready handshake and close
 async fn oversized_buffered_amount_closes_connection_with_4008() {
     let h = freshell_server::tests::WsHarness::spawn().await;
     let mut c = h.authed_client().await;
-    h.force_client_buffered_amount(&mut c, 3 * 1024 * 1024).await;
+    h.force_client_buffered_amount(&mut c, (2 * 1024 * 1024) + 1).await;
     let close = c.wait_close().await;
     assert_eq!(close.code, 4008);
 }
 
 #[tokio::test]
-async fn pending_snapshot_queue_is_bounded_and_drops_or_closes_on_overflow() {
+async fn pending_snapshot_queue_closes_attach_on_overflow_when_policy_requires_it() {
     let mut reg = freshell_pty::TerminalRegistry::new_for_test_with_overflow_policy(
         freshell_pty::OverflowPolicy::CloseAttachOnOverflow,
     );
@@ -803,7 +838,7 @@ Expected: FAIL
 
 ```rust
 // Mirror source behavior:
-// - close sockets when bufferedAmount exceeds MAX_WS_BUFFERED_AMOUNT (close code 4008)
+// - close sockets when bufferedAmount exceeds MAX_WS_BUFFERED_AMOUNT (2 MiB, close code 4008)
 // - maintain pending snapshot queues per attached client
 // - bound pending queue growth; close/detach when overflow threshold exceeded
 ```
@@ -878,14 +913,22 @@ async fn terminal_create_is_idempotent_by_request_id() {
 async fn terminal_create_is_rate_limited_after_threshold() {
     let h = freshell_server::tests::WsHarness::spawn().await;
     let mut c = h.authed_client().await;
-    for i in 0..12 {
+    for i in 0..10 {
         c.send_json(serde_json::json!({
             "type":"terminal.create",
             "requestId": format!("req-{i}"),
             "mode":"shell",
             "shell":"system"
         })).await;
+        let ok = c.wait_type("terminal.created").await;
+        assert_eq!(ok["requestId"].as_str().unwrap(), format!("req-{i}"));
     }
+    c.send_json(serde_json::json!({
+        "type":"terminal.create",
+        "requestId":"req-10",
+        "mode":"shell",
+        "shell":"system"
+    })).await;
     let err = c.wait_type("error").await;
     assert_eq!(err["code"], "RATE_LIMITED");
 }
@@ -903,7 +946,7 @@ Expected: FAIL
 // Add WS dispatch for:
 // terminal.create, terminal.attach, terminal.detach,
 // terminal.input, terminal.resize, terminal.kill, terminal.list, terminal.meta.list
-// plus request-id idempotency map and create rate limiter.
+// plus request-id idempotency map and create rate limiter (10 terminal.create messages per 10s window).
 // all outbound events must be sent through a typed send_ws(WsServerMessage) helper (no raw JSON bypasses).
 ```
 
@@ -931,6 +974,8 @@ git commit -m "feat(ws): implement full terminal websocket lifecycle commands"
 - Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/opencode.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/gemini.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/providers/kimi.rs`
+- Create: `.worktrees/rust-port/rust/crates/freshell-coding-cli/src/provider_contract.rs`
+- Create: `.worktrees/rust-port/docs/provider-contracts.md`
 - Modify: `.worktrees/rust-port/rust/crates/freshell-server/src/ws/mod.rs`
 - Test: `.worktrees/rust-port/rust/crates/freshell-server/tests/ws_codingcli_lifecycle.rs`
 
@@ -982,6 +1027,10 @@ Expected: FAIL
 // - bounded event buffer and status transitions
 // - stderr passthrough, input forwarding, kill semantics
 // - providers unavailable on host return deterministic typed errors without crashing runtime
+// Provider contract source:
+// - claude/codex: parity from existing provider implementations in server/coding-cli/providers/*
+// - opencode/gemini/kimi: explicit contract doc + golden fixtures in docs/provider-contracts.md and provider_contract.rs
+//   (spawn, stream event shape, stderr text field, kill semantics, unavailable-binary behavior)
 // Wire WS commands/events: codingcli.create/input/kill + created/event/exit/stderr/killed.
 ```
 
@@ -995,7 +1044,7 @@ Expected: PASS
 
 ```bash
 cd .worktrees/rust-port
-git add rust/crates/freshell-coding-cli rust/crates/freshell-server/src/ws/mod.rs rust/crates/freshell-server/tests/ws_codingcli_lifecycle.rs
+git add rust/crates/freshell-coding-cli rust/crates/freshell-server/src/ws/mod.rs rust/crates/freshell-server/tests/ws_codingcli_lifecycle.rs docs/provider-contracts.md
 git commit -m "feat(coding-cli): port coding cli session manager and websocket lifecycle"
 ```
 
@@ -1041,6 +1090,8 @@ Expected: FAIL
 ```rust
 // Define Provider trait + parser impls for claude/codex/opencode/gemini/kimi.
 // Build in-memory index keyed by project_path with sorted sessions.
+// For providers without legacy on-disk formats in current TS source (opencode/gemini/kimi),
+// use canonical event/session JSONL shape defined in docs/provider-contracts.md.
 // Resolve fixture paths via CARGO_MANIFEST_DIR-aware helper so tests run from crate directories.
 ```
 
@@ -1203,10 +1254,10 @@ Expected: FAIL
 ```rust
 // Add publish(next_projects):
 // - diff previous vs next
-// - when patch size <= max bytes:
+// - when patch size <= 500 * 1024 bytes (MAX_WS_CHUNK_BYTES default):
 //   - send sessions.patch to sessionsPatchV1 clients
 //   - send full sessions.updated snapshot to legacy clients
-// - when patch size > max bytes:
+// - when patch size > 500 * 1024 bytes:
 //   - send full sessions.updated snapshot to all clients
 ```
 
@@ -1474,6 +1525,7 @@ git commit -m "feat(web): add wasm app shell with api bootstrap and websocket cl
 - Create: `.worktrees/rust-port/rust/crates/freshell-web/src/js/editor_bridge.rs`
 - Create: `.worktrees/rust-port/rust/crates/freshell-web/js/xterm_bridge.js`
 - Create: `.worktrees/rust-port/rust/crates/freshell-web/js/monaco_bridge.js`
+- Create: `.worktrees/rust-port/rust/crates/freshell-web/js/interop_contract.test.js`
 - Test: `.worktrees/rust-port/rust/crates/freshell-web/tests/js_bridge_contract.rs`
 
 **Step 1: Write the failing test**
@@ -1502,6 +1554,7 @@ Expected: FAIL
 // - wasm-bindgen wrappers for xterm.js mount/write/resize/dispose
 // - wasm-bindgen wrappers for Monaco mount/get/set/dispose
 // - plain JS bridge modules (no TypeScript) as stable boundary
+// - node:test interop contract tests for JS bridge functions
 // - deterministic no-op test doubles for non-browser unit tests
 ```
 
@@ -1613,7 +1666,7 @@ Expected: FAIL
 ```rust
 // Terminal component responsibilities:
 // - send terminal.create with createRequestId
-// - process terminal.created / attached.start / attached.chunk / attached.end / output / exit / error
+// - process terminal.created / terminal.attached / attached.start / attached.chunk / attached.end / output / exit / error
 // - render terminal via xterm.js bridge from Task 12A
 // - resize on visibility/observer events
 // - reconnect attach semantics
@@ -1921,28 +1974,31 @@ git commit -m "feat(tauri): add browser-pane devtools bridge for desktop"
 #[tokio::test]
 async fn ws_protocol_parity_smoke() {
     let h = freshell_server::tests::WsHarness::spawn().await;
-    let mut c = h.authed_client().await;
+    let (mut chunk_capable, mut legacy) = h.two_clients_with_attach_capability_split().await;
 
-    c.send_json(serde_json::json!({
+    chunk_capable.send_json(serde_json::json!({
         "type":"terminal.create",
         "requestId":"req-1",
         "mode":"shell",
         "shell":"system"
     })).await;
-    let created = c.wait_type("terminal.created").await;
+    let created = chunk_capable.wait_type("terminal.created").await;
     assert_eq!(created["requestId"], "req-1");
     let terminal_id = created["terminalId"].as_str().unwrap();
 
-    c.send_json(serde_json::json!({"type":"terminal.attach","terminalId":terminal_id})).await;
-    assert_eq!(c.wait_type("terminal.attached.start").await["terminalId"], terminal_id);
-    assert_eq!(c.wait_type("terminal.attached.chunk").await["terminalId"], terminal_id);
-    assert_eq!(c.wait_type("terminal.attached.end").await["terminalId"], terminal_id);
+    chunk_capable.send_json(serde_json::json!({"type":"terminal.attach","terminalId":terminal_id})).await;
+    assert_eq!(chunk_capable.wait_type("terminal.attached.start").await["terminalId"], terminal_id);
+    assert_eq!(chunk_capable.wait_type("terminal.attached.chunk").await["terminalId"], terminal_id);
+    assert_eq!(chunk_capable.wait_type("terminal.attached.end").await["terminalId"], terminal_id);
 
-    c.send_json(serde_json::json!({"type":"terminal.meta.list","requestId":"meta-1"})).await;
-    assert_eq!(c.wait_type("terminal.meta.list.response").await["requestId"], "meta-1");
+    legacy.send_json(serde_json::json!({"type":"terminal.attach","terminalId":terminal_id})).await;
+    assert_eq!(legacy.wait_type("terminal.attached").await["terminalId"], terminal_id);
+
+    chunk_capable.send_json(serde_json::json!({"type":"terminal.meta.list","requestId":"meta-1"})).await;
+    assert_eq!(chunk_capable.wait_type("terminal.meta.list.response").await["requestId"], "meta-1");
 
     h.publish_sessions_fixture("projects_small").await;
-    let patch_or_snapshot = c.wait_one_of(&["sessions.patch", "sessions.updated"]).await;
+    let patch_or_snapshot = chunk_capable.wait_one_of(&["sessions.patch", "sessions.updated"]).await;
     assert!(patch_or_snapshot["type"] == "sessions.patch" || patch_or_snapshot["type"] == "sessions.updated");
 }
 
@@ -2021,7 +2077,8 @@ Expected: FAIL
     "dev:rport-smoke": "bash test/rust_runtime_smoke.sh",
     "dev": "cargo run --manifest-path rust/Cargo.toml -p freshell-server",
     "build": "cargo build --manifest-path rust/Cargo.toml --workspace",
-    "test": "cargo test --manifest-path rust/Cargo.toml --workspace"
+    "test": "cargo test --manifest-path rust/Cargo.toml --workspace",
+    "test:js-interop": "node --test rust/crates/freshell-web/js/*.test.js"
   }
 }
 ```
@@ -2038,6 +2095,7 @@ Also in this task:
 
 Run:
 - `cd .worktrees/rust-port && bash test/rust_runtime_smoke.sh`
+- `cd .worktrees/rust-port && npm run test:js-interop`
 - `cd .worktrees/rust-port && npm test`
 
 Expected: PASS
