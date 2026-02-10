@@ -56,8 +56,8 @@
 
 2. **Race-free attach completion.**
 - Never call `finishAttachSnapshot` before the full snapshot sequence completes.
-- Keep the existing `setImmediate(() => finishAttachSnapshot(...))` timing model after successful snapshot send completion.
-- Chunk frames may be sent sequentially with explicit enqueue success/failure checks; only finalize attach after `end` is accepted.
+- Chunk frames are sent sequentially with explicit enqueue success/failure checks; only finalize attach after `end` is accepted.
+- With async frame enqueue, call `finishAttachSnapshot` immediately after successful completion of the snapshot send sequence (no additional timer hop).
 
 3. **Partial chunk streams must fail safely.**
 - If socket backpressure/close happens during chunk send, abort the stream and do not call `finishAttachSnapshot`.
@@ -316,14 +316,14 @@ Method behavior:
 - Inline path (small snapshot OR client not chunk-capable):
   - If `created` present, send `terminal.created` with `snapshot`.
   - Else send `terminal.attached` with `snapshot`.
-  - If `await queueAttachFrame(...)` returns `true`, schedule `setImmediate(() => this.registry.finishAttachSnapshot(terminalId, ws))`.
-  - Rationale: `queueAttachFrame` resolves only after frame enqueue callback/close outcome, so `setImmediate` still preserves snapshot-before-output ordering.
+  - If `await queueAttachFrame(...)` returns `true`, call `this.registry.finishAttachSnapshot(terminalId, ws)` immediately.
+  - Rationale: frame enqueue has already completed, and websocket/TCP preserves send order for subsequent output frames.
 - Chunk path (oversized + capable):
   - Compute chunks first via `chunkTerminalSnapshot(..., effectiveAttachChunkBytes, ...)`.
   - If chunks are empty or a single chunk, use inline path (do not send `snapshotChunked: true`).
   - If `created`, send `terminal.created` with `snapshotChunked: true` and no snapshot body.
   - Send `terminal.attached.start`, each `terminal.attached.chunk`, then `terminal.attached.end` with `totalCodeUnits`, awaiting `queueAttachFrame(...)` at each step.
-  - Schedule `setImmediate(() => finishAttachSnapshot(...))` only if all chunk frames were accepted.
+  - Call `finishAttachSnapshot(...)` only if all chunk frames were accepted.
   - If any frame enqueue returns `false`, abort remaining chunks and do not finish attach for that connection.
 
 In `src/lib/ws-client.ts`:
@@ -403,6 +403,7 @@ In `TerminalView.tsx`:
   - existing inline snapshot behavior unchanged.
   - if `snapshotChunked: true`, keep attaching state until `terminal.attached.end`.
 - Explicitly skip `setIsAttaching(false)` in the `terminal.created` handler when `snapshotChunked: true`.
+- When `snapshotChunked: true`, set an explicit local snapshot state (`pending` -> `complete`/`degraded`) so UI behavior is deterministic.
 - On reconnect/unmount/detach/terminal change, clear in-flight chunk buffers and timers.
 - On reconnect/disconnect, clear chunk state immediately and bump generation token so stale chunks from prior connection are ignored.
 - On chunk timeout, drop buffered chunks, clear timer, and set `isAttaching` false (do not render partial snapshot).
@@ -414,6 +415,7 @@ In `TerminalView.tsx`:
 - Timeout path should not mark pane as errored; keep normal runtime/output handling active.
 - Auto-reattach is attempted at most once per timed-out attach sequence to avoid loops.
 - On any end-of-stream validation failure, clear `isAttaching` immediately and run the same one-shot guarded auto-reattach path.
+- If reattach fails, keep pane status as running, mark snapshot state as degraded, and show a one-time warning banner/message.
 
 Suggested local types:
 
@@ -502,7 +504,9 @@ Add:
 
 ### Step 3. Wire shutdown
 
-In `server/index.ts` shutdown flow, call `sessionsSync.shutdown()` as an explicit early shutdown step immediately after `server.close(...)` and before registry/CLI/ws shutdown actions, so no coalesced timer can fire during shutdown.
+In `server/index.ts` shutdown flow:
+- ensure `sessionsSync` is instantiated in `main()` scope that the `shutdown` closure captures.
+- call `sessionsSync.shutdown()` as an explicit early shutdown step immediately after `server.close(...)` and before registry/CLI/ws shutdown actions, so no coalesced timer can fire during shutdown.
 
 ### Step 4. Run tests (green)
 
