@@ -23,7 +23,7 @@ Example: `freshell (main*)  25%` then whitespace, then pane action icons.
 - Codex also applies `effective_context_window_percent` (default `95`) when reporting usable model context.
 
 **Implementation consequence:**
-- Use `last_token_usage.total_tokens` as the active context-usage numerator.
+- Use `total_token_usage.total_tokens` as the active context-usage numerator.
 - 100% should map to compact threshold (not full context window).
 - Threshold formula:
   - preferred: explicit `model_auto_compact_token_limit` when known
@@ -31,10 +31,11 @@ Example: `freshell (main*)  25%` then whitespace, then pane action icons.
 
 ### Claude Code
 - Claude Code auto-compacts when context exceeds `95%` capacity.
+- Claude supports `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` to compact earlier (1-100); values above the default threshold do not increase the threshold.
 - Claude statusline docs expose context usage semantics and default context-window fallback (`200000` tokens) when model data is unavailable.
 
 **Implementation consequence:**
-- 100% maps to `95% of context window`.
+- 100% maps to Claude’s active compact trigger percent (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` when known, else default `95%`).
 - Since Claude stream/session JSON does not provide context-window size directly, use:
   - model-specific context-window map when available
   - fallback `200000`, so compact threshold default is `190000`.
