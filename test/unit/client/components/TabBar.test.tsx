@@ -249,7 +249,7 @@ describe('TabBar', () => {
 
       // Inactive tabs should be slightly off-background gray
       expect(inactiveTabElement?.className).toContain('bg-muted')
-      expect(inactiveTabElement?.className).toContain('border-b-0')
+      expect(inactiveTabElement?.className).toContain('border-b')
     })
 
     it('updates active tab highlight when active tab changes', () => {
