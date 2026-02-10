@@ -279,7 +279,7 @@ In `server/ws-handler.ts`:
   - performs the same backpressure guard behavior as `send` (including `4008` close on overflow) before enqueue.
   - enqueues with `ws.send(payload, callback)` and resolves `false` on callback error.
   - resolves `false` on socket `close` event while frame is in-flight.
-  - includes a bounded send timeout (e.g. 5s) so an in-flight send cannot hang indefinitely.
+  - includes a bounded send timeout `ATTACH_FRAME_SEND_TIMEOUT_MS` (default 30s; env-overridable) so an in-flight send cannot hang indefinitely.
   - on timeout, resolves `false` and proactively closes the socket with `4008` (`Attach send timeout`) to avoid dangling in-flight state.
   - this helper is dedicated to attach snapshot sequencing and should not change non-attach send semantics.
 - Add per-terminal-per-connection attach send serialization (promise chaining) so async attach flows cannot interleave.
@@ -381,8 +381,9 @@ Add lifecycle tests for chunk flow:
 - reconnect/disconnect increments a local connection-generation token and clears all in-flight buffers for prior generation.
 - timeout recovery keeps terminal usable for subsequent live output (no permanent error state).
 - timeout recovery performs one guarded auto-reattach attempt (`terminal.attach` only, no detach) to restore snapshot context; if it fails, continue in degraded live-output-only mode with warning.
+- auto-reattach guard scope: at most one automatic retry per `terminalId` per connection generation; if that retry also fails/times out, no further automatic retries until manual user action or generation changes.
 - Explicit timeout coordination:
-  - server in-flight frame timeout: 5s
+  - server in-flight frame timeout: 30s default (`WS_ATTACH_FRAME_SEND_TIMEOUT_MS`)
   - client chunk completion timeout: 10s
   - ws reconnect min delay after backpressure close: 5s
   - client disconnect cleanup runs immediately and clears chunk buffers before timer fallback.
@@ -393,6 +394,7 @@ In `TerminalView.tsx`:
 - Add `useRef<Map<string, string[]>>` for in-flight attach chunks.
 - Add `useRef<Map<string, number>>` (or equivalent) for per-terminal chunk timeout timers.
 - Add `useRef<number>` (connection generation token) incremented on reconnect/disconnect cleanup.
+- Add `useRef<Set<string>>` for consumed auto-reattach guards keyed by `${terminalId}:${generation}`.
 - Add `const ATTACH_CHUNK_TIMEOUT_MS = 10_000`.
 - Handle:
   - `terminal.attached.start`
@@ -406,6 +408,7 @@ In `TerminalView.tsx`:
 - When `snapshotChunked: true`, set an explicit local snapshot state (`pending` -> `complete`/`degraded`) so UI behavior is deterministic.
 - On reconnect/unmount/detach/terminal change, clear in-flight chunk buffers and timers.
 - On reconnect/disconnect, clear chunk state immediately and bump generation token so stale chunks from prior connection are ignored.
+- Reset auto-reattach guard set when generation changes.
 - On chunk timeout, drop buffered chunks, clear timer, and set `isAttaching` false (do not render partial snapshot).
 - On `terminal.attached.end`, validate `reassembled.length === totalCodeUnits`; if mismatch, discard snapshot and log warning/debug event.
 - On `terminal.attached.end`, validate received chunk count matches `totalChunks`; if mismatch, discard snapshot and log warning/debug event.
@@ -413,7 +416,7 @@ In `TerminalView.tsx`:
 - Process chunk frames only for the active `terminalId`; ignore unrelated message types and unrelated terminal chunk frames.
 - If `terminal.exit` arrives for the active terminal before `end`, cancel chunk state and transition to exited behavior.
 - Timeout path should not mark pane as errored; keep normal runtime/output handling active.
-- Auto-reattach is attempted at most once per timed-out attach sequence to avoid loops.
+- Auto-reattach is attempted at most once per terminal per connection generation; failed retries transition directly to degraded snapshot state without further automatic retries.
 - On any end-of-stream validation failure, clear `isAttaching` immediately and run the same one-shot guarded auto-reattach path.
 - If reattach fails, keep pane status as running, mark snapshot state as degraded, and show a one-time warning banner/message.
 
