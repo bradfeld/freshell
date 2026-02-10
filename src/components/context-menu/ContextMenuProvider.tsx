@@ -193,14 +193,22 @@ export function ContextMenuProvider({
     dispatch(requestPaneRename({ tabId, paneId }))
   }, [dispatch])
 
+  const clearStaleTabTerminalId = useCallback((tabId: string, detachedTerminalId: string) => {
+    const tab = tabsState.tabs.find((t) => t.id === tabId)
+    if (tab?.terminalId === detachedTerminalId) {
+      dispatch(updateTab({ id: tabId, updates: { terminalId: undefined } }))
+    }
+  }, [dispatch, tabsState.tabs])
+
   const replacePaneAction = useCallback((tabId: string, paneId: string) => {
     if (!panes[tabId]) return
     const content = findPaneContent(panes[tabId], paneId)
     if (content?.kind === 'terminal' && content.terminalId) {
       ws.send({ type: 'terminal.detach', terminalId: content.terminalId })
+      clearStaleTabTerminalId(tabId, content.terminalId)
     }
     dispatch(replacePane({ tabId, paneId }))
-  }, [dispatch, panes, ws])
+  }, [dispatch, panes, ws, clearStaleTabTerminalId])
 
   const closeTabById = useCallback((tabId: string) => {
     const layout = panes[tabId]
@@ -699,7 +707,14 @@ export function ContextMenuProvider({
         replacePane: replacePaneAction,
         resetSplit: (tabId, splitId) => dispatch(resetSplit({ tabId, splitId })),
         swapSplit: (tabId, splitId) => dispatch(swapSplit({ tabId, splitId })),
-        closePane: (tabId, paneId) => dispatch(closePane({ tabId, paneId })),
+        closePane: (tabId, paneId) => {
+          const content = findPaneContent(panes[tabId], paneId)
+          if (content?.kind === 'terminal' && content.terminalId) {
+            ws.send({ type: 'terminal.detach', terminalId: content.terminalId })
+            clearStaleTabTerminalId(tabId, content.terminalId)
+          }
+          dispatch(closePane({ tabId, paneId }))
+        },
         getTerminalActions: getTerminalActions,
         getEditorActions: getEditorActions,
         getBrowserActions: getBrowserActions,
@@ -749,6 +764,8 @@ export function ContextMenuProvider({
     moveTab,
     renamePane,
     replacePaneAction,
+    clearStaleTabTerminalId,
+    ws,
     dispatch,
     openSessionInNewTab,
     openSessionInThisTab,

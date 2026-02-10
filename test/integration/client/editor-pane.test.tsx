@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Provider } from 'react-redux'
 import { configureStore } from '@reduxjs/toolkit'
 import panesReducer, { initLayout } from '@/store/panesSlice'
+import tabsReducer from '@/store/tabsSlice'
 import settingsReducer from '@/store/settingsSlice'
 import PaneLayout from '@/components/panes/PaneLayout'
 
@@ -123,6 +124,7 @@ const createTestStore = () =>
   configureStore({
     reducer: {
       panes: panesReducer,
+      tabs: tabsReducer,
       settings: settingsReducer,
     },
   })

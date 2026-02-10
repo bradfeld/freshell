@@ -741,11 +741,8 @@ describe('ContextMenuProvider', () => {
   })
 
   describe('Replace pane', () => {
-    it('detaches terminal and replaces pane with picker via context menu', async () => {
-      const user = userEvent.setup()
-      wsMocks.send.mockClear()
-
-      const store = configureStore({
+    function createStoreWithTerminalPane() {
+      return configureStore({
         reducer: {
           tabs: tabsReducer,
           panes: panesReducer,
@@ -765,6 +762,7 @@ describe('ContextMenuProvider', () => {
                 mode: 'shell',
                 shell: 'system',
                 createdAt: 1,
+                terminalId: 'term-1',
               },
             ],
             activeTabId: 'tab-1',
@@ -796,6 +794,13 @@ describe('ContextMenuProvider', () => {
           },
         },
       })
+    }
+
+    it('detaches terminal and replaces pane with picker via context menu', async () => {
+      const user = userEvent.setup()
+      wsMocks.send.mockClear()
+
+      const store = createStoreWithTerminalPane()
 
       render(
         <Provider store={store}>
@@ -812,11 +817,9 @@ describe('ContextMenuProvider', () => {
         </Provider>
       )
 
-      // Right-click to open context menu
       await user.pointer({ target: screen.getByText('Terminal Content'), keys: '[MouseRight]' })
       expect(screen.getByRole('menu')).toBeInTheDocument()
 
-      // Click "Replace pane"
       await user.click(screen.getByRole('menuitem', { name: 'Replace pane' }))
 
       // Verify terminal.detach was sent via the actual handler
@@ -828,6 +831,10 @@ describe('ContextMenuProvider', () => {
       if (layout.type === 'leaf') {
         expect(layout.content).toEqual({ kind: 'picker' })
       }
+
+      // Verify stale tab.terminalId is cleared
+      expect(store.getState().tabs.tabs[0].terminalId).toBeUndefined()
     })
+
   })
 })

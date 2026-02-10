@@ -4,6 +4,7 @@ import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import PaneContainer from '@/components/panes/PaneContainer'
 import panesReducer from '@/store/panesSlice'
+import tabsReducer from '@/store/tabsSlice'
 import settingsReducer from '@/store/settingsSlice'
 import connectionReducer, { ConnectionState } from '@/store/connectionSlice'
 import type { PanesState } from '@/store/panesSlice'
@@ -115,6 +116,7 @@ function createStore(
   return configureStore({
     reducer: {
       panes: panesReducer,
+      tabs: tabsReducer,
       settings: settingsReducer,
       connection: connectionReducer,
     },
@@ -124,6 +126,10 @@ function createStore(
         activePane: {},
         paneTitles: {},
         ...initialPanesState,
+      },
+      tabs: {
+        tabs: [{ id: 'tab-1', createRequestId: 'tab-1', title: 'Tab 1', mode: 'shell' as const, status: 'running' as const, createdAt: 1 }],
+        activeTabId: 'tab-1',
       },
       connection: {
         status: 'disconnected',
@@ -915,6 +921,7 @@ describe('PaneContainer', () => {
       return configureStore({
         reducer: {
           panes: panesReducer,
+          tabs: tabsReducer,
           settings: settingsReducer,
           connection: connectionReducer,
         },
@@ -923,6 +930,10 @@ describe('PaneContainer', () => {
             layouts: { 'tab-1': node },
             activePane: { 'tab-1': 'pane-1' },
             paneTitles: {},
+          },
+          tabs: {
+            tabs: [{ id: 'tab-1', createRequestId: 'tab-1', title: 'Tab 1', mode: 'shell' as const, status: 'running' as const, createdAt: 1 }],
+            activeTabId: 'tab-1',
           },
           connection: {
             status: 'ready' as const,

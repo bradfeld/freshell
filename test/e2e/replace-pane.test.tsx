@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { configureStore } from '@reduxjs/toolkit'
-import tabsReducer from '@/store/tabsSlice'
-import panesReducer, { replacePane, updatePaneTitle } from '@/store/panesSlice'
+import tabsReducer, { updateTab } from '@/store/tabsSlice'
+import panesReducer, { closePane, replacePane, updatePaneTitle } from '@/store/panesSlice'
 import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import turnCompletionReducer from '@/store/turnCompletionSlice'
@@ -24,7 +24,7 @@ vi.mock('@/lib/ws-client', () => ({
   }),
 }))
 
-function createStore(layout: PaneNode, opts?: { paneTitleSetByUser?: Record<string, Record<string, boolean>> }) {
+function createStore(layout: PaneNode, opts?: { paneTitleSetByUser?: Record<string, Record<string, boolean>>; tabTerminalId?: string }) {
   return configureStore({
     reducer: {
       tabs: tabsReducer,
@@ -44,6 +44,7 @@ function createStore(layout: PaneNode, opts?: { paneTitleSetByUser?: Record<stri
             status: 'running' as const,
             shell: 'system' as const,
             createdAt: Date.now(),
+            terminalId: opts?.tabTerminalId,
           },
         ],
         activeTabId: 'tab-1',
@@ -169,6 +170,126 @@ describe('replace pane (e2e)', () => {
     const state = store.getState().panes
     expect(state.paneTitles['tab-1']['pane-1']).toBe('New Tab')
     expect(state.paneTitleSetByUser['tab-1']?.['pane-1']).toBeUndefined()
+  })
+
+  describe('tab.terminalId cleanup', () => {
+    it('clears stale tab.terminalId when replacing pane with matching terminal', () => {
+      const layout: PaneNode = {
+        type: 'leaf',
+        id: 'pane-1',
+        content: {
+          kind: 'terminal',
+          createRequestId: 'req-1',
+          status: 'running',
+          mode: 'shell',
+          shell: 'system',
+          terminalId: 'term-1',
+        },
+      }
+      const store = createStore(layout, { tabTerminalId: 'term-1' })
+
+      // Verify tab.terminalId is set
+      expect(store.getState().tabs.tabs[0].terminalId).toBe('term-1')
+
+      // Simulate what replacePaneAction does: detach + clear stale tab.terminalId + dispatch
+      const content = findPaneContent(store.getState().panes.layouts['tab-1'], 'pane-1')
+      if (content?.kind === 'terminal' && content.terminalId) {
+        wsMocks.send({ type: 'terminal.detach', terminalId: content.terminalId })
+        const tab = store.getState().tabs.tabs.find((t) => t.id === 'tab-1')
+        if (tab?.terminalId === content.terminalId) {
+          store.dispatch(updateTab({ id: 'tab-1', updates: { terminalId: undefined } }))
+        }
+      }
+      store.dispatch(replacePane({ tabId: 'tab-1', paneId: 'pane-1' }))
+
+      // tab.terminalId should be cleared
+      expect(store.getState().tabs.tabs[0].terminalId).toBeUndefined()
+    })
+
+    it('does not clear tab.terminalId when pane terminal does not match', () => {
+      const layout: PaneNode = {
+        type: 'leaf',
+        id: 'pane-1',
+        content: {
+          kind: 'terminal',
+          createRequestId: 'req-1',
+          status: 'running',
+          mode: 'shell',
+          shell: 'system',
+          terminalId: 'term-2',
+        },
+      }
+      // tab.terminalId is 'term-1' but pane has 'term-2'
+      const store = createStore(layout, { tabTerminalId: 'term-1' })
+
+      const content = findPaneContent(store.getState().panes.layouts['tab-1'], 'pane-1')
+      if (content?.kind === 'terminal' && content.terminalId) {
+        const tab = store.getState().tabs.tabs.find((t) => t.id === 'tab-1')
+        if (tab?.terminalId === content.terminalId) {
+          store.dispatch(updateTab({ id: 'tab-1', updates: { terminalId: undefined } }))
+        }
+      }
+      store.dispatch(replacePane({ tabId: 'tab-1', paneId: 'pane-1' }))
+
+      // tab.terminalId should NOT be cleared (different terminal)
+      expect(store.getState().tabs.tabs[0].terminalId).toBe('term-1')
+    })
+
+    it('clears stale tab.terminalId when closing pane with matching terminal', () => {
+      const layout: PaneNode = {
+        type: 'split',
+        id: 'split-1',
+        direction: 'horizontal',
+        sizes: [50, 50],
+        children: [
+          {
+            type: 'leaf',
+            id: 'pane-1',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-1',
+              status: 'running',
+              mode: 'shell',
+              shell: 'system',
+              terminalId: 'term-1',
+            },
+          },
+          {
+            type: 'leaf',
+            id: 'pane-2',
+            content: {
+              kind: 'terminal',
+              createRequestId: 'req-2',
+              status: 'running',
+              mode: 'shell',
+              shell: 'system',
+              terminalId: 'term-2',
+            },
+          },
+        ],
+      }
+      const store = createStore(layout, { tabTerminalId: 'term-1' })
+
+      // Simulate PaneContainer.handleClose: detach + clear stale + dispatch closePane
+      const content = findPaneContent(store.getState().panes.layouts['tab-1'], 'pane-1')
+      if (content?.kind === 'terminal' && content.terminalId) {
+        wsMocks.send({ type: 'terminal.detach', terminalId: content.terminalId })
+        const tab = store.getState().tabs.tabs.find((t) => t.id === 'tab-1')
+        if (tab?.terminalId === content.terminalId) {
+          store.dispatch(updateTab({ id: 'tab-1', updates: { terminalId: undefined } }))
+        }
+      }
+      store.dispatch(closePane({ tabId: 'tab-1', paneId: 'pane-1' }))
+
+      // tab.terminalId should be cleared
+      expect(store.getState().tabs.tabs[0].terminalId).toBeUndefined()
+      // pane-2 should remain
+      const remaining = store.getState().panes.layouts['tab-1']
+      expect(remaining.type).toBe('leaf')
+      if (remaining.type === 'leaf') {
+        expect(remaining.id).toBe('pane-2')
+      }
+    })
   })
 
   it('replaces one pane in a split without affecting the other', () => {
