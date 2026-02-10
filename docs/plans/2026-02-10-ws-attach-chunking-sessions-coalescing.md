@@ -55,9 +55,9 @@
 - Non-capable clients keep current inline behavior (compatibility fallback).
 
 2. **Race-free attach completion.**
-- Do not yield between snapshot chunks.
-- Keep the existing `setImmediate(() => finishAttachSnapshot(...))` timing model.
-- Schedule `finishAttachSnapshot` exactly once, only after the final inline or chunked snapshot frame is queued.
+- Never call `finishAttachSnapshot` before the full snapshot sequence completes.
+- Keep the existing `setImmediate(() => finishAttachSnapshot(...))` timing model after successful snapshot send completion.
+- Chunk frames may be sent sequentially with explicit enqueue success/failure checks; only finalize attach after `end` is accepted.
 
 3. **Partial chunk streams must fail safely.**
 - If socket backpressure/close happens during chunk send, abort the stream and do not call `finishAttachSnapshot`.
@@ -78,7 +78,7 @@
 
 7. **Chunking algorithm cost is bounded for current limits.**
 - With `MAX_CHUNK_BYTES` (from env `MAX_WS_CHUNK_BYTES`) defaulting to ~500KB and snapshot upper bound 2MB, attach chunking is typically <= 4 chunks.
-- The helper should avoid wasteful repeated full-envelope serialization in hot loops; precompute constant envelope costs where possible.
+- The helper should avoid wasteful repeated full-object envelope serialization in hot loops; precompute stable envelope fragments where possible.
 - Acceptance target: chunking a 2MB snapshot should stay within practical single-digit to low-double-digit milliseconds on dev hardware; treat >100ms as a regression to optimize.
 
 ---
@@ -139,6 +139,7 @@ Add tests for `chunkTerminalSnapshot(snapshot, maxBytes, terminalId)`:
 - returns single chunk for small snapshot.
 - splits large snapshot into multiple chunks under byte limit using real envelope.
 - handles unicode text and round-trips exactly.
+- does not split surrogate pairs across chunk boundaries.
 - honors long terminal IDs (simulate nanoid-length IDs).
 - throws clear error when `maxBytes` is too small for minimal chunk envelope.
 - preserves empty snapshot behavior (`[]`) so caller can choose inline path.
@@ -167,11 +168,11 @@ In `server/ws-handler.ts`:
 export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, terminalId: string): string[] {
   if (!snapshot) return []
 
-  const envelopeBytes = Buffer.byteLength(JSON.stringify({
-    type: 'terminal.attached.chunk',
-    terminalId,
-    chunk: '',
-  }))
+  const prefix = `{"type":"terminal.attached.chunk","terminalId":${JSON.stringify(terminalId)},"chunk":`
+  const suffix = '}'
+  const payloadBytes = (chunk: string) =>
+    Buffer.byteLength(prefix) + Buffer.byteLength(JSON.stringify(chunk)) + Buffer.byteLength(suffix)
+  const envelopeBytes = payloadBytes('')
 
   if (envelopeBytes + 1 > maxBytes) {
     throw new Error('MAX_WS_CHUNK_BYTES too small for terminal.attached.chunk envelope')
@@ -188,11 +189,7 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, termin
     while (lo <= hi) {
       const mid = Math.floor((lo + hi) / 2)
       const candidate = snapshot.slice(cursor, mid)
-      const bytes = Buffer.byteLength(JSON.stringify({
-        type: 'terminal.attached.chunk',
-        terminalId,
-        chunk: candidate,
-      }))
+      const bytes = payloadBytes(candidate)
       if (bytes <= maxBytes) {
         best = mid
         lo = mid + 1
@@ -201,7 +198,23 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, termin
       }
     }
 
-    if (best === cursor) throw new Error('Unable to chunk snapshot safely within max byte budget')
+    if (best === cursor) {
+      // Fall back to exactly one full code point to avoid splitting surrogate pairs.
+      const cp = snapshot.codePointAt(cursor)
+      const next = cursor + (cp !== undefined && cp > 0xFFFF ? 2 : 1)
+      const candidate = snapshot.slice(cursor, next)
+      if (payloadBytes(candidate) > maxBytes) {
+        throw new Error('Unable to chunk snapshot safely within max byte budget')
+      }
+      best = next
+    } else if (best < snapshot.length) {
+      // If boundary lands between high+low surrogate, step back one code unit.
+      const prev = snapshot.charCodeAt(best - 1)
+      const next = snapshot.charCodeAt(best)
+      const prevIsHigh = prev >= 0xd800 && prev <= 0xdbff
+      const nextIsLow = next >= 0xdc00 && next <= 0xdfff
+      if (prevIsHigh && nextIsLow) best -= 1
+    }
 
     chunks.push(snapshot.slice(cursor, best))
     cursor = best
@@ -219,7 +232,7 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, termin
 
 ```bash
 git add test/unit/server/ws-chunking.test.ts server/ws-handler.ts
-git commit -m "test(ws): add byte-accurate terminal snapshot chunking helper coverage"
+git commit -m "feat(ws): add byte-accurate terminal snapshot chunking helper and coverage"
 ```
 
 ---
@@ -236,6 +249,7 @@ In `test/server/ws-edge-cases.test.ts`, add tests asserting:
 2. `terminal.output` queued during attach is emitted only after `terminal.attached.end`.
 3. Large `terminal.create` snapshot paths also use chunk flow (at minimum one create path; ideally cover reused + new).
 4. If connection closes mid-chunk stream, snapshot stream aborts and no attach-finalization flush occurs for that connection.
+5. Empty snapshots always use inline path and never advertise `snapshotChunked: true`.
 
 Note: this file uses `FakeRegistry.simulateOutput(...)` intentionally (test helper, not production `TerminalRegistry`).
 
@@ -247,14 +261,15 @@ In `server/ws-handler.ts`:
 - Extend `ClientState` with `supportsTerminalAttachChunkV1`.
 - Parse new hello capability.
 - Keep existing `send(ws, msg)` signature unchanged.
-- Add `queueAttachFrame(ws, msg): boolean` helper for attach snapshot flow only:
-  - returns `false` if socket is not open before send.
-  - calls existing `send(ws, msg)`.
-  - returns `ws.readyState === WebSocket.OPEN` after send (captures backpressure-close path).
+- Add `queueAttachFrame(ws, msg): Promise<boolean>` helper for attach snapshot flow only:
+  - resolves `false` if socket is not open before send.
+  - enqueues with `ws.send(payload, callback)` and resolves `false` on callback error.
+  - resolves `false` if socket transitions out of `OPEN` before callback completes.
+  - keeps backpressure-close behavior consistent with existing guard logic.
 - Add a private class method (inside `WsHandler`) that sends snapshot inline or chunked and finalizes attach only after a complete snapshot send:
 
 ```ts
-private sendAttachSnapshotAndFinalize(
+private async sendAttachSnapshotAndFinalize(
   ws: LiveWebSocket,
   state: ClientState,
   args: {
@@ -266,21 +281,22 @@ private sendAttachSnapshotAndFinalize(
       effectiveResumeSessionId?: string
     }
   }
-): void
+): Promise<void>
 ```
 
 Method behavior:
+- Decide inline vs chunked **before** sending any frame.
 - Inline path (small snapshot OR client not chunk-capable):
   - If `created` present, send `terminal.created` with `snapshot`.
   - Else send `terminal.attached` with `snapshot`.
-  - If `queueAttachFrame` returns `true`, schedule `setImmediate(() => this.registry.finishAttachSnapshot(terminalId, ws))`.
+  - If `await queueAttachFrame(...)` returns `true`, schedule `setImmediate(() => this.registry.finishAttachSnapshot(terminalId, ws))`.
 - Chunk path (oversized + capable):
+  - Compute chunks first via `chunkTerminalSnapshot(...)`.
+  - If chunks are empty, use inline path (do not send `snapshotChunked: true`).
   - If `created`, send `terminal.created` with `snapshotChunked: true` and no snapshot body.
-  - Chunk with `chunkTerminalSnapshot(snapshot, MAX_CHUNK_BYTES, terminalId)`.
-  - If chunk helper returns `[]`, send inline snapshot path instead (no empty chunk stream).
-  - Send `terminal.attached.start`, each `terminal.attached.chunk`, then `terminal.attached.end` with `totalCodeUnits`, checking `queueAttachFrame(...)` before continuing.
+  - Send `terminal.attached.start`, each `terminal.attached.chunk`, then `terminal.attached.end` with `totalCodeUnits`, awaiting `queueAttachFrame(...)` at each step.
   - Schedule `setImmediate(() => finishAttachSnapshot(...))` only if all chunk frames were accepted.
-  - If any frame enqueue returns `false`, abort remaining chunks and do not finish attach for that connection (connection is expected to close or already be closed).
+  - If any frame enqueue returns `false`, abort remaining chunks and do not finish attach for that connection.
 
 ### Step 3. Replace all four snapshot callsites
 
@@ -323,10 +339,12 @@ Add lifecycle tests for chunk flow:
 - `terminal.attached.end` clears terminal, writes reassembled snapshot once, sets status running, and sets attaching false.
 - `terminal.created` with `snapshotChunked: true` does not prematurely clear attaching state.
 - `totalCodeUnits` mismatch on `terminal.attached.end` drops snapshot (no partial render).
+- `totalChunks` mismatch between advertised and received chunk count drops snapshot (no partial render).
 - incomplete stream cleanup:
   - on websocket reconnect/disconnect, buffered chunks for that terminal are dropped.
   - on timeout (no `terminal.attached.end` within `ATTACH_CHUNK_TIMEOUT_MS = 10_000`), buffered chunks are dropped and attach spinner is cleared.
   - on repeated `terminal.attached.start` for same terminal, previous in-flight chunks are replaced.
+- timeout recovery keeps terminal usable for subsequent live output (no permanent error state).
 
 ### Step 2. Implement client behavior
 
@@ -345,6 +363,8 @@ In `TerminalView.tsx`:
 - On reconnect/unmount/detach/terminal change, clear in-flight chunk buffers and timers.
 - On chunk timeout, drop buffered chunks, clear timer, and set `isAttaching` false (do not render partial snapshot).
 - On `terminal.attached.end`, validate `reassembled.length === totalCodeUnits`; if mismatch, discard snapshot and log warning/debug event.
+- On `terminal.attached.end`, validate received chunk count matches `totalChunks`; if mismatch, discard snapshot and log warning/debug event.
+- Timeout path should not mark pane as errored; keep normal runtime/output handling active.
 
 Suggested local types:
 
@@ -411,6 +431,10 @@ Publish logic:
 - no active timer: flush immediately, start window timer.
 - active timer: overwrite `pendingTrailing` with latest.
 - timer callback flushes pendingTrailing once (if present); if it flushed, start next window; if nothing pending, stop timer.
+- In `flush(next)`, preserve existing patch-size fallback:
+  - compute patch diff.
+  - if patch payload exceeds `MAX_CHUNK_BYTES`, send full `sessions.updated` fallback (`broadcastSessionsUpdated(next)`) exactly as current behavior.
+  - otherwise keep patch-first (`broadcastSessionsPatch`) + legacy snapshot (`broadcastSessionsUpdatedToLegacy`) behavior.
 
 Diff timing contract:
 - `pendingTrailing` stores raw `ProjectGroup[]`.
