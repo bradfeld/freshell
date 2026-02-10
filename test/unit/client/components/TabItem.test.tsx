@@ -55,7 +55,8 @@ describe('TabItem', () => {
     render(<TabItem {...defaultProps} isActive={true} />)
     const tabElement = screen.getByText('Test Tab').closest('div[class*="group"]')
     expect(tabElement?.className).toContain('bg-background')
-    expect(tabElement?.className).toContain('border-muted-foreground/45')
+    expect(tabElement?.className).toContain('border-b-0')
+    expect(tabElement?.className).toContain('-mb-px')
   })
 
   it('applies dragging opacity when isDragging is true', () => {

@@ -228,10 +228,12 @@ describe('TabBar', () => {
       // Active tab should match the app background and keep an outline
       expect(activeTabElement?.className).toContain('bg-background')
       expect(activeTabElement?.className).toContain('text-foreground')
-      expect(activeTabElement?.className).toContain('border-muted-foreground/45')
+      expect(activeTabElement?.className).toContain('border-b-0')
+      expect(activeTabElement?.className).toContain('-mb-px')
 
       // Inactive tabs should be slightly off-background gray
       expect(inactiveTabElement?.className).toContain('bg-muted')
+      expect(inactiveTabElement?.className).toContain('border-b-0')
     })
 
     it('updates active tab highlight when active tab changes', () => {
