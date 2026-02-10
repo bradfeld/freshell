@@ -1,80 +1,112 @@
-# Pane Header Metadata (cwd/worktree/tokens) Implementation Plan
+# Pane Header Runtime Metadata (cwd/branch-dirty/token %) Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Show live `cwd`, worktree/repo context, and token usage in pane headers for Codex and Claude terminal panes, with robust server->client metadata synchronization.
+**Goal:** For Codex and Claude terminal panes, render right-aligned runtime metadata in the pane title bar as:
 
-**Architecture:** Introduce a dedicated terminal metadata channel in the server (`terminal.meta.*`), sourced from terminal registry + coding-cli session indexing. Keep metadata in a non-persisted client Redux slice keyed by `terminalId`, then render compact chips in `PaneHeader` for coding CLI terminal panes. Parse provider token usage from authoritative session event formats (Codex `token_count.info.*`, Claude assistant usage) and broadcast updates when metadata changes.
+`<subdir> (<branch><*if dirty>)  <percentUsedToCompact>%  [existing header icons]`
+
+Example: `freshell (main*)  25%` then whitespace, then pane action icons.
+
+**Architecture:** Keep terminal runtime metadata server-authoritative (`terminal.meta.*` over WS), store it in a non-persisted Redux slice keyed by `terminalId`, and render a single formatted right-aligned string in `PaneHeader`. Metadata is sourced from terminal registry + coding-cli session indexer + provider token parsing.
 
 **Tech Stack:** TypeScript, Node/Express/WebSocket (`ws`), Redux Toolkit, React, Vitest, Testing Library.
+
+---
+
+## External Research Findings (Used to Define 100%)
+
+### Codex
+- Codex token-count event schema is nested at `event_msg.payload.info.{total_token_usage,last_token_usage,model_context_window}`.
+- Codex compacts when `total_usage_tokens >= auto_compact_limit`.
+- `auto_compact_limit` defaults to `90%` of model `context_window` when not explicitly configured.
+- Codex also applies `effective_context_window_percent` (default `95`) when reporting usable model context.
+
+**Implementation consequence:**
+- Use `last_token_usage.total_tokens` as the active context-usage numerator.
+- 100% should map to compact threshold (not full context window).
+- Threshold formula:
+  - preferred: explicit `model_auto_compact_token_limit` when known
+  - fallback: `model_context_window * (90 / 95)` (default-behavior estimate)
+
+### Claude Code
+- Claude Code auto-compacts when context exceeds `95%` capacity.
+- Claude statusline docs expose context usage semantics and default context-window fallback (`200000` tokens) when model data is unavailable.
+
+**Implementation consequence:**
+- 100% maps to `95% of context window`.
+- Since Claude stream/session JSON does not provide context-window size directly, use:
+  - model-specific context-window map when available
+  - fallback `200000`, so compact threshold default is `190000`.
+
+### Scope note
+- Token-to-compact percentage is implemented for `codex` and `claude` only in this iteration.
+- `opencode/gemini/kimi` continue to receive cwd/branch metadata where available, but no guaranteed `% to compact`.
 
 ---
 
 ## Scope and constraints
 
 - Single branch / single PR delivery.
-- TDD throughout: red -> green -> refactor for each task.
-- Keep persisted pane layout schema untouched (metadata is runtime-only).
-- Backward-compatible protocol changes (new WS message types, no breaking changes).
+- TDD throughout: red -> green -> refactor per task.
+- Keep persisted pane layout schema untouched (runtime-only metadata).
+- Backward-compatible WS protocol additions only.
+- Existing behavior in `App.tsx` message handlers (notably `terminal.exit` idle-warning cleanup) must be preserved.
 
 ---
 
-### Task 1: Add Git root helpers for checkout root vs canonical repo root
+### Task 1: Add explicit Git checkout-root + branch/dirty helpers (no ambiguity)
 
 **Files:**
 - Modify: `server/coding-cli/utils.ts`
 - Modify: `test/unit/server/coding-cli/resolve-git-root.test.ts`
+- Create: `test/unit/server/coding-cli/git-metadata.test.ts`
 
-**Step 1: Write failing tests for checkout-root behavior**
+**Step 1: Write failing tests for checkout-root semantics**
 
-Add tests that prove:
-- `resolveGitCheckoutRoot(worktreeDir/deep/path)` returns the worktree checkout root.
-- `resolveGitRepoRoot(worktreeDir/deep/path)` still returns canonical parent repo root.
+Add tests that explicitly distinguish:
+- `resolveGitCheckoutRoot()` returns the directory that contains `.git`.
+- For worktrees, `resolveGitCheckoutRoot()` returns worktree dir, while `resolveGitRepoRoot()` returns canonical parent repo root.
 - Submodule checkout root remains submodule root.
 
 ```ts
-it('returns worktree checkout root for nested path', async () => {
-  expect(await resolveGitCheckoutRoot(path.join(worktreeDir, 'src', 'deep'))).toBe(worktreeDir)
-})
+expect(await resolveGitCheckoutRoot(path.join(worktreeDir, 'src', 'deep'))).toBe(worktreeDir)
+expect(await resolveGitRepoRoot(path.join(worktreeDir, 'src', 'deep'))).toBe(parentRepoDir)
 ```
 
-**Step 2: Run targeted tests to confirm failure**
+**Step 2: Write failing tests for branch+dirty resolution**
 
-Run: `npm test -- test/unit/server/coding-cli/resolve-git-root.test.ts`
-Expected: FAIL with `resolveGitCheckoutRoot is not defined` or missing export.
+Add tests for new helper (e.g. `resolveGitBranchAndDirty(cwd)`):
+- returns `branch` from git metadata.
+- returns `isDirty` true when porcelain status has entries.
+- handles non-git directories gracefully.
 
-**Step 3: Implement `resolveGitCheckoutRoot()` and shared traversal helpers**
+**Step 3: Implement helpers with explicit behavior**
 
 In `server/coding-cli/utils.ts`:
-- Add `resolveGitCheckoutRoot(cwd: string): Promise<string>`.
-- Reuse normalization/walk logic.
-- Return directory containing `.git` (file or directory) as checkout root.
-- Keep `resolveGitRepoRoot()` behavior unchanged.
+- add `resolveGitCheckoutRoot(cwd)` with explicit worktree behavior:
+  - when `.git` is a file (worktree), return directory containing that `.git` file
+  - do **not** resolve through `commondir` for checkout root
+- add `resolveGitBranchAndDirty(cwd)` for branch + dirty state.
 
-```ts
-export async function resolveGitCheckoutRoot(cwd: string): Promise<string> {
-  // normalize input
-  // walk up for .git
-  // return directory where .git is found
-  // fallback to normalized cwd
-}
-```
+**Step 4: Run targeted tests**
 
-**Step 4: Re-run targeted tests**
+Run:
+- `npm test -- test/unit/server/coding-cli/resolve-git-root.test.ts`
+- `npm test -- test/unit/server/coding-cli/git-metadata.test.ts`
 
-Run: `npm test -- test/unit/server/coding-cli/resolve-git-root.test.ts`
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add server/coding-cli/utils.ts test/unit/server/coding-cli/resolve-git-root.test.ts
-git commit -m "feat(coding-cli): add checkout-root resolver alongside canonical repo-root resolution"
+git add server/coding-cli/utils.ts test/unit/server/coding-cli/resolve-git-root.test.ts test/unit/server/coding-cli/git-metadata.test.ts
+git commit -m "feat(coding-cli): add explicit checkout-root and git branch/dirty metadata helpers"
 ```
 
 ---
 
-### Task 2: Fix and harden provider token parsing (Codex + Claude)
+### Task 2: Fix provider token parsing with current schemas (Codex + Claude)
 
 **Files:**
 - Modify: `server/coding-cli/types.ts`
@@ -83,70 +115,73 @@ git commit -m "feat(coding-cli): add checkout-root resolver alongside canonical 
 - Modify: `test/unit/server/coding-cli/codex-provider.test.ts`
 - Modify: `test/unit/server/coding-cli/claude-provider.test.ts`
 
-**Step 1: Add failing tests for Codex `token_count.info` format**
+**Step 1: Add failing Codex tests for nested `token_count.info` format**
 
-Add a test that feeds:
-- `event_msg.payload.type = "token_count"`
-- nested `payload.info.total_token_usage` and `payload.info.last_token_usage`
-
-Expect normalized `token.usage` event with totals from `total_token_usage`.
+Cover:
+- parse `event_msg.payload.type = token_count` with nested `payload.info`.
+- prefer `info.last_token_usage.total_tokens` for context usage.
+- keep compatibility fallback for legacy flat payload shape.
+- parse `session_meta.payload.git.branch` when present.
 
 ```ts
 expect(events[0]).toMatchObject({
   type: 'token.usage',
   tokens: { inputTokens: 120, outputTokens: 30, cachedTokens: 40 },
 })
+expect(meta.tokenUsage?.contextTokens).toBe(51200)
+expect(meta.gitBranch).toBe('main')
 ```
 
-**Step 2: Add failing tests for Claude usage aggregation from session file**
+**Step 2: Add failing Claude tests for usage aggregation from real session structure**
 
-Add parse-session tests that:
-- include multiple assistant records with `message.usage`.
-- include duplicated assistant `message.id` (should not double-count).
-- expect aggregated totals in parsed metadata.
+Cover parse-session aggregation from assistant message usage fields:
+- `message.usage.input_tokens`
+- `message.usage.output_tokens`
+- `message.usage.cache_read_input_tokens`
+- `message.usage.cache_creation_input_tokens`
+- dedupe repeated assistant records by `message.id`.
 
 ```ts
 expect(meta.tokenUsage).toEqual({
   inputTokens: 20,
   outputTokens: 9,
   cachedTokens: 12,
-  totalTokens: 29,
+  totalTokens: 41,
 })
 ```
 
-**Step 3: Run focused provider tests to confirm failures**
-
-Run:
-- `npm test -- test/unit/server/coding-cli/codex-provider.test.ts`
-- `npm test -- test/unit/server/coding-cli/claude-provider.test.ts`
-
-Expected: FAIL in new token assertions.
-
-**Step 4: Implement provider parsing updates**
+**Step 3: Extend shared types explicitly (no hidden fields)**
 
 In `server/coding-cli/types.ts`:
-- extend parsed metadata/session types with optional token summary:
+- add `TokenSummary`.
+- add `tokenUsage?: TokenSummary` to both `ParsedSessionMeta` and `CodingCliSession`.
+- keep `TokenPayload` intact for live normalized events; document relationship clearly.
 
 ```ts
 export interface TokenSummary {
   inputTokens: number
   outputTokens: number
-  cachedTokens?: number
+  cachedTokens: number
   totalTokens: number
+  contextTokens?: number
+  modelContextWindow?: number
+  compactThresholdTokens?: number
+  compactPercent?: number
 }
 ```
 
-In `server/coding-cli/providers/codex.ts`:
-- parse `token_count` from `payload.info.total_token_usage`.
-- support fallback shape for legacy logs only if nested shape absent.
-- in `parseCodexSessionContent`, keep latest token totals encountered.
+**Step 4: Implement provider parsing**
 
-In `server/coding-cli/providers/claude.ts`:
-- aggregate assistant usage across file parse.
-- dedupe by assistant message ID.
-- map cache read + cache creation into `cachedTokens`.
+- `codex.ts`:
+  - parse nested `payload.info` first.
+  - fallback to legacy flat fields if nested missing.
+  - compute compact percentage from Codex threshold rules (from research section).
+- `claude.ts`:
+  - aggregate assistant usage across parse pass.
+  - dedupe by assistant `message.id`.
+  - compute `compactThresholdTokens` using Claude 95% rule + context-window fallback.
 
-**Step 5: Re-run focused tests**
+**Step 5: Run focused tests**
 
 Run:
 - `npm test -- test/unit/server/coding-cli/codex-provider.test.ts`
@@ -158,223 +193,196 @@ Expected: PASS.
 
 ```bash
 git add server/coding-cli/types.ts server/coding-cli/providers/codex.ts server/coding-cli/providers/claude.ts test/unit/server/coding-cli/codex-provider.test.ts test/unit/server/coding-cli/claude-provider.test.ts
-git commit -m "fix(coding-cli): parse current codex token_count schema and aggregate claude usage totals"
+git commit -m "fix(coding-cli): parse current codex token_count schema and aggregate claude usage for compact-percent"
 ```
 
 ---
 
-### Task 3: Carry token metadata through session indexing
+### Task 3: Propagate token + git metadata through session indexing
 
 **Files:**
 - Modify: `server/coding-cli/session-indexer.ts`
 - Modify: `test/unit/server/coding-cli/session-indexer.test.ts`
 
-**Step 1: Add failing indexer test for token propagation**
+**Step 1: Add failing indexer tests**
 
-Add a test that injects provider parse metadata with token summary and verifies indexed session includes `tokenUsage`.
-
-```ts
-expect(projects[0].sessions[0].tokenUsage?.totalTokens).toBe(420)
-```
-
-**Step 2: Run focused indexer test**
-
-Run: `npm test -- test/unit/server/coding-cli/session-indexer.test.ts`
-Expected: FAIL on missing `tokenUsage`.
-
-**Step 3: Implement propagation in `session-indexer.ts`**
-
-When creating `baseSession`, include:
+Verify indexed sessions include:
+- `tokenUsage`
+- `gitBranch`
+- `isDirty` (when metadata present)
 
 ```ts
-tokenUsage: meta.tokenUsage,
+expect(projects[0].sessions[0].tokenUsage?.compactPercent).toBe(25)
+expect(projects[0].sessions[0].gitBranch).toBe('main')
 ```
 
-Ensure this survives override application and grouping.
+**Step 2: Implement propagation**
 
-**Step 4: Re-run focused test**
+When constructing `baseSession`, propagate metadata from `ParsedSessionMeta` to `CodingCliSession` explicitly.
+
+**Step 3: Run focused tests**
 
 Run: `npm test -- test/unit/server/coding-cli/session-indexer.test.ts`
+
+Expected: PASS.
+
+**Step 4: Commit**
+
+```bash
+git add server/coding-cli/session-indexer.ts test/unit/server/coding-cli/session-indexer.test.ts
+git commit -m "feat(indexer): propagate token and git metadata into coding-cli session records"
+```
+
+---
+
+### Task 4: Add terminal metadata service with explicit data sources
+
+**Files:**
+- Create: `server/terminal-metadata-service.ts`
+- Create: `test/unit/server/terminal-metadata-service.test.ts`
+
+**Step 1: Define concrete model and method contracts**
+
+```ts
+type TerminalMeta = {
+  terminalId: string
+  cwd?: string
+  checkoutRoot?: string
+  repoRoot?: string
+  displaySubdir?: string
+  branch?: string
+  isDirty?: boolean
+  provider?: 'claude' | 'codex' | 'opencode' | 'gemini' | 'kimi'
+  sessionId?: string
+  tokenUsage?: TokenSummary
+  compactPercent?: number
+  updatedAt: number
+}
+```
+
+Methods:
+- `seedFromTerminal(record: ReturnType<TerminalRegistry['list']>[number])`
+- `associateSession(terminalId, provider, sessionId)`
+- `applySessionMetadata(terminalId, session)`
+- `list()`
+- `remove(terminalId)`
+
+**Step 2: Add failing tests for service behavior**
+
+Cover:
+- seeds metadata from terminal list/create records.
+- enriches checkout/repo/branch/dirty.
+- merges token usage with `updatedAt` set by service.
+- idempotent updates do not emit duplicate change payloads.
+
+**Step 3: Implement service**
+
+Make update paths deterministic and cheap, with equality checks for no-op updates.
+
+**Step 4: Run tests**
+
+Run: `npm test -- test/unit/server/terminal-metadata-service.test.ts`
+
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add server/coding-cli/session-indexer.ts test/unit/server/coding-cli/session-indexer.test.ts
-git commit -m "feat(indexer): propagate token usage summaries into indexed coding CLI sessions"
+git add server/terminal-metadata-service.ts test/unit/server/terminal-metadata-service.test.ts
+git commit -m "feat(server): add terminal metadata service with explicit cwd/branch/token state"
 ```
 
 ---
 
-### Task 4: Introduce server terminal metadata service + WS contract
+### Task 5: Add WS protocol for terminal metadata (`terminal.meta.*`)
 
 **Files:**
-- Create: `server/terminal-metadata-service.ts`
 - Modify: `server/ws-handler.ts`
-- Modify: `server/index.ts`
 - Modify: `test/server/ws-protocol.test.ts`
-- Create: `test/unit/server/terminal-metadata-service.test.ts`
 
-**Step 1: Add failing tests for metadata service behavior**
+**Step 1: Add failing WS tests**
 
-In new `test/unit/server/terminal-metadata-service.test.ts`, cover:
-- seed metadata from terminal (`cwd`).
-- async enrichment sets `worktreeRoot` + `repoRoot`.
-- token updates by provider/session.
-- idempotent updates do not emit duplicate patches.
+Test:
+- request `terminal.meta.list` receives `terminal.meta.list.response`.
+- server can broadcast `terminal.meta.updated`.
 
-```ts
-expect(service.get(terminalId)?.worktreeRoot).toBe('/repo/.worktrees/feature-x')
-expect(service.get(terminalId)?.repoRoot).toBe('/repo')
-```
-
-**Step 2: Add failing WS protocol test for new meta messages**
-
-In `test/server/ws-protocol.test.ts`:
-- send `{ type: 'terminal.meta.list', requestId: 'meta-1' }`.
-- expect `terminal.meta.list.response`.
-
-```ts
-expect(response.type).toBe('terminal.meta.list.response')
-expect(Array.isArray(response.items)).toBe(true)
-```
-
-**Step 3: Run tests to confirm failures**
-
-Run:
-- `npm test -- test/unit/server/terminal-metadata-service.test.ts`
-- `npm test -- test/server/ws-protocol.test.ts`
-
-Expected: FAIL (missing service + message types).
-
-**Step 4: Implement service and WS schema/handlers**
-
-In `server/terminal-metadata-service.ts`, implement:
-
-```ts
-export type TerminalMeta = {
-  cwd?: string
-  worktreeRoot?: string
-  repoRoot?: string
-  provider?: 'claude' | 'codex' | 'opencode' | 'gemini' | 'kimi'
-  sessionId?: string
-  tokenUsage?: {
-    inputTokens: number
-    outputTokens: number
-    cachedTokens?: number
-    totalTokens: number
-    updatedAt: number
-  }
-}
-```
-
-Add methods:
-- `seedFromTerminal(record)`
-- `associateSession(terminalId, provider, sessionId)`
-- `updateTokenUsage(terminalId, usage)`
-- `list()`
+**Step 2: Implement WS schema + handlers**
 
 In `server/ws-handler.ts`:
-- add client message schema for `terminal.meta.list`.
-- add response `terminal.meta.list.response`.
-- add broadcast message `terminal.meta.updated`.
+- add client message: `terminal.meta.list`.
+- add response: `terminal.meta.list.response`.
+- add broadcast event type: `terminal.meta.updated`.
 
-In `server/index.ts`:
-- instantiate service.
-- on terminal create/association/title loops, push metadata updates.
-- on coding-cli index update, map session tokenUsage to associated terminals and broadcast.
+**Step 3: Run tests**
 
-**Step 5: Re-run tests**
-
-Run:
-- `npm test -- test/unit/server/terminal-metadata-service.test.ts`
-- `npm test -- test/server/ws-protocol.test.ts`
+Run: `npm test -- test/server/ws-protocol.test.ts`
 
 Expected: PASS.
 
-**Step 6: Commit**
+**Step 4: Commit**
 
 ```bash
-git add server/terminal-metadata-service.ts server/ws-handler.ts server/index.ts test/unit/server/terminal-metadata-service.test.ts test/server/ws-protocol.test.ts
-git commit -m "feat(ws): add terminal metadata service and terminal.meta list/update protocol"
+git add server/ws-handler.ts test/server/ws-protocol.test.ts
+git commit -m "feat(ws): add terminal metadata list/update protocol"
 ```
 
 ---
 
-### Task 5: Publish metadata updates from session association flows
+### Task 6: Wire metadata service in server lifecycle + session association flows
 
 **Files:**
 - Modify: `server/index.ts`
 - Modify: `test/server/session-association.test.ts`
 
-**Step 1: Add failing session-association test assertions**
+**Step 1: Add failing association-flow tests**
 
-When a terminal gets associated via:
-- Claude new session association
-- non-Claude coding-cli indexer association
+For both Claude and Codex association paths, assert both broadcasts:
+- existing `terminal.session.associated`
+- new `terminal.meta.updated` with provider/session + branch/token fields when present.
 
-Expect additional broadcast:
-- `terminal.meta.updated` with provider/session linkage.
+**Step 2: Implement server wiring with explicit source points**
 
-```ts
-expect(broadcasts).toContainEqual(expect.objectContaining({
-  type: 'terminal.meta.updated',
-  terminalId: term.terminalId,
-  meta: expect.objectContaining({ sessionId: session.sessionId, provider: 'codex' }),
-}))
-```
+In `server/index.ts`:
+- instantiate metadata service.
+- seed from `registry.list()` for snapshot serving.
+- seed/update on terminal create and title-association loops.
+- on coding-cli index updates, map sessions to associated terminals and call `applySessionMetadata(...)`.
+- broadcast `terminal.meta.updated` only when metadata changed.
+- on terminal exit/remove, remove metadata and broadcast removal patch.
 
-**Step 2: Run focused association tests**
-
-Run: `npm test -- test/server/session-association.test.ts`
-Expected: FAIL.
-
-**Step 3: Implement broadcast wiring**
-
-In each association success branch in `server/index.ts`, after `terminal.session.associated`, send `terminal.meta.updated` using metadata service snapshot.
-
-**Step 4: Re-run tests**
+**Step 3: Run tests**
 
 Run: `npm test -- test/server/session-association.test.ts`
+
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 4: Commit**
 
 ```bash
 git add server/index.ts test/server/session-association.test.ts
-git commit -m "feat(sessions): broadcast terminal metadata updates on session association events"
+git commit -m "feat(server): publish terminal metadata updates from association and indexer flows"
 ```
 
 ---
 
-### Task 6: Add runtime terminal metadata state on the client
+### Task 7: Add runtime client metadata slice and WS ingestion
 
 **Files:**
 - Create: `src/store/terminalMetaSlice.ts`
 - Modify: `src/store/store.ts`
-- Create: `test/unit/client/store/terminalMetaSlice.test.ts`
 - Modify: `src/App.tsx`
+- Create: `test/unit/client/store/terminalMetaSlice.test.ts`
 
-**Step 1: Write failing slice tests**
+**Step 1: Add failing slice tests**
 
 Cover:
-- upsert from list response.
-- patch update from single terminal.
+- snapshot replace from `terminal.meta.list.response`.
+- upsert patch from `terminal.meta.updated`.
 - remove on terminal exit.
-- reset behavior for stale entries.
 
-```ts
-expect(state.byTerminalId['term-1']?.tokenUsage?.totalTokens).toBe(1200)
-```
+**Step 2: Implement slice + store registration**
 
-**Step 2: Run slice test to confirm failure**
-
-Run: `npm test -- test/unit/client/store/terminalMetaSlice.test.ts`
-Expected: FAIL (missing slice).
-
-**Step 3: Implement slice + store registration**
-
-In `src/store/terminalMetaSlice.ts`:
+State:
 
 ```ts
 type TerminalMetaState = {
@@ -383,97 +391,83 @@ type TerminalMetaState = {
 ```
 
 Reducers:
-- `upsertTerminalMeta`
 - `setTerminalMetaSnapshot`
+- `upsertTerminalMeta`
 - `removeTerminalMeta`
 
-Register reducer in `src/store/store.ts` (runtime only; no persist middleware changes needed).
+No persistence changes.
 
-**Step 4: Wire WS handling in `src/App.tsx`**
+**Step 3: Wire App WS handlers (additive, non-destructive)**
 
-Handle messages:
-- `terminal.meta.list.response` -> `setTerminalMetaSnapshot`.
-- `terminal.meta.updated` -> `upsertTerminalMeta`.
-- `terminal.exit` -> `removeTerminalMeta`.
+In `src/App.tsx`:
+- on `ready`, call existing `ws.send(...)` helper with `terminal.meta.list` request.
+- handle `terminal.meta.list.response` and `terminal.meta.updated`.
+- on `terminal.exit`, keep existing `clearIdleWarning` dispatch and add `removeTerminalMeta` dispatch (do not replace current logic).
 
-On `ready`, request metadata snapshot:
-
-```ts
-ws.send({ type: 'terminal.meta.list', requestId: `meta-${Date.now()}` })
-```
-
-**Step 5: Re-run tests**
+**Step 4: Run tests**
 
 Run:
 - `npm test -- test/unit/client/store/terminalMetaSlice.test.ts`
 - `npm test -- test/e2e/turn-complete-notification-flow.test.tsx`
 
-Expected: PASS, no regression in existing WS-driven flow.
+Expected: PASS.
 
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
 git add src/store/terminalMetaSlice.ts src/store/store.ts src/App.tsx test/unit/client/store/terminalMetaSlice.test.ts
-git commit -m "feat(client): add runtime terminal metadata slice and websocket ingestion"
+git commit -m "feat(client): ingest terminal metadata snapshot and live updates"
 ```
 
 ---
 
-### Task 7: Render metadata chips in pane headers (Codex + Claude)
+### Task 8: Render right-aligned title text + existing icons in pane header
 
 **Files:**
 - Modify: `src/components/panes/PaneContainer.tsx`
 - Modify: `src/components/panes/Pane.tsx`
 - Modify: `src/components/panes/PaneHeader.tsx`
-- Create: `src/lib/format-terminal-meta.ts`
+- Create: `src/lib/format-terminal-title-meta.ts`
 - Modify: `test/unit/client/components/panes/PaneHeader.test.tsx`
 - Modify: `test/unit/client/components/panes/Pane.test.tsx`
 
 **Step 1: Add failing component tests**
 
-`PaneHeader.test.tsx`:
-- renders `cwd` chip.
-- renders worktree chip.
-- renders token chip (`12.3K tok`) when provided.
-- hides chips for non-coding-cli terminal mode.
+`PaneHeader.test.tsx` should assert:
+- right-aligned metadata text for coding-cli panes, e.g. `freshell (main*)  25%`.
+- percentage omitted when compact threshold unknown.
+- metadata hidden for non-coding-cli modes.
+- icon buttons still render after metadata text.
 
-`Pane.test.tsx`:
-- forwards metadata prop into header.
+`Pane.test.tsx` should assert metadata prop/select path is wired.
 
-**Step 2: Run component tests to confirm failure**
+**Step 2: Implement formatting helper**
 
-Run:
-- `npm test -- test/unit/client/components/panes/PaneHeader.test.tsx`
-- `npm test -- test/unit/client/components/panes/Pane.test.tsx`
+In `src/lib/format-terminal-title-meta.ts`:
+- `formatPaneRuntimeLabel(meta): string | undefined`
+- derive `subdir` from checkout root basename fallback to cwd basename.
+- format branch+dirty as `(<branch>*)` when dirty.
+- format percent as integer `%`.
 
-Expected: FAIL.
-
-**Step 3: Implement formatting helper and prop plumbing**
-
-In `src/lib/format-terminal-meta.ts` add:
-- `formatTokenCount(n: number): string`
-- `formatHeaderCwd(path: string): string`
-- `formatWorktreeLabel(worktreeRoot: string, repoRoot?: string): string`
-
-In `PaneContainer`:
-- lookup metadata by `terminalId` from `state.terminalMeta.byTerminalId`.
-- pass to `Pane`.
-
-In `Pane`:
-- pass metadata to `PaneHeader`.
+**Step 3: Implement layout and alignment**
 
 In `PaneHeader`:
-- render compact chips inline after title for coding-cli modes (`claude`, `codex`).
+- keep existing left icon + title behavior.
+- add a right-side metadata text element before action icons.
+- preserve whitespace between metadata and icons.
 
 ```tsx
-{showMeta && (
-  <span className="text-[11px] text-muted-foreground truncate" aria-label="Terminal metadata">
-    {metaParts.join(' · ')}
-  </span>
-)}
+<div className="ml-auto flex items-center gap-2">
+  {metaLabel && <span className="text-xs text-muted-foreground text-right">{metaLabel}</span>}
+  {/* existing zoom/close icons */}
+</div>
 ```
 
-**Step 4: Re-run component tests**
+**Step 4: Decide selector location explicitly**
+
+Use `PaneContainer` selector + prop pass to keep `PaneHeader` largely presentational (one extra prop hop is acceptable and explicit).
+
+**Step 5: Run tests**
 
 Run:
 - `npm test -- test/unit/client/components/panes/PaneHeader.test.tsx`
@@ -481,73 +475,63 @@ Run:
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
-git add src/components/panes/PaneContainer.tsx src/components/panes/Pane.tsx src/components/panes/PaneHeader.tsx src/lib/format-terminal-meta.ts test/unit/client/components/panes/PaneHeader.test.tsx test/unit/client/components/panes/Pane.test.tsx
-git commit -m "feat(ui): show cwd/worktree/token metadata chips in coding-cli pane headers"
+git add src/components/panes/PaneContainer.tsx src/components/panes/Pane.tsx src/components/panes/PaneHeader.tsx src/lib/format-terminal-title-meta.ts test/unit/client/components/panes/PaneHeader.test.tsx test/unit/client/components/panes/Pane.test.tsx
+git commit -m "feat(ui): render right-aligned cwd/branch-dirty/compact-percent metadata in pane headers"
 ```
 
 ---
 
-### Task 8: End-to-end metadata flow test and full regression
+### Task 9: End-to-end metadata-to-header flow + full regression
 
 **Files:**
-- Create: `test/e2e/pane-header-metadata-flow.test.tsx`
+- Create: `test/e2e/pane-header-runtime-meta-flow.test.tsx`
 
-**Step 1: Write failing e2e flow test**
+**Step 1: Write failing e2e test**
 
-Create a harness similar to existing e2e WS tests:
-- render tab with codex terminal pane.
-- emit `terminal.meta.list.response` then `terminal.meta.updated`.
-- assert header shows updated chips.
-- emit `terminal.exit`; assert metadata chip is removed or reset.
+Flow:
+- render Codex and Claude panes.
+- emit metadata snapshot + update messages.
+- assert right-aligned text updates correctly.
+- emit `terminal.exit` and assert metadata is removed.
 
-```ts
-expect(screen.getByText(/src\/freshell/)).toBeInTheDocument()
-expect(screen.getByText(/12\.3K tok/)).toBeInTheDocument()
-```
+**Step 2: Run e2e + full regression**
 
-**Step 2: Run e2e test and confirm failure**
-
-Run: `npm test -- test/e2e/pane-header-metadata-flow.test.tsx`
-Expected: FAIL before implementation is complete, PASS after.
-
-**Step 3: Final regression runs**
-
-Run in order:
+Run:
+- `npm test -- test/e2e/pane-header-runtime-meta-flow.test.tsx`
 - `npm run lint`
 - `npm test`
 
-Expected: all pass.
+Expected: all PASS.
 
-**Step 4: Final commit**
+**Step 3: Commit**
 
 ```bash
-git add test/e2e/pane-header-metadata-flow.test.tsx
-git commit -m "test(e2e): validate terminal metadata websocket-to-header rendering flow"
+git add test/e2e/pane-header-runtime-meta-flow.test.tsx
+git commit -m "test(e2e): verify terminal metadata websocket flow to right-aligned pane header text"
 ```
-
-**Step 5: Optional squash guidance (only if requested)**
-
-Do not amend or squash unless explicitly requested by user.
 
 ---
 
 ## Final verification checklist
 
-1. `terminal.meta.list` responds with current metadata for running terminals.
-2. `terminal.meta.updated` broadcasts on association + token updates.
-3. Codex token parsing uses nested `token_count.info.total_token_usage`.
-4. Claude token totals are aggregated from session data without duplicate double-counting.
-5. Metadata is runtime-only in Redux and does not bloat persisted pane layouts.
-6. Codex/Claude pane headers show `cwd`, worktree context, and token totals.
-7. `npm run lint` and `npm test` are green.
+1. `resolveGitCheckoutRoot()` explicitly returns worktree checkout root (not canonical parent repo root).
+2. Codex parser handles nested `token_count.info.*` schema and computes compact percent from compact-threshold semantics.
+3. Claude parser aggregates assistant usage with message-id dedupe and computes compact percent with 95% rule.
+4. `ParsedSessionMeta` and `CodingCliSession` both carry `tokenUsage` (and related git metadata) explicitly.
+5. `terminal.meta.list` and `terminal.meta.updated` WS messages work end-to-end.
+6. `terminal.exit` handling in `App.tsx` preserves existing idle-warning cleanup and removes terminal metadata.
+7. Pane header shows right-aligned metadata text in format `<subdir> (<branch><*>)  <percent>%` before icons.
+8. Non-coding-cli panes do not show this metadata string.
+9. `npm run lint` and `npm test` are green.
 
 ---
 
 ## Rollout notes
 
-- Keep metadata chips lightweight (single-line, truncating) to avoid header overflow.
-- If token usage is unavailable, render `cwd`/worktree only (no placeholders).
-- If provider session association has not happened yet, chips should progressively fill in as updates arrive.
+- Metadata rendering is intentionally runtime-only and non-persisted.
+- When branch/dirty cannot be resolved, render available components (e.g., subdir only).
+- If compact-threshold denominator is unknown, omit `%` rather than showing misleading values.
+- Provider-specific compact-percent rules currently implemented for Codex and Claude only; other providers remain extensible.
