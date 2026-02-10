@@ -190,6 +190,7 @@ use freshell_protocol::{WsClientMessage, WsServerMessage};
 fn ws_schema_covers_all_required_message_families() {
     let client_types = [
         r#"{"type":"hello","token":"token-1234567890abcd","capabilities":{"sessionsPatchV1":true,"terminalAttachChunkV1":true}}"#,
+        r#"{"type":"hello","capabilities":{"sessionsPatchV1":true}}"#,
         r#"{"type":"ping"}"#,
         r#"{"type":"terminal.create","requestId":"r1","mode":"shell","shell":"system"}"#,
         r#"{"type":"terminal.attach","terminalId":"t1"}"#,
@@ -223,9 +224,10 @@ fn ws_schema_covers_all_required_message_families() {
     let server_types = [
         r#"{"type":"ready","timestamp":"2026-02-10T00:00:00Z"}"#,
         r#"{"type":"terminal.created","requestId":"r1","terminalId":"t1","snapshot":"","createdAt":1,"effectiveResumeSessionId":"sess-prev"}"#,
+        r#"{"type":"terminal.created","requestId":"r1b","terminalId":"t2","snapshotChunked":true,"createdAt":2}"#,
         r#"{"type":"terminal.attached","terminalId":"t1","snapshot":"hello\n"}"#,
         r#"{"type":"terminal.attached.start","terminalId":"t1","totalCodeUnits":12,"totalChunks":2}"#,
-        r#"{"type":"terminal.attached.chunk","terminalId":"t1","chunk":"aGVsbG8K"}"#,
+        r#"{"type":"terminal.attached.chunk","terminalId":"t1","chunk":"hello\n"}"#,
         r#"{"type":"terminal.attached.end","terminalId":"t1","totalCodeUnits":12,"totalChunks":2}"#,
         r#"{"type":"terminal.detached","terminalId":"t1"}"#,
         r#"{"type":"terminal.output","terminalId":"t1","data":"hi\n"}"#,
@@ -243,8 +245,8 @@ fn ws_schema_covers_all_required_message_families() {
         r#"{"type":"sessions.updated","projects":[]}"#,
         r#"{"type":"sessions.updated","projects":[],"clear":true,"append":false}"#,
         r#"{"type":"sessions.patch","upsertProjects":[],"removeProjectPaths":[]}"#,
-        r#"{"type":"session.status","sessionId":"abc","status":"running"}"#,
-        r#"{"type":"session.repair.activity","event":"scanned","sessionId":"abc"}"#,
+        r#"{"type":"session.status","sessionId":"abc","status":"healthy","chainDepth":2}"#,
+        r#"{"type":"session.repair.activity","event":"scanned","sessionId":"abc","status":"healthy","chainDepth":2,"orphanCount":0}"#,
         r#"{"type":"settings.updated","settings":{}}"#,
         r#"{"type":"perf.logging","enabled":false}"#,
         r#"{"type":"terminal.idle.warning","terminalId":"t1","killMinutes":180,"warnMinutes":5,"lastActivityAt":1739145600000}"#,
@@ -293,11 +295,31 @@ pub enum TerminalMode {
 pub enum ShellType { System, Cmd, Powershell, Wsl }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
+pub enum CodingCliProvider { Claude, Codex, Opencode, Gemini, Kimi }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode { Default, Plan, AcceptEdits, BypassPermissions }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxMode { ReadOnly, WorkspaceWrite, DangerFullAccess }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCode { InvalidMessage, RateLimited, InvalidTerminalId, Unauthorized }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionHealthStatus { Healthy, Corrupted, Repaired }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum WsClientMessage {
     #[serde(rename = "hello")]
     Hello {
-        token: String,
+        token: Option<String>,
         capabilities: Option<ClientCapabilities>,
         sessions: Option<HelloSessions>,
     },
@@ -327,14 +349,14 @@ pub enum WsClientMessage {
     #[serde(rename = "codingcli.create")]
     CodingCliCreate {
         request_id: String,
-        provider: String,
+        provider: CodingCliProvider,
         prompt: String,
         cwd: Option<String>,
         resume_session_id: Option<String>,
         model: Option<String>,
         max_turns: Option<u32>,
-        permission_mode: Option<String>,
-        sandbox: Option<String>,
+        permission_mode: Option<PermissionMode>,
+        sandbox: Option<SandboxMode>,
     },
     #[serde(rename = "codingcli.input")]
     CodingCliInput { session_id: String, data: String },
@@ -347,9 +369,11 @@ pub enum WsClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCapabilities {
     #[serde(rename = "sessionsPatchV1")]
-    pub sessions_patch_v1: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions_patch_v1: Option<bool>,
     #[serde(rename = "terminalAttachChunkV1")]
-    pub terminal_attach_chunk_v1: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_attach_chunk_v1: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,7 +384,7 @@ pub struct HelloSessions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum WsServerMessage {
     #[serde(rename = "ready")]
     Ready { timestamp: String },
@@ -368,7 +392,10 @@ pub enum WsServerMessage {
     TerminalCreated {
         request_id: String,
         terminal_id: String,
-        snapshot: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_chunked: Option<bool>,
         created_at: u64,
         effective_resume_session_id: Option<String>,
     },
@@ -397,13 +424,13 @@ pub enum WsServerMessage {
     #[serde(rename = "terminal.title.updated")]
     TerminalTitleUpdated { terminal_id: String, title: String },
     #[serde(rename = "codingcli.created")]
-    CodingCliCreated { request_id: String, session_id: String, provider: String },
+    CodingCliCreated { request_id: String, session_id: String, provider: CodingCliProvider },
     #[serde(rename = "codingcli.event")]
-    CodingCliEvent { session_id: String, provider: String, event: serde_json::Value },
+    CodingCliEvent { session_id: String, provider: CodingCliProvider, event: serde_json::Value },
     #[serde(rename = "codingcli.exit")]
-    CodingCliExit { session_id: String, provider: String, exit_code: i32 },
+    CodingCliExit { session_id: String, provider: CodingCliProvider, exit_code: i32 },
     #[serde(rename = "codingcli.stderr")]
-    CodingCliStderr { session_id: String, provider: String, text: String },
+    CodingCliStderr { session_id: String, provider: CodingCliProvider, text: String },
     #[serde(rename = "codingcli.killed")]
     CodingCliKilled { session_id: String, success: bool },
     #[serde(rename = "sessions.updated")]
@@ -417,9 +444,29 @@ pub enum WsServerMessage {
     #[serde(rename = "sessions.patch")]
     SessionsPatch { upsert_projects: Vec<serde_json::Value>, remove_project_paths: Vec<String> },
     #[serde(rename = "session.status")]
-    SessionStatus { session_id: String, status: String },
+    SessionStatus {
+        session_id: String,
+        status: SessionHealthStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chain_depth: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        orphans_fixed: Option<u64>,
+    },
     #[serde(rename = "session.repair.activity")]
-    SessionRepairActivity { event: String, session_id: String, status: Option<String>, message: Option<String> },
+    SessionRepairActivity {
+        event: String,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<SessionHealthStatus>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chain_depth: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        orphan_count: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        orphans_fixed: Option<u64>,
+    },
     #[serde(rename = "settings.updated")]
     SettingsUpdated { settings: serde_json::Value },
     #[serde(rename = "perf.logging")]
@@ -432,7 +479,7 @@ pub enum WsServerMessage {
     Pong { timestamp: String },
     #[serde(rename = "error")]
     Error {
-        code: String,
+        code: ErrorCode,
         message: String,
         request_id: Option<String>,
         terminal_id: Option<String>,
@@ -465,7 +512,7 @@ pub struct TerminalMetaRecord {
     pub display_subdir: Option<String>,
     pub branch: Option<String>,
     pub is_dirty: Option<bool>,
-    pub provider: Option<String>,
+    pub provider: Option<CodingCliProvider>,
     pub session_id: Option<String>,
     pub token_usage: Option<TokenUsageSummary>,
     pub updated_at: u64,
@@ -488,6 +535,7 @@ pub struct TokenUsageSummary {
 Also implement a single outbound WS serializer in `freshell-server` so every server frame, including `terminal.output`, is emitted from `WsServerMessage` instead of ad-hoc JSON payloads.
 Attach compatibility rule: emit `terminal.attached` for non-chunk-capable clients (and small-snapshot fast path), and `terminal.attached.start/chunk/end` for chunk-capable large snapshots.
 In the protocol tests, add explicit key-name assertions for `requestId`, `terminalId`, `resumeSessionId`, and `lastActivityAt` to ensure camelCase wire keys stay correct.
+Use a serde version that supports `rename_all_fields` for internally-tagged enums, or apply per-field `#[serde(rename = "...")]` annotations if you cannot rely on that attribute.
 
 **Step 4: Run test to verify it passes**
 
@@ -540,6 +588,10 @@ pub fn validate_auth_token(token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+In the same task, scaffold `freshell-config` with full `UserConfig` parity:
+- `settings`, `sessionOverrides`, `terminalOverrides`, `projectColors`, `recentDirectories`
+- atomic write via temp file + rename with Windows retry/backoff behavior for EPERM/EACCES/EBUSY
 
 **Step 4: Run test to verify it passes**
 
@@ -656,8 +708,13 @@ Expected: FAIL
 // - PATCH /api/settings (auth)
 // - PUT /api/settings alias (auth; same semantics as PATCH)
 // - /api/* request-rate middleware parity (default 300 requests / 60 seconds, test-configurable)
+// - trust-proxy configuration parity so requester IPs are correct behind reverse proxies
 // auth middleware reads x-auth-token
 // config writes are serialized through a single-writer async mutex to preserve atomic file semantics.
+// settings update side effects must mirror source behavior:
+// - apply debug logging toggle at runtime
+// - propagate safety/scrollback changes into terminal registry settings
+// - trigger session index refreshes where settings impact indexing behavior
 // optional harness helpers can be added later; this test should compile/run with only tower::ServiceExt and axum primitives.
 ```
 
@@ -1502,7 +1559,9 @@ async fn http_route_parity_smoke_covers_existing_surface() {
     freshell_server::tests::assert_route_exists(&app, "DELETE", "/api/terminals/:terminalId").await;
     freshell_server::tests::assert_route_exists(&app, "GET", "/api/debug").await;
     freshell_server::tests::assert_route_exists(&app, "POST", "/api/perf").await;
+    freshell_server::tests::assert_route_exists(&app, "POST", "/api/logs/client").await;
     freshell_server::tests::assert_route_exists(&app, "POST", "/api/ai/terminals/:terminalId/summary").await;
+    freshell_server::tests::assert_route_exists(&app, "POST", "/api/proxy/forward").await;
     freshell_server::tests::assert_route_exists(&app, "DELETE", "/api/proxy/forward/:port").await;
     freshell_server::tests::assert_route_exists(&app, "GET", "/api/files/candidate-dirs").await;
 }
@@ -1522,7 +1581,7 @@ Expected: FAIL
 // - /api/sessions, /api/sessions/search, /api/sessions/:sessionId (patch/delete), /api/project-colors
 // - /api/terminals, /api/terminals/:terminalId (patch/delete)
 // - /api/debug, /api/perf (POST), /api/ai/terminals/:terminalId/summary (POST)
-// - /api/proxy/forward/:port (DELETE), /api/files/candidate-dirs
+// - /api/logs/client (POST), /api/proxy/forward (POST), /api/proxy/forward/:port (DELETE), /api/files/candidate-dirs
 ```
 
 **Step 4: Run tests to verify pass**
@@ -1682,8 +1741,15 @@ Expected: FAIL
 ```rust
 // Port pane node tree:
 // Leaf | Split(direction, sizes, children)
-// Actions: init, split, add, close, resize, swap, zoom, rename-request
-// Persist to localStorage only (client-local authority)
+// Pane content kinds: terminal | browser | editor | picker
+// Actions parity (all reducers): initLayout, resetLayout, splitPane, addPane, closePane,
+// setActivePane, resizePanes, resizeMultipleSplits, resetSplit, swapSplit, replacePane,
+// updatePaneContent, removeLayout, hydratePanes, updatePaneTitle, requestPaneRename,
+// clearPaneRenameRequest, toggleZoom.
+// Persisted state must include paneTitles + paneTitleSetByUser maps.
+// hydratePanes must use smart terminal merge logic (createRequestId/terminalId/resumeSessionId aware),
+// not naive overwrite.
+// Persist to localStorage only (client-local authority), with editor-buffer stripping handled in persistence layer.
 ```
 
 **Step 4: Run test to verify it passes**
@@ -1738,6 +1804,9 @@ Expected: FAIL
 // - fallback to storage events when BroadcastChannel unavailable
 // - ignore self-originated events via sender-id tagging
 // - debounce/merge updates to avoid event storms
+// - support skipPersist metadata to prevent hydration write-loops
+// - flush pending persistence on visibilitychange/pagehide/beforeunload
+// - preserve smart terminal merge behavior during cross-tab hydration
 ```
 
 **Step 4: Run test to verify it passes**
@@ -1949,8 +2018,12 @@ git commit -m "feat(web): port editor pane and files api interactions"
 #[test]
 fn settings_defaults_match_current_product_and_remain_ui_editable() {
     let s = freshell_web::settings::default_settings();
-    assert_eq!(s.default_shell, "system");
-    assert!(s.ai_summary.enabled);
+    assert_eq!(s.theme, "system");
+    assert_eq!(s.terminal.font_size, 16);
+    assert_eq!(s.safety.auto_kill_idle_minutes, 180);
+    assert_eq!(s.panes.default_new_pane, "ask");
+    assert!(s.coding_cli.enabled_providers.contains(&CodingCliProvider::Claude));
+    assert!(s.coding_cli.enabled_providers.contains(&CodingCliProvider::Codex));
 }
 ```
 
@@ -1965,7 +2038,13 @@ Expected: FAIL
 ```rust
 // Settings page:
 // - all config editable via UI controls only
-// - AI controls in settings (default behavior silent, configurable)
+// - cover existing settings sections: terminal (including fontFamily/theme/scrollback), uiScale,
+//   safety, sidebar (including recency-pinned sort mode), panes (including iconsOnTabs/defaultNewPane),
+//   codingCli (enabledProviders + provider-level model/sandbox/permission/cwd options)
+// - provider picker/options must derive from codingCli.enabledProviders so non-default providers
+//   (opencode/gemini/kimi) appear when enabled
+// - include config surfaces backed by UserConfig outside settings where UI touches them:
+//   sessionOverrides, terminalOverrides, projectColors, recentDirectories
 // Sidebar:
 // - project/session grouping, filters, sorting parity
 ```
