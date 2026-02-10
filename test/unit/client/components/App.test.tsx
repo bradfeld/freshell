@@ -163,6 +163,18 @@ describe('App Component - Share Button', () => {
     expect(shareButton).toBeInTheDocument()
   })
 
+  it('renders the outlined terminal work area connector strip', () => {
+    renderApp()
+
+    const workArea = screen.getByTestId('terminal-work-area')
+    const connector = screen.getByTestId('terminal-work-area-connector')
+
+    expect(workArea.className).toContain('border-t')
+    expect(workArea.className).toContain('border-muted-foreground/45')
+    expect(connector.className).toContain('h-[3px]')
+    expect(connector.className).toContain('bg-background')
+  })
+
   it('uses Web Share API when available (non-Windows)', async () => {
     const mockShare = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(global, 'navigator', {

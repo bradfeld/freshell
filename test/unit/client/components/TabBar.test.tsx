@@ -225,13 +225,13 @@ describe('TabBar', () => {
       const activeTabElement = screen.getByText('Active Tab').closest('div[class*="group"]')
       const inactiveTabElement = screen.getByText('Inactive Tab').closest('div[class*="group"]')
 
-      // Active tab should match the pane title-bar surface
-      expect(activeTabElement?.className).toContain('bg-muted')
+      // Active tab should match the app background and keep an outline
+      expect(activeTabElement?.className).toContain('bg-background')
       expect(activeTabElement?.className).toContain('text-foreground')
+      expect(activeTabElement?.className).toContain('border-muted-foreground/45')
 
-      // Inactive tabs should be white in both light and dark themes
-      expect(inactiveTabElement?.className).toContain('bg-white')
-      expect(inactiveTabElement?.className).toContain('dark:bg-white')
+      // Inactive tabs should be slightly off-background gray
+      expect(inactiveTabElement?.className).toContain('bg-muted')
     })
 
     it('updates active tab highlight when active tab changes', () => {
@@ -247,7 +247,7 @@ describe('TabBar', () => {
 
       // Initial state - tab 1 is active
       let tab1Element = screen.getByText('Tab 1').closest('div[class*="group"]')
-      expect(tab1Element?.className).toContain('bg-muted')
+      expect(tab1Element?.className).toContain('bg-background')
 
       // Click tab 2 to change active tab
       fireEvent.click(screen.getByText('Tab 2'))
@@ -263,8 +263,8 @@ describe('TabBar', () => {
       const tab2Element = screen.getByText('Tab 2').closest('div[class*="group"]')
       tab1Element = screen.getByText('Tab 1').closest('div[class*="group"]')
 
-      expect(tab2Element?.className).toContain('bg-muted')
-      expect(tab1Element?.className).toContain('bg-white')
+      expect(tab2Element?.className).toContain('bg-background')
+      expect(tab1Element?.className).toContain('bg-muted')
     })
 
     it('highlights inactive tabs that need attention', () => {

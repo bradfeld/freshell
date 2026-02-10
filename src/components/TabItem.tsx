@@ -104,12 +104,12 @@ export default function TabItem({
   return (
     <div
       className={cn(
-        'group flex items-center gap-2 h-8 px-3 rounded-t-md text-sm cursor-pointer transition-all',
+        'group relative flex items-center gap-2 h-8 px-3 rounded-t-md border border-muted-foreground/45 text-sm cursor-pointer transition-colors',
         isActive
-          ? 'bg-muted text-foreground shadow-sm'
+          ? 'z-10 -mb-px bg-background text-foreground border-b-background'
           : needsAttention
             ? 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200 mt-1 dark:bg-emerald-900/40 dark:text-emerald-100 dark:hover:bg-emerald-900/55'
-            : 'bg-white dark:bg-white text-slate-700 hover:text-slate-900 hover:bg-white/95 mt-1',
+            : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/90 mt-1',
         isDragging && 'opacity-50'
       )}
       role="button"
