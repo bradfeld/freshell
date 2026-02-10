@@ -55,8 +55,8 @@ Export the action from the slice.
 - Replace in single-pane tab: verify works and picker renders
 - Replace a renamed pane: verify title resets to "New Tab"
 
-## Known Pre-existing Issue (Out of Scope)
-`tab.terminalId` is not cleared when panes are closed or replaced. This causes `openTerminal` dedup (`ContextMenuProvider.tsx:475-481`) to focus stale tabs. This affects `closePane` equally and predates this feature — tracked but not fixed here.
+## Previously Known Issue (Fixed)
+`tab.terminalId` was not cleared when panes were closed or replaced, causing `openTerminal` dedup to focus stale tabs. Fixed in this branch: `clearStaleTabTerminalId` helper clears `tab.terminalId` when the detached terminal matches, applied to `replacePaneAction`, `closePane` action (ContextMenuProvider), and `handleClose` (PaneContainer).
 
 ## Key Files
 - `src/store/panesSlice.ts` — new `replacePane` action
