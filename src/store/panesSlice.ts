@@ -624,10 +624,12 @@ export const panesSlice = createSlice({
       if (!root) return
 
       const pickerContent: PaneContent = { kind: 'picker' }
+      let found = false
 
       function updateContent(node: PaneNode): PaneNode {
         if (node.type === 'leaf') {
           if (node.id === paneId) {
+            found = true
             return { ...node, content: pickerContent }
           }
           return node
@@ -639,6 +641,8 @@ export const panesSlice = createSlice({
       }
 
       state.layouts[tabId] = updateContent(root)
+
+      if (!found) return
 
       // Reset title to picker-derived title ("New Tab")
       if (!state.paneTitles[tabId]) {

@@ -1036,6 +1036,9 @@ describe('panesSlice', () => {
       // Content should be unchanged
       const resultLeaf = result.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>
       expect(resultLeaf.content.kind).toBe('terminal')
+
+      // No ghost title entry should be created for non-existent pane
+      expect(result.paneTitles['tab-1']['non-existent']).toBeUndefined()
     })
 
     it('works on a pane inside a split', () => {
