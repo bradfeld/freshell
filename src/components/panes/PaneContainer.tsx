@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { getWsClient } from '@/lib/ws-client'
 import { api } from '@/lib/api'
 import { derivePaneTitle } from '@/lib/derivePaneTitle'
+import { formatPaneRuntimeLabel } from '@/lib/format-terminal-title-meta'
 import { snap1D, collectCollinearSnapTargets, convertThresholdToLocal } from '@/lib/pane-snap'
 import { nanoid } from 'nanoid'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
@@ -33,6 +34,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const dispatch = useAppDispatch()
   const activePane = useAppSelector((s) => s.panes.activePane[tabId])
   const paneTitles = useAppSelector((s) => s.panes.paneTitles[tabId] ?? EMPTY_PANE_TITLES)
+  const terminalMetaById = useAppSelector((s) => s.terminalMeta.byTerminalId)
   const zoomedPaneId = useAppSelector((s) => s.panes.zoomedPane?.[tabId])
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
@@ -172,6 +174,12 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     const paneTitle = explicitTitle ?? derivePaneTitle(node.content)
     const paneStatus = node.content.kind === 'terminal' ? node.content.status : 'running'
     const isRenaming = renamingPaneId === node.id
+    const paneMetaLabel =
+      node.content.kind === 'terminal' &&
+      node.content.mode !== 'shell' &&
+      node.content.terminalId
+        ? formatPaneRuntimeLabel(terminalMetaById[node.content.terminalId])
+        : undefined
 
     return (
       <Pane
@@ -182,6 +190,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         title={paneTitle}
         status={paneStatus}
         content={node.content}
+        metaLabel={paneMetaLabel}
         onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
         onToggleZoom={() => handleToggleZoom(node.id)}

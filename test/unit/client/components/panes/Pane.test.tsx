@@ -66,7 +66,7 @@ describe('Pane', () => {
       expect(closeButton).toBeInTheDocument()
     })
 
-    it('hides close button when it is the only pane', () => {
+    it('renders fallback close button when no title is provided (including single-pane tabs)', () => {
       const onClose = vi.fn()
       const onFocus = vi.fn()
 
@@ -81,8 +81,8 @@ describe('Pane', () => {
         </Pane>
       )
 
-      const closeButton = screen.queryByTitle('Close pane')
-      expect(closeButton).not.toBeInTheDocument()
+      const closeButton = screen.getByTitle('Close pane')
+      expect(closeButton).toBeInTheDocument()
     })
   })
 
@@ -281,7 +281,7 @@ describe('Pane', () => {
       expect(screen.getByText('My Terminal')).toBeInTheDocument()
     })
 
-    it('does not render PaneHeader when only pane', () => {
+    it('renders PaneHeader when only pane and title is provided', () => {
       render(
         <Pane
           isActive={true}
@@ -296,7 +296,28 @@ describe('Pane', () => {
         </Pane>
       )
 
-      expect(screen.queryByText('My Terminal')).not.toBeInTheDocument()
+      expect(screen.getByText('My Terminal')).toBeInTheDocument()
+    })
+
+    it('passes metadata labels through to PaneHeader', () => {
+      render(
+        <Pane
+          isActive={true}
+          isOnlyPane={true}
+          title="My Terminal"
+          metaLabel="freshell (main*)  25%"
+          status="running"
+          content={makeTerminalContent('codex')}
+          onClose={vi.fn()}
+          onFocus={vi.fn()}
+        >
+          <div>Content</div>
+        </Pane>
+      )
+
+      expect(
+        screen.getByText((_, element) => element?.getAttribute('title') === 'freshell (main*)  25%'),
+      ).toBeInTheDocument()
     })
 
     it('renders fallback close button when no title provided but multiple panes', () => {

@@ -16,6 +16,7 @@ function statusClassName(status: TerminalStatus): string {
 
 interface PaneHeaderProps {
   title: string
+  metaLabel?: string
   status: TerminalStatus
   isActive: boolean
   onClose: () => void
@@ -32,6 +33,7 @@ interface PaneHeaderProps {
 
 export default function PaneHeader({
   title,
+  metaLabel,
   status,
   isActive,
   onClose,
@@ -66,48 +68,61 @@ export default function PaneHeader({
     >
       <PaneIcon content={content} className={cn('h-3.5 w-3.5 shrink-0', statusClassName(status))} />
 
-      {isRenaming ? (
-        <input
-          ref={inputRef}
-          className="bg-transparent outline-none flex-1 min-w-0 text-sm"
-          value={renameValue ?? ''}
-          onChange={(e) => onRenameChange?.(e.target.value)}
-          onBlur={onRenameBlur}
-          onKeyDown={onRenameKeyDown}
-          onClick={(e) => e.stopPropagation()}
-          aria-label="Rename pane"
-        />
-      ) : (
-        <span className="flex-1 truncate" title={title}>
-          {title}
-        </span>
-      )}
+      <div className="min-w-0 flex-1">
+        {isRenaming ? (
+          <input
+            ref={inputRef}
+            className="bg-transparent outline-none w-full min-w-0 text-sm"
+            value={renameValue ?? ''}
+            onChange={(e) => onRenameChange?.(e.target.value)}
+            onBlur={onRenameBlur}
+            onKeyDown={onRenameKeyDown}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Rename pane"
+          />
+        ) : (
+          <span className="block truncate" title={title}>
+            {title}
+          </span>
+        )}
+      </div>
 
-      {onToggleZoom && (
+      <div className="ml-auto flex items-center gap-2">
+        {metaLabel && (
+          <span
+            className="max-w-[18rem] truncate text-xs text-muted-foreground text-right"
+            title={metaLabel}
+          >
+            {metaLabel}
+          </span>
+        )}
+
+        {onToggleZoom && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleZoom()
+            }}
+            className="p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
+            title={isZoomed ? 'Restore pane' : 'Maximize pane'}
+            aria-label={isZoomed ? 'Restore pane' : 'Maximize pane'}
+          >
+            {isZoomed ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+          </button>
+        )}
+
         <button
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
-            onToggleZoom()
+            onClose()
           }}
-          className="p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
-          title={isZoomed ? 'Restore pane' : 'Maximize pane'}
-          aria-label={isZoomed ? 'Restore pane' : 'Maximize pane'}
+          className="p-0.5 rounded opacity-60 hover:opacity-100 hover:bg-background/50 transition-opacity"
+          title="Close pane"
         >
-          {isZoomed ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+          <X className="h-3 w-3" />
         </button>
-      )}
-
-      <button
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation()
-          onClose()
-        }}
-        className="p-0.5 rounded opacity-60 hover:opacity-100 hover:bg-background/50 transition-opacity"
-        title="Close pane"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      </div>
     </div>
   )
 }

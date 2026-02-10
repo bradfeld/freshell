@@ -6,6 +6,7 @@ import PaneContainer from '@/components/panes/PaneContainer'
 import panesReducer from '@/store/panesSlice'
 import settingsReducer from '@/store/settingsSlice'
 import connectionReducer, { ConnectionState } from '@/store/connectionSlice'
+import terminalMetaReducer from '@/store/terminalMetaSlice'
 import type { PanesState } from '@/store/panesSlice'
 import type { PaneNode, PaneContent, EditorPaneContent } from '@/store/paneTypes'
 
@@ -70,6 +71,9 @@ vi.mock('lucide-react', () => ({
   FileText: ({ className }: { className?: string }) => (
     <svg data-testid="file-text-icon" className={className} />
   ),
+  LayoutGrid: ({ className }: { className?: string }) => (
+    <svg data-testid="layout-grid-icon" className={className} />
+  ),
   Maximize2: ({ className }: { className?: string }) => (
     <svg data-testid="maximize-icon" className={className} />
   ),
@@ -123,6 +127,7 @@ function createStore(
       panes: panesReducer,
       settings: settingsReducer,
       connection: connectionReducer,
+      terminalMeta: terminalMetaReducer,
     },
     preloadedState: {
       panes: {
@@ -140,6 +145,9 @@ function createStore(
         platform: null,
         availableClis: {},
         ...initialConnectionState,
+      },
+      terminalMeta: {
+        byTerminalId: {},
       },
     },
   })
@@ -404,7 +412,7 @@ describe('PaneContainer', () => {
       expect((state.layouts['tab-1'] as Extract<PaneNode, { type: 'leaf' }>).id).toBe(pane2Id)
     })
 
-    it('does not show close button for single pane (root is leaf)', () => {
+    it('shows close button for single pane (root is leaf)', () => {
       const paneId = 'pane-1'
       const leafNode: PaneNode = {
         type: 'leaf',
@@ -422,8 +430,8 @@ describe('PaneContainer', () => {
         store
       )
 
-      // There should be no close button when it's the only pane
-      expect(screen.queryByTitle('Close pane')).not.toBeInTheDocument()
+      // Header is always visible, including single-pane tabs.
+      expect(screen.getByTitle('Close pane')).toBeInTheDocument()
     })
 
     it('closes second pane when its close button is clicked', () => {
@@ -927,6 +935,7 @@ describe('PaneContainer', () => {
           panes: panesReducer,
           settings: settingsReducer,
           connection: connectionReducer,
+          terminalMeta: terminalMetaReducer,
         },
         preloadedState: {
           panes: {
@@ -966,6 +975,9 @@ describe('PaneContainer', () => {
             },
             loaded: true,
             lastSavedAt: null,
+          },
+          terminalMeta: {
+            byTerminalId: {},
           },
         },
       })

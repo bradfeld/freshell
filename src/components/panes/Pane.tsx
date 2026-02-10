@@ -11,6 +11,7 @@ interface PaneProps {
   isActive: boolean
   isOnlyPane: boolean
   title?: string
+  metaLabel?: string
   status?: TerminalStatus
   content?: PaneContent
   onClose: () => void
@@ -32,6 +33,7 @@ export default function Pane({
   isActive,
   isOnlyPane,
   title,
+  metaLabel,
   status,
   content,
   onClose,
@@ -46,7 +48,7 @@ export default function Pane({
   onRenameKeyDown,
   onDoubleClickTitle,
 }: PaneProps) {
-  const showHeader = !isOnlyPane && title !== undefined
+  const showHeader = title !== undefined
 
   return (
     <div
@@ -71,6 +73,7 @@ export default function Pane({
         <div data-context={ContextIds.Pane} data-tab-id={tabId} data-pane-id={paneId}>
           <PaneHeader
             title={title}
+            metaLabel={metaLabel}
             status={status || 'creating'}
             isActive={isActive}
             onClose={onClose}
@@ -87,8 +90,8 @@ export default function Pane({
         </div>
       )}
 
-      {/* Fallback close button - shown when no header but multiple panes */}
-      {!isOnlyPane && !showHeader && (
+      {/* Fallback close button - shown when no header */}
+      {!showHeader && (
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {

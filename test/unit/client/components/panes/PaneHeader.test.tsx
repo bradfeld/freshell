@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import PaneHeader from '@/components/panes/PaneHeader'
+import { formatPaneRuntimeLabel } from '@/lib/format-terminal-title-meta'
 
 vi.mock('lucide-react', () => ({
   X: ({ className }: { className?: string }) => (
@@ -73,6 +74,84 @@ describe('PaneHeader', () => {
       )
 
       expect(screen.getByTitle('Close pane')).toBeInTheDocument()
+    })
+
+    it('renders right-aligned metadata text before action icons', () => {
+      render(
+        <PaneHeader
+          title="My Terminal"
+          metaLabel="freshell (main*)  25%"
+          status="running"
+          isActive={true}
+          onClose={vi.fn()}
+          onToggleZoom={vi.fn()}
+          content={makeTerminalContent('codex')}
+        />
+      )
+
+      expect(
+        screen.getByText((_, element) => element?.getAttribute('title') === 'freshell (main*)  25%'),
+      ).toBeInTheDocument()
+      expect(screen.getByTitle('Maximize pane')).toBeInTheDocument()
+      expect(screen.getByTitle('Close pane')).toBeInTheDocument()
+    })
+  })
+
+  describe('formatPaneRuntimeLabel()', () => {
+    it('formats codex and claude metadata with identical spacing/output for equivalent inputs', () => {
+      const codex = formatPaneRuntimeLabel({
+        terminalId: 'term-1',
+        provider: 'codex',
+        checkoutRoot: '/home/user/freshell',
+        branch: 'main',
+        isDirty: true,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cachedTokens: 0,
+          totalTokens: 15,
+          compactPercent: 25,
+        },
+        updatedAt: 1,
+      })
+
+      const claude = formatPaneRuntimeLabel({
+        terminalId: 'term-2',
+        provider: 'claude',
+        checkoutRoot: '/home/user/freshell',
+        branch: 'main',
+        isDirty: true,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cachedTokens: 0,
+          totalTokens: 15,
+          compactPercent: 25,
+        },
+        updatedAt: 1,
+      })
+
+      expect(codex).toBe('freshell (main*)  25%')
+      expect(claude).toBe(codex)
+    })
+
+    it('omits percentage when compact-threshold usage is unavailable', () => {
+      const label = formatPaneRuntimeLabel({
+        terminalId: 'term-3',
+        provider: 'codex',
+        checkoutRoot: '/home/user/freshell',
+        branch: 'main',
+        isDirty: false,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cachedTokens: 0,
+          totalTokens: 15,
+        },
+        updatedAt: 1,
+      })
+
+      expect(label).toBe('freshell (main)')
     })
   })
 
