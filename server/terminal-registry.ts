@@ -1104,15 +1104,23 @@ export class TerminalRegistry extends EventEmitter {
   }
 
   /**
-   * Find a running Claude terminal that already owns the given sessionId.
+   * Find a running terminal of the given mode that already owns the given sessionId.
    */
-  findRunningClaudeTerminalBySession(sessionId: string): TerminalRecord | undefined {
+  findRunningTerminalBySession(mode: TerminalMode, sessionId: string): TerminalRecord | undefined {
     for (const term of this.terminals.values()) {
-      if (term.mode !== 'claude') continue
+      if (term.mode !== mode) continue
       if (term.status !== 'running') continue
       if (term.resumeSessionId === sessionId) return term
     }
     return undefined
+  }
+
+  /**
+   * Find a running Claude terminal that already owns the given sessionId.
+   * @deprecated Use findRunningTerminalBySession('claude', sessionId) instead.
+   */
+  findRunningClaudeTerminalBySession(sessionId: string): TerminalRecord | undefined {
+    return this.findRunningTerminalBySession('claude', sessionId)
   }
 
   /**
