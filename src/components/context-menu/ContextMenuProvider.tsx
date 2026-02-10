@@ -708,7 +708,7 @@ export function ContextMenuProvider({
         resetSplit: (tabId, splitId) => dispatch(resetSplit({ tabId, splitId })),
         swapSplit: (tabId, splitId) => dispatch(swapSplit({ tabId, splitId })),
         closePane: (tabId, paneId) => {
-          const content = findPaneContent(panes[tabId], paneId)
+          const content = panes[tabId] ? findPaneContent(panes[tabId], paneId) : null
           if (content?.kind === 'terminal' && content.terminalId) {
             ws.send({ type: 'terminal.detach', terminalId: content.terminalId })
             clearStaleTabTerminalId(tabId, content.terminalId)
