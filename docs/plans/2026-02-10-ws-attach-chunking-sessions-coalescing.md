@@ -21,7 +21,9 @@
   - `terminal.create` reused-by-session path
   - `terminal.create` new terminal path
   - `terminal.attach` path
-- These inline sends can exceed safe buffered thresholds and trigger backpressure closes.
+- The highest oversized-snapshot risk is in reused/reattach paths (existing buffered scrollback).
+- The new-terminal create path is usually small, but remains part of the unified send path for consistency and future-proofing.
+- Any oversized inline send can exceed safe buffered thresholds and trigger backpressure closes.
 
 2. **Bursty index updates publish too often.**
 - `codingCliIndexer.onUpdate` calls `sessionsSync.publish(projects)` for every update callback.
@@ -164,6 +166,7 @@ Add tests for `chunkTerminalSnapshot(snapshot, maxBytes, terminalId)`:
 - splits large snapshot into multiple chunks under byte limit using real envelope.
 - handles unicode text and round-trips exactly.
 - does not split surrogate pairs across chunk boundaries.
+- handles minimal surrogate-pair boundary cases where step-back would otherwise regress to `cursor`.
 - honors long terminal IDs (simulate nanoid-length IDs).
 - throws clear error when `maxBytes` is too small for minimal chunk envelope.
 - preserves empty snapshot behavior (`[]`) so caller can choose inline path.
@@ -224,11 +227,14 @@ export function chunkTerminalSnapshot(snapshot: string, maxBytes: number, termin
       const next = snapshot.charCodeAt(best)
       const prevIsHigh = prev >= 0xd800 && prev <= 0xdbff
       const nextIsLow = next >= 0xdc00 && next <= 0xdfff
-      if (prevIsHigh && nextIsLow) best -= 1
+      if (prevIsHigh && nextIsLow) {
+        best -= 1
+      }
     }
 
     if (best === cursor) {
       // Final safety: always advance by one full code point or fail.
+      // This intentionally handles cases where surrogate step-back regressed to cursor.
       const cp = snapshot.codePointAt(cursor)
       const next = cursor + (cp !== undefined && cp > 0xffff ? 2 : 1)
       const candidate = snapshot.slice(cursor, next)
@@ -305,6 +311,8 @@ In `server/ws-handler.ts`:
   - resolves `false` on socket `close` event while frame is in-flight.
   - includes a bounded send timeout `ATTACH_FRAME_SEND_TIMEOUT_MS` (default 30s; env-overridable) so an in-flight send cannot hang indefinitely.
   - on timeout, resolves `false` and proactively closes the socket with `4008` (`Attach send timeout`) to avoid dangling in-flight state.
+  - must be single-settlement: callback, close-handler, and timeout-handler all converge through one `settle(result)` guard so the promise can resolve exactly once.
+  - must remove `close` listeners and clear timeout inside `settle(...)` before resolving to prevent leaks and double-resolution races.
   - this helper is dedicated to attach snapshot sequencing and should not change non-attach send semantics.
 - Add per-terminal-per-connection attach send serialization (promise chaining) so async attach flows cannot interleave.
   - Store chains in `attachSendChains: Map<string, Promise<void>>` keyed by `${connectionId}:${terminalId}`.
@@ -352,6 +360,25 @@ private enqueueAttachSnapshotSend(
 `enqueueAttachSnapshotSend(...)` requirements:
 - Compute chain key `${ws.connectionId}:${args.terminalId}`.
 - Append `sendAttachSnapshotAndFinalize(...)` to the key's promise chain.
+- Use identity-safe cleanup pattern, e.g.:
+
+```ts
+const key = `${ws.connectionId}:${args.terminalId}`
+const previous = this.attachSendChains.get(key) ?? Promise.resolve()
+const current = previous
+  .catch(() => undefined)
+  .then(() => this.sendAttachSnapshotAndFinalize(ws, state, args))
+  .catch((error) => {
+    this.logger.warn('attach_snapshot_send_failed', { key, terminalId: args.terminalId, error })
+  })
+  .finally(() => {
+    if (this.attachSendChains.get(key) === current) {
+      this.attachSendChains.delete(key)
+    }
+  })
+this.attachSendChains.set(key, current)
+```
+
 - Catch/log inside the chain so the websocket message loop is never blocked and never gets unhandled rejection noise.
 - Keep `onMessage` handlers non-blocking by calling this wrapper and returning immediately (do not `await` chain completion in handlers).
 - In `onClose(...)`, perform `attachChainKeysByConnection` cleanup using `ws.connectionId`.
@@ -481,7 +508,7 @@ In `src/components/terminal/useChunkedAttach.ts` (new hook):
 In `src/components/TerminalView.tsx`:
 - Replace inline chunk state machine branches with hook integration points:
   - pass websocket messages/terminal identity into the hook.
-  - apply hook outputs (`snapshotText`, `snapshotState`, `shouldAutoReattach`, warnings) to existing render and terminal write flows.
+  - apply hook outputs from `useState`/hook callbacks (`snapshotText`, `snapshotState`, `shouldAutoReattach`, warnings) to existing render and terminal write flows.
 - Keep rendering/UI responsibilities in `TerminalView`; keep protocol sequencing and retries in the hook.
 
 Suggested local types:
@@ -584,6 +611,7 @@ Add:
 
 In `server/index.ts` shutdown flow:
 - ensure `sessionsSync` is instantiated in `main()` scope that the `shutdown` closure captures.
+- constructor signature remains backward-compatible via default second parameter (`options = {}`); existing callsites compile unchanged unless custom options are needed.
 - call `sessionsSync.shutdown()` as an explicit early shutdown step immediately after `server.close(...)` and before registry/CLI/ws shutdown actions, so no coalesced timer can fire during shutdown.
 
 ### Step 4. Run tests (green)
