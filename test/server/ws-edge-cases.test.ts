@@ -182,13 +182,17 @@ class FakeRegistry {
     }))
   }
 
-  findRunningClaudeTerminalBySession(sessionId: string) {
+  findRunningTerminalBySession(mode: string, sessionId: string) {
     for (const rec of this.records.values()) {
-      if (rec.mode !== 'claude') continue
+      if (rec.mode !== mode) continue
       if (rec.status !== 'running') continue
       if (rec.resumeSessionId === sessionId) return rec
     }
     return undefined
+  }
+
+  findRunningClaudeTerminalBySession(sessionId: string) {
+    return this.findRunningTerminalBySession('claude', sessionId)
   }
 
   // Simulate terminal output for testing

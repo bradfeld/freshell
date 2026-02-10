@@ -1129,7 +1129,9 @@ export class WsHandler {
             }
           }
 
-          // Kick off session repair without blocking terminal creation.
+          // Session repair is Claude-specific (uses JSONL session files).
+          // Other providers (codex, opencode, etc.) don't use the same file
+          // structure, so this block correctly remains gated on mode === 'claude'.
           if (m.mode === 'claude' && effectiveResumeSessionId && this.sessionRepairService) {
             const sessionId = effectiveResumeSessionId
             const cached = this.sessionRepairService.getResult(sessionId)
