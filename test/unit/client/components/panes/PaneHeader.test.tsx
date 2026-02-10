@@ -291,7 +291,7 @@ describe('PaneHeader', () => {
       expect(onToggleZoom).toHaveBeenCalledTimes(1)
     })
 
-    it('stops mouseDown propagation to prevent drag', () => {
+    it('allows mouseDown to propagate so parent can activate pane', () => {
       const parentMouseDown = vi.fn()
       render(
         <div onMouseDown={parentMouseDown}>
@@ -307,7 +307,7 @@ describe('PaneHeader', () => {
       )
 
       fireEvent.mouseDown(screen.getByTitle('Maximize pane'))
-      expect(parentMouseDown).not.toHaveBeenCalled()
+      expect(parentMouseDown).toHaveBeenCalledTimes(1)
     })
 
     it('does not render zoom button when onToggleZoom is not provided', () => {

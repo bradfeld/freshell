@@ -185,7 +185,7 @@ describe('IntersectionDragOverlay', () => {
       expect(overlay.className).toContain('pointer-events-none')
     })
 
-    it('hot zones have separator role and aria-label', () => {
+    it('hot zones are hidden from assistive technology', () => {
       const store = createStore({
         layouts: { 'tab-1': create2x2Grid() },
       })
@@ -196,9 +196,12 @@ describe('IntersectionDragOverlay', () => {
         store,
       )
 
-      const hotzones = screen.getAllByRole('separator')
-      expect(hotzones.length).toBeGreaterThanOrEqual(1)
-      expect(hotzones[0]).toHaveAttribute('aria-label', 'Intersection drag handle')
+      const hotzone = screen.getByTestId('intersection-hotzone-400,300')
+      expect(hotzone).toHaveAttribute('aria-hidden', 'true')
+      // Should not be in the tab order (no tabIndex or tabIndex=-1)
+      expect(hotzone.tabIndex).toBe(-1)
+      // Should not have a role that exposes it to screen readers
+      expect(hotzone).not.toHaveAttribute('role')
     })
   })
 

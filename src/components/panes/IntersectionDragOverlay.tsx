@@ -227,9 +227,7 @@ export default function IntersectionDragOverlay({
           <div
             key={key}
             data-testid={`intersection-hotzone-${key}`}
-            role="separator"
-            tabIndex={0}
-            aria-label="Intersection drag handle"
+            aria-hidden="true"
             className="absolute pointer-events-auto cursor-move"
             style={{
               left: intersection.x - HOT_ZONE_SIZE / 2,

@@ -89,7 +89,6 @@ export default function PaneHeader({
 
       {onToggleZoom && (
         <button
-          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
             onToggleZoom()
