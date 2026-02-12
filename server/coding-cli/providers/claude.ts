@@ -1,6 +1,5 @@
 import path from 'path'
 import { createHash } from 'crypto'
-import fs from 'fs'
 import fsp from 'fs/promises'
 import { extractTitleFromMessage } from '../../title-utils.js'
 import { isValidClaudeSessionId } from '../../claude-session-id.js'
@@ -115,10 +114,10 @@ function parseAutocompactSnapshotFromDebugText(text: string): ClaudeDebugAutocom
   return snapshot?.tokens || snapshot?.threshold ? snapshot : undefined
 }
 
-function readClaudeDebugAutocompactSnapshot(
+async function readClaudeDebugAutocompactSnapshot(
   sessionId: string,
   claudeHome: string,
-): ClaudeDebugAutocompactSnapshot | undefined {
+): Promise<ClaudeDebugAutocompactSnapshot | undefined> {
   if (!sessionId || !isValidClaudeSessionId(sessionId)) return undefined
 
   const debugPath = path.join(claudeHome, 'debug', `${sessionId}.txt`)
@@ -132,12 +131,13 @@ function readClaudeDebugAutocompactSnapshot(
     }
 
     try {
-      const stat = fs.statSync(debugPath)
+      const stat = await fsp.stat(debugPath)
       const mtimeMs = stat.mtimeMs || stat.mtime.getTime()
       const size = stat.size
       if (cached.mtimeMs === mtimeMs && cached.size === size) {
         return cached.snapshot || undefined
       }
+      // Fall through: file changed, so re-read below using this stat.
     } catch {
       claudeDebugAutocompactCache.set(cacheKey, {
         checkedAt: now,
@@ -148,8 +148,8 @@ function readClaudeDebugAutocompactSnapshot(
   }
 
   try {
-    const stat = fs.statSync(debugPath)
-    const fd = fs.openSync(debugPath, 'r')
+    const stat = await fsp.stat(debugPath)
+    const fd = await fsp.open(debugPath, 'r')
     let snapshot: ClaudeDebugAutocompactSnapshot | undefined
     try {
       const maxReadBytes = Math.min(stat.size, CLAUDE_DEBUG_AUTOCOMPACT_MAX_READ_BYTES)
@@ -163,23 +163,22 @@ function readClaudeDebugAutocompactSnapshot(
         return undefined
       }
 
-      const byteBudgetsRaw = [
-        CLAUDE_DEBUG_AUTOCOMPACT_TAIL_BYTES,
-        512 * 1024,
-        2 * 1024 * 1024,
+      const byteBudgets = Array.from(new Set([
+        Math.min(CLAUDE_DEBUG_AUTOCOMPACT_TAIL_BYTES, maxReadBytes),
+        Math.min(512 * 1024, maxReadBytes),
+        Math.min(2 * 1024 * 1024, maxReadBytes),
         maxReadBytes,
-      ].map((b) => Math.min(b, maxReadBytes))
-      const byteBudgets = byteBudgetsRaw.filter((b, idx, arr) => b > 0 && (idx === 0 || b !== arr[idx - 1]))
+      ])).filter((b) => b > 0)
 
       for (const bytesToRead of byteBudgets) {
         const start = Math.max(0, stat.size - bytesToRead)
         const buffer = Buffer.alloc(bytesToRead)
-        const read = fs.readSync(fd, buffer, 0, bytesToRead, start)
-        snapshot = parseAutocompactSnapshotFromDebugText(buffer.subarray(0, read).toString('utf8'))
+        const read = await fd.read(buffer, 0, bytesToRead, start)
+        snapshot = parseAutocompactSnapshotFromDebugText(buffer.subarray(0, read.bytesRead).toString('utf8'))
         if (snapshot) break
       }
     } finally {
-      fs.closeSync(fd)
+      await fd.close()
     }
 
     claudeDebugAutocompactCache.set(cacheKey, {
@@ -427,9 +426,9 @@ export const claudeProvider: CodingCliProvider = {
     return files
   },
 
-  parseSessionFile(content: string, filePath: string): ParsedSessionMeta {
+  async parseSessionFile(content: string, filePath: string): Promise<ParsedSessionMeta> {
     const fallbackSessionId = path.basename(filePath, '.jsonl')
-    const debugAutocompact = readClaudeDebugAutocompactSnapshot(fallbackSessionId, this.homeDir)
+    const debugAutocompact = await readClaudeDebugAutocompactSnapshot(fallbackSessionId, this.homeDir)
     return parseSessionContent(content, {
       fallbackSessionId,
       compactThresholdTokens: debugAutocompact?.threshold,

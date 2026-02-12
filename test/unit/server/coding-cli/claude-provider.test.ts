@@ -272,7 +272,7 @@ describe('parseSessionContent() - token usage snapshots', () => {
         }),
       ].join('\n')
 
-      const meta = claudeProvider.parseSessionFile(
+      const meta = await claudeProvider.parseSessionFile(
         content,
         path.join(homeDir, 'projects', 'project-a', `${sessionId}.jsonl`),
       )
@@ -289,7 +289,7 @@ describe('parseSessionContent() - token usage snapshots', () => {
         'utf8',
       )
 
-      const refreshed = claudeProvider.parseSessionFile(
+      const refreshed = await claudeProvider.parseSessionFile(
         content,
         path.join(homeDir, 'projects', 'project-a', `${sessionId}.jsonl`),
       )

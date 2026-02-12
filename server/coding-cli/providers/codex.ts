@@ -326,7 +326,7 @@ export const codexProvider: CodingCliProvider = {
     return walkJsonlFiles(sessionsDir)
   },
 
-  parseSessionFile(content: string, _filePath: string) {
+  async parseSessionFile(content: string, _filePath: string) {
     return parseCodexSessionContent(content)
   },
 
