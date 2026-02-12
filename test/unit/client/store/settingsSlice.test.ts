@@ -94,7 +94,7 @@ describe('settingsSlice', () => {
           lineHeight: 1.4,
           cursorBlink: false,
           scrollback: 10000,
-          theme: 'light',
+          theme: 'one-light',
           warnExternalLinks: true,
         },
         defaultCwd: '/home/user',

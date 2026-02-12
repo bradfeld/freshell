@@ -804,7 +804,7 @@ describe('State Edge Cases', () => {
             lineHeight: 1.8,
             cursorBlink: false,
             scrollback: 100000,
-            theme: 'light',
+            theme: 'one-light',
             warnExternalLinks: true,
           },
           defaultCwd: '/custom/path',
