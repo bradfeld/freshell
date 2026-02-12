@@ -33,6 +33,9 @@ export const defaultSettings: AppSettings = {
     width: 288,
     collapsed: false,
   },
+  notifications: {
+    soundEnabled: true,
+  },
   panes: {
     defaultNewPane: 'ask' as const,
     snapThreshold: 2,
@@ -83,6 +86,7 @@ export function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): A
     logging: { ...baseLogging, ...(patch.logging || {}) },
     safety: { ...base.safety, ...(patch.safety || {}) },
     sidebar: { ...base.sidebar, ...(patch.sidebar || {}) },
+    notifications: { ...base.notifications, ...(patch.notifications || {}) },
     panes: { ...base.panes, ...(patch.panes || {}) },
     codingCli: {
       ...baseCodingCli,

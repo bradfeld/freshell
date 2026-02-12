@@ -145,6 +145,9 @@ export interface AppSettings {
     width: number // pixels, default 288 (equivalent to w-72)
     collapsed: boolean // for mobile/responsive use
   }
+  notifications: {
+    soundEnabled: boolean
+  }
   codingCli: CodingCliSettings
   panes: {
     defaultNewPane: DefaultNewPane

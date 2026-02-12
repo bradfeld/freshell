@@ -641,6 +641,19 @@ export default function SettingsView() {
             </SettingsRow>
           </SettingsSection>
 
+          {/* Notifications */}
+          <SettingsSection title="Notifications" description="Sound and alert preferences">
+            <SettingsRow label="Sound on completion">
+              <Toggle
+                checked={settings.notifications?.soundEnabled ?? true}
+                onChange={(checked) => {
+                  dispatch(updateSettingsLocal({ notifications: { soundEnabled: checked } } as any))
+                  scheduleSave({ notifications: { soundEnabled: checked } })
+                }}
+              />
+            </SettingsRow>
+          </SettingsSection>
+
           {/* Terminal */}
           <SettingsSection title="Terminal" description="Font and rendering options">
             <SettingsRow label="Color scheme">

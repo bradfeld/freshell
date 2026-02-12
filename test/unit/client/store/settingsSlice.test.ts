@@ -111,6 +111,9 @@ describe('settingsSlice', () => {
           width: 320,
           collapsed: false,
         },
+        notifications: {
+          soundEnabled: false,
+        },
         codingCli: {
           enabledProviders: ['codex'],
           providers: {

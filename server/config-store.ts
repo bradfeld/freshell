@@ -65,6 +65,9 @@ export type AppSettings = {
     width: number
     collapsed: boolean
   }
+  notifications: {
+    soundEnabled: boolean
+  }
   codingCli: {
     enabledProviders: CodingCliProviderName[]
     providers: Partial<Record<CodingCliProviderName, {
@@ -122,6 +125,9 @@ export const defaultSettings: AppSettings = {
   safety: {
     autoKillIdleMinutes: 180,
     warnBeforeKillMinutes: 5,
+  },
+  notifications: {
+    soundEnabled: true,
   },
   panes: {
     defaultNewPane: 'ask',
@@ -308,6 +314,7 @@ function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSetti
     },
     logging: { ...baseLogging, ...(patch.logging || {}) },
     safety: { ...base.safety, ...(patch.safety || {}) },
+    notifications: { ...base.notifications, ...(patch.notifications || {}) },
     panes: { ...base.panes, ...(patch.panes || {}) },
     sidebar: { ...base.sidebar, ...(patch.sidebar || {}) },
     codingCli: {
