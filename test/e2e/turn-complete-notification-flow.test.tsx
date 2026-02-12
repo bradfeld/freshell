@@ -254,7 +254,7 @@ describe('turn complete notification flow (e2e)', () => {
     }
   })
 
-  it('bells and highlights on background completion, then clears when user types', async () => {
+  it('bells and highlights on background completion, clears on tab click (default click mode)', async () => {
     const store = createStore()
 
     render(
@@ -282,20 +282,11 @@ describe('turn complete notification flow (e2e)', () => {
     const backgroundTabBefore = screen.getByText('Background').closest('div[class*="group"]')
     expect(backgroundTabBefore?.className).toContain('bg-emerald-100')
 
-    // Switch to the background tab
+    // Switch to the background tab — in 'click' mode, attention clears on tab switch
     fireEvent.click(screen.getByText('Background'))
 
     await waitFor(() => {
       expect(store.getState().tabs.activeTabId).toBe('tab-2')
-    })
-
-    // Attention persists after switching tabs (no auto-clear on focus)
-    expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
-
-    // Attention is cleared when the user types (dispatches clearTabAttention).
-    // TerminalView calls clearTabAttention in its sendInput handler.
-    act(() => {
-      store.dispatch(clearTabAttention({ tabId: 'tab-2' }))
     })
 
     await waitFor(() => {
@@ -306,7 +297,7 @@ describe('turn complete notification flow (e2e)', () => {
     expect(backgroundTabAfter?.className).not.toContain('bg-emerald-100')
   })
 
-  it('sets pane attention on completion and clears on user input dispatch', async () => {
+  it('click mode clears both tab and pane attention when switching to completed tab', async () => {
     const store = createStore()
 
     render(
@@ -328,22 +319,25 @@ describe('turn complete notification flow (e2e)', () => {
       })
     })
 
-    // Pane attention should be set alongside tab attention
+    // Both tab and pane attention should be set
     await waitFor(() => {
       expect(store.getState().turnCompletion.attentionByPane['pane-2']).toBe(true)
     })
     expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
 
-    // Simulate clearing pane attention (TerminalView dispatches this on user input)
-    act(() => {
-      store.dispatch(clearPaneAttention({ paneId: 'pane-2' }))
+    // Switch to the background tab — click mode clears both tab AND pane attention
+    fireEvent.click(screen.getByText('Background'))
+
+    await waitFor(() => {
+      expect(store.getState().tabs.activeTabId).toBe('tab-2')
+    })
+
+    await waitFor(() => {
+      expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBeUndefined()
     })
 
     await waitFor(() => {
       expect(store.getState().turnCompletion.attentionByPane['pane-2']).toBeUndefined()
     })
-
-    // Tab attention remains (cleared independently by tab-level input)
-    expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
   })
 })

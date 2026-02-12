@@ -3,9 +3,11 @@ import { render, cleanup, act, waitFor } from '@testing-library/react'
 import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import tabsReducer from '@/store/tabsSlice'
+import panesReducer from '@/store/panesSlice'
+import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import turnCompletionReducer, { recordTurnComplete } from '@/store/turnCompletionSlice'
 import { useTurnCompletionNotifications } from '@/hooks/useTurnCompletionNotifications'
-import type { Tab } from '@/store/types'
+import type { Tab, AttentionDismiss } from '@/store/types'
 
 const playSound = vi.hoisted(() => vi.fn())
 
@@ -18,7 +20,7 @@ function TestComponent() {
   return null
 }
 
-function createStore(activeTabId = 'tab-1') {
+function createStore(activeTabId = 'tab-1', attentionDismiss: AttentionDismiss = 'click') {
   const now = Date.now()
   const tabs: Tab[] = [
     {
@@ -44,6 +46,8 @@ function createStore(activeTabId = 'tab-1') {
   return configureStore({
     reducer: {
       tabs: tabsReducer,
+      panes: panesReducer,
+      settings: settingsReducer,
       turnCompletion: turnCompletionReducer,
     },
     preloadedState: {
@@ -51,6 +55,21 @@ function createStore(activeTabId = 'tab-1') {
         tabs,
         activeTabId,
         renameRequestTabId: null,
+      },
+      panes: {
+        layouts: {},
+        activePane: {
+          'tab-1': 'pane-1',
+          'tab-2': 'pane-2',
+        },
+        paneTitles: {},
+      },
+      settings: {
+        settings: {
+          ...defaultSettings,
+          panes: { ...defaultSettings.panes, attentionDismiss },
+        },
+        loaded: true,
       },
       turnCompletion: {
         seq: 0,
@@ -139,7 +158,7 @@ describe('useTurnCompletionNotifications', () => {
   })
 
   it('marks attention but does not play bell when the active tab completes while focused', async () => {
-    const store = createStore('tab-1')
+    const store = createStore('tab-1', 'type')
 
     render(
       <Provider store={store}>
@@ -156,7 +175,7 @@ describe('useTurnCompletionNotifications', () => {
     })
 
     expect(playSound).not.toHaveBeenCalled()
-    // Attention is always marked — cleared by typing, not by focus
+    // Attention is always marked — in 'type' mode, cleared by typing
     expect(store.getState().turnCompletion.attentionByTab['tab-1']).toBe(true)
   })
 
@@ -181,8 +200,8 @@ describe('useTurnCompletionNotifications', () => {
     expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
   })
 
-  it('does not drop completion when focus state transitions before blur listener updates', async () => {
-    const store = createStore('tab-1')
+  it('does not drop completion when focus state transitions before blur listener updates (type mode)', async () => {
+    const store = createStore('tab-1', 'type')
 
     render(
       <Provider store={store}>
@@ -203,7 +222,7 @@ describe('useTurnCompletionNotifications', () => {
   })
 
   it('marks attention on all tabs in burst completions', async () => {
-    const store = createStore('tab-1')
+    const store = createStore('tab-1', 'type')
 
     render(
       <Provider store={store}>
@@ -222,14 +241,14 @@ describe('useTurnCompletionNotifications', () => {
 
     // Sound plays once (for the background tab-2; active tab-1 skips sound)
     expect(playSound).toHaveBeenCalledTimes(1)
-    // Attention is marked on ALL tabs — cleared by typing, not by focus
+    // In 'type' mode, attention is marked on ALL tabs — cleared by typing only
     expect(store.getState().turnCompletion.attentionByTab['tab-1']).toBe(true)
     expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
   })
 
-  it('attention persists after switching tabs (cleared by typing, not focus)', async () => {
+  it('attention persists in type mode after switching tabs', async () => {
     hasFocus = false
-    const store = createStore('tab-1')
+    const store = createStore('tab-1', 'type')
 
     render(
       <Provider store={store}>
@@ -245,16 +264,45 @@ describe('useTurnCompletionNotifications', () => {
       expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
     })
 
-    // Regain focus and switch to tab-2 — attention should persist
-    // (previously, focus change would auto-clear; now only typing clears it)
+    // Regain focus — in 'type' mode, attention should persist (only typing clears it)
     act(() => {
       hasFocus = true
       window.dispatchEvent(new Event('focus'))
     })
 
-    // Give a tick for any effects to run
     await waitFor(() => {
       expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
     })
+  })
+
+  it('attention clears in click mode when active tab has attention and window is focused', async () => {
+    hasFocus = false
+    const store = createStore('tab-2', 'click')
+
+    render(
+      <Provider store={store}>
+        <TestComponent />
+      </Provider>
+    )
+
+    act(() => {
+      store.dispatch(recordTurnComplete({ tabId: 'tab-2', paneId: 'pane-2', terminalId: 'term-2', at: 100 }))
+    })
+
+    await waitFor(() => {
+      expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
+    })
+    expect(store.getState().turnCompletion.attentionByPane['pane-2']).toBe(true)
+
+    // Regain focus — in 'click' mode, both tab and pane attention should clear
+    act(() => {
+      hasFocus = true
+      window.dispatchEvent(new Event('focus'))
+    })
+
+    await waitFor(() => {
+      expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBeUndefined()
+    })
+    expect(store.getState().turnCompletion.attentionByPane['pane-2']).toBeUndefined()
   })
 })

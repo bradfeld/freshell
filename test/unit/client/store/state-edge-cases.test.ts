@@ -825,6 +825,7 @@ describe('State Edge Cases', () => {
             snapThreshold: 3,
             iconsOnTabs: true,
             tabAttentionStyle: 'highlight' as const,
+            attentionDismiss: 'click' as const,
           },
           codingCli: {
             enabledProviders: ['claude', 'codex'],

@@ -52,6 +52,7 @@ describe('settingsSlice', () => {
         snapThreshold: 2,
         iconsOnTabs: true,
         tabAttentionStyle: 'highlight',
+        attentionDismiss: 'click',
       })
       expect(state.settings.codingCli).toEqual({
         enabledProviders: ['claude', 'codex'],
@@ -124,6 +125,7 @@ describe('settingsSlice', () => {
           snapThreshold: 2,
           iconsOnTabs: true,
           tabAttentionStyle: 'highlight',
+          attentionDismiss: 'click' as const,
         },
       }
 
