@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { Loader2 } from 'lucide-react'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
@@ -52,6 +53,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // All hooks MUST be called before any conditional returns
   const ws = useMemo(() => getWsClient(), [])
   const [isAttaching, setIsAttaching] = useState(false)
+  const [pendingLinkUri, setPendingLinkUri] = useState<string | null>(null)
+  const setPendingLinkUriRef = useRef(setPendingLinkUri)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -200,9 +203,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       linkHandler: {
         activate: (_event: MouseEvent, uri: string) => {
           if (warnExternalLinksRef.current !== false) {
-            if (confirm(`Do you want to navigate to ${uri}?\n\nWARNING: This link could potentially be dangerous`)) {
-              window.open(uri, '_blank', 'noopener,noreferrer')
-            }
+            setPendingLinkUriRef.current(uri)
           } else {
             window.open(uri, '_blank', 'noopener,noreferrer')
           }
@@ -734,6 +735,24 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           {snapshotWarning}
         </div>
       )}
+      <ConfirmModal
+        open={pendingLinkUri !== null}
+        title="Open external link?"
+        body={
+          <>
+            <p className="break-all font-mono text-xs bg-muted rounded px-2 py-1 mb-2">{pendingLinkUri}</p>
+            <p>Links from terminal output could be dangerous. Only open links you trust.</p>
+          </>
+        }
+        confirmLabel="Open link"
+        onConfirm={() => {
+          if (pendingLinkUri) {
+            window.open(pendingLinkUri, '_blank', 'noopener,noreferrer')
+          }
+          setPendingLinkUri(null)
+        }}
+        onCancel={() => setPendingLinkUri(null)}
+      />
     </div>
   )
 }
