@@ -493,7 +493,7 @@ export const codexProvider: CodingCliProvider = {
       const output = parsedToken.eventTokens.outputTokens
       // Codex `cached_input_tokens` is a subset of `input_tokens` (not additive),
       // so prefer the explicit `total_tokens` from the envelope when available.
-      const total = parsedToken.summary?.totalTokens ?? (input + output + (parsedToken.eventTokens.cachedTokens || 0))
+      const total = parsedToken.summary?.totalTokens ?? (input + output)
       return [
         {
           ...base,
