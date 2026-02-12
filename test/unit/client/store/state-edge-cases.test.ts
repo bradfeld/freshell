@@ -820,6 +820,9 @@ describe('State Edge Cases', () => {
             width: 400,
             collapsed: true,
           },
+          notifications: {
+            soundEnabled: false,
+          },
           panes: {
             defaultNewPane: 'shell',
             snapThreshold: 3,
