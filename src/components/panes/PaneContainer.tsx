@@ -26,6 +26,7 @@ import type { TerminalMetaRecord } from '@/store/terminalMetaSlice'
 // Stable empty object to avoid selector memoization issues
 const EMPTY_PANE_TITLES: Record<string, string> = {}
 const EMPTY_TERMINAL_META_BY_ID: Record<string, TerminalMetaRecord> = {}
+const EMPTY_ATTENTION_BY_PANE: Record<string, boolean> = {}
 
 interface PaneContainerProps {
   tabId: string
@@ -101,6 +102,12 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     (s) => s.terminalMeta?.byTerminalId ?? EMPTY_TERMINAL_META_BY_ID
   )
   const zoomedPaneId = useAppSelector((s) => s.panes.zoomedPane?.[tabId])
+  const attentionByPane = useAppSelector(
+    (s) => s.turnCompletion?.attentionByPane ?? EMPTY_ATTENTION_BY_PANE
+  )
+  const tabAttentionStyle = useAppSelector(
+    (s) => s.settings?.settings?.panes?.tabAttentionStyle ?? 'highlight'
+  )
   const containerRef = useRef<HTMLDivElement>(null)
   const ws = useMemo(() => getWsClient(), [])
   const snapThreshold = useAppSelector((s) => s.settings?.settings?.panes?.snapThreshold ?? 2)
@@ -280,6 +287,8 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         ? formatPaneRuntimeTooltip(paneRuntimeMeta)
         : undefined
 
+    const needsAttention = tabAttentionStyle !== 'none' && !!attentionByPane[node.id]
+
     return (
       <Pane
         tabId={tabId}
@@ -291,6 +300,7 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
         content={node.content}
         metaLabel={paneMetaLabel}
         metaTooltip={paneMetaTooltip}
+        needsAttention={needsAttention}
         onClose={() => handleClose(node.id, node.content)}
         onFocus={() => handleFocus(node.id)}
         onToggleZoom={() => handleToggleZoom(node.id)}

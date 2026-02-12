@@ -18,6 +18,7 @@ interface PaneHeaderProps {
   title: string
   metaLabel?: string
   metaTooltip?: string
+  needsAttention?: boolean
   status: TerminalStatus
   isActive: boolean
   onClose: () => void
@@ -36,6 +37,7 @@ export default function PaneHeader({
   title,
   metaLabel,
   metaTooltip,
+  needsAttention,
   status,
   isActive,
   onClose,
@@ -62,7 +64,9 @@ export default function PaneHeader({
     <div
       className={cn(
         'flex items-center gap-2 h-7 px-2 text-sm border-b border-border shrink-0',
-        isActive ? 'bg-muted' : 'bg-muted/50 text-muted-foreground'
+        needsAttention
+          ? 'bg-emerald-50 border-l-2 border-l-emerald-500 dark:bg-emerald-900/30'
+          : isActive ? 'bg-muted' : 'bg-muted/50 text-muted-foreground'
       )}
       onDoubleClick={isRenaming ? undefined : onDoubleClick}
       role="banner"

@@ -14,6 +14,7 @@ export interface TurnCompletionState {
   lastEvent: TurnCompleteEvent | null
   pendingEvents: TurnCompleteEvent[]
   attentionByTab: Record<string, boolean>
+  attentionByPane: Record<string, boolean>
 }
 
 const initialState: TurnCompletionState = {
@@ -21,6 +22,7 @@ const initialState: TurnCompletionState = {
   lastEvent: null,
   pendingEvents: [],
   attentionByTab: {},
+  attentionByPane: {},
 }
 
 const turnCompletionSlice = createSlice({
@@ -49,6 +51,14 @@ const turnCompletionSlice = createSlice({
       if (!state.attentionByTab[action.payload.tabId]) return
       delete state.attentionByTab[action.payload.tabId]
     },
+    markPaneAttention(state, action: PayloadAction<{ paneId: string }>) {
+      if (state.attentionByPane[action.payload.paneId]) return
+      state.attentionByPane[action.payload.paneId] = true
+    },
+    clearPaneAttention(state, action: PayloadAction<{ paneId: string }>) {
+      if (!state.attentionByPane[action.payload.paneId]) return
+      delete state.attentionByPane[action.payload.paneId]
+    },
   },
 })
 
@@ -57,6 +67,8 @@ export const {
   consumeTurnCompleteEvents,
   markTabAttention,
   clearTabAttention,
+  markPaneAttention,
+  clearPaneAttention,
 } = turnCompletionSlice.actions
 
 export default turnCompletionSlice.reducer

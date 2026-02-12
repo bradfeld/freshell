@@ -538,5 +538,59 @@ describe('PaneHeader', () => {
       const header = container.firstChild as HTMLElement
       expect(header.className).toContain('bg-muted/50')
     })
+
+    it('applies emerald attention styling when needsAttention is true', () => {
+      const { container } = render(
+        <PaneHeader
+          title="My Terminal"
+          status="running"
+          isActive={false}
+          needsAttention={true}
+          onClose={vi.fn()}
+          content={makeTerminalContent()}
+        />
+      )
+
+      const header = container.firstChild as HTMLElement
+      expect(header.className).toContain('bg-emerald-50')
+      expect(header.className).toContain('border-l-emerald-500')
+      // Attention takes precedence: no active/inactive bg classes
+      expect(header.className).not.toContain('bg-muted/50')
+      expect(header.className).not.toContain('text-muted-foreground')
+    })
+
+    it('does not apply emerald styling when needsAttention is false', () => {
+      const { container } = render(
+        <PaneHeader
+          title="My Terminal"
+          status="running"
+          isActive={true}
+          needsAttention={false}
+          onClose={vi.fn()}
+          content={makeTerminalContent()}
+        />
+      )
+
+      const header = container.firstChild as HTMLElement
+      expect(header.className).not.toContain('bg-emerald-50')
+      expect(header.className).not.toContain('border-l-emerald-500')
+      expect(header.className).toContain('bg-muted')
+    })
+
+    it('does not apply emerald styling when needsAttention is undefined', () => {
+      const { container } = render(
+        <PaneHeader
+          title="My Terminal"
+          status="running"
+          isActive={true}
+          onClose={vi.fn()}
+          content={makeTerminalContent()}
+        />
+      )
+
+      const header = container.firstChild as HTMLElement
+      expect(header.className).not.toContain('bg-emerald-50')
+      expect(header.className).not.toContain('border-l-emerald-500')
+    })
   })
 })

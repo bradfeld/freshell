@@ -10,7 +10,7 @@ import tabsReducer from '@/store/tabsSlice'
 import panesReducer from '@/store/panesSlice'
 import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import connectionReducer from '@/store/connectionSlice'
-import turnCompletionReducer, { clearTabAttention } from '@/store/turnCompletionSlice'
+import turnCompletionReducer, { clearTabAttention, clearPaneAttention } from '@/store/turnCompletionSlice'
 import type { PaneNode, TerminalPaneContent } from '@/store/paneTypes'
 import type { Tab } from '@/store/types'
 
@@ -205,6 +205,7 @@ function createStore() {
         lastEvent: null,
         pendingEvents: [],
         attentionByTab: {},
+        attentionByPane: {},
       },
     },
   })
@@ -303,5 +304,46 @@ describe('turn complete notification flow (e2e)', () => {
 
     const backgroundTabAfter = screen.getByText('Background').closest('div[class*="group"]')
     expect(backgroundTabAfter?.className).not.toContain('bg-emerald-100')
+  })
+
+  it('sets pane attention on completion and clears on user input dispatch', async () => {
+    const store = createStore()
+
+    render(
+      <Provider store={store}>
+        <Harness />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(wsMocks.onMessage).toHaveBeenCalled()
+    })
+
+    // Emit turn complete signal on background tab's terminal
+    act(() => {
+      wsMocks.emitMessage({
+        type: 'terminal.output',
+        terminalId: 'term-2',
+        data: '\x07',
+      })
+    })
+
+    // Pane attention should be set alongside tab attention
+    await waitFor(() => {
+      expect(store.getState().turnCompletion.attentionByPane['pane-2']).toBe(true)
+    })
+    expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
+
+    // Simulate clearing pane attention (TerminalView dispatches this on user input)
+    act(() => {
+      store.dispatch(clearPaneAttention({ paneId: 'pane-2' }))
+    })
+
+    await waitFor(() => {
+      expect(store.getState().turnCompletion.attentionByPane['pane-2']).toBeUndefined()
+    })
+
+    // Tab attention remains (cleared independently by tab-level input)
+    expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
   })
 })

@@ -57,6 +57,7 @@ function createStore(activeTabId = 'tab-1') {
         lastEvent: null,
         pendingEvents: [],
         attentionByTab: {},
+        attentionByPane: {},
       },
     },
   })
@@ -114,6 +115,27 @@ describe('useTurnCompletionNotifications', () => {
     })
     expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
     expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
+  })
+
+  it('marks pane attention alongside tab attention on completion', async () => {
+    const store = createStore('tab-1')
+
+    render(
+      <Provider store={store}>
+        <TestComponent />
+      </Provider>
+    )
+
+    act(() => {
+      store.dispatch(recordTurnComplete({ tabId: 'tab-2', paneId: 'pane-2', terminalId: 'term-2', at: 100 }))
+    })
+
+    await waitFor(() => {
+      expect(store.getState().turnCompletion.pendingEvents).toHaveLength(0)
+    })
+
+    expect(store.getState().turnCompletion.attentionByTab['tab-2']).toBe(true)
+    expect(store.getState().turnCompletion.attentionByPane['pane-2']).toBe(true)
   })
 
   it('marks attention but does not play bell when the active tab completes while focused', async () => {

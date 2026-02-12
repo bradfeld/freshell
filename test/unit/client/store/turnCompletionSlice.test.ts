@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import reducer, {
   clearTabAttention,
+  clearPaneAttention,
   consumeTurnCompleteEvents,
   markTabAttention,
+  markPaneAttention,
   recordTurnComplete,
   type TurnCompletionState,
 } from '@/store/turnCompletionSlice'
@@ -80,11 +82,34 @@ describe('turnCompletionSlice', () => {
       lastEvent: null,
       pendingEvents: [],
       attentionByTab: {},
+      attentionByPane: {},
     }
     // Should return exact same state reference — no draft modification
     expect(state).toEqual(initial)
     // Also verify repeated clears don't mutate
     const next = reducer(state, clearTabAttention({ tabId: 'tab-1' }))
+    expect(next).toBe(state)
+  })
+
+  it('marks and clears pane attention', () => {
+    let state = reducer(undefined, markPaneAttention({ paneId: 'pane-5' }))
+    expect(state.attentionByPane['pane-5']).toBe(true)
+
+    state = reducer(state, clearPaneAttention({ paneId: 'pane-5' }))
+    expect(state.attentionByPane['pane-5']).toBeUndefined()
+  })
+
+  it('markPaneAttention is a no-op when already set (perf guard)', () => {
+    const state = reducer(undefined, markPaneAttention({ paneId: 'pane-1' }))
+    const next = reducer(state, markPaneAttention({ paneId: 'pane-1' }))
+    // Immer returns the same reference when the draft is unmodified
+    expect(next).toBe(state)
+  })
+
+  it('clearPaneAttention is a no-op when not set (perf guard)', () => {
+    const state = reducer(undefined, clearPaneAttention({ paneId: 'pane-1' }))
+    // Should return exact same state reference — no draft modification
+    const next = reducer(state, clearPaneAttention({ paneId: 'pane-1' }))
     expect(next).toBe(state)
   })
 })

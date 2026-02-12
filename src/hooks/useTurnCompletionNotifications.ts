@@ -3,6 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
   consumeTurnCompleteEvents,
   markTabAttention,
+  markPaneAttention,
   type TurnCompleteEvent,
 } from '@/store/turnCompletionSlice'
 import { useNotificationSound } from '@/hooks/useNotificationSound'
@@ -33,6 +34,7 @@ export function useTurnCompletionNotifications() {
       if (event.seq <= lastHandledSeqRef.current) continue
       highestHandledSeq = Math.max(highestHandledSeq, event.seq)
       dispatch(markTabAttention({ tabId: event.tabId }))
+      dispatch(markPaneAttention({ paneId: event.paneId }))
       if (windowFocused && activeTabId === event.tabId) {
         continue
       }

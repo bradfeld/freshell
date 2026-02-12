@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
-import { recordTurnComplete, clearTabAttention } from '@/store/turnCompletionSlice'
+import { recordTurnComplete, clearTabAttention, clearPaneAttention } from '@/store/turnCompletionSlice'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
@@ -46,6 +46,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const settings = useAppSelector((s) => s.settings.settings)
   const hasAttention = useAppSelector((s) => !!s.turnCompletion?.attentionByTab?.[tabId])
   const hasAttentionRef = useRef(hasAttention)
+  const hasPaneAttention = useAppSelector((s) => !!s.turnCompletion?.attentionByPane?.[paneId])
+  const hasPaneAttentionRef = useRef(hasPaneAttention)
 
   // All hooks MUST be called before any conditional returns
   const ws = useMemo(() => getWsClient(), [])
@@ -94,6 +96,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // latest value — avoids a stale-ref window where the first keystroke after
   // attention is set wouldn't clear it.
   hasAttentionRef.current = hasAttention
+  hasPaneAttentionRef.current = hasPaneAttention
 
   const shouldFocusActiveTerminal = !hidden && activeTabId === tabId && activePaneId === paneId
 
@@ -167,8 +170,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (hasAttentionRef.current) {
       dispatch(clearTabAttention({ tabId }))
     }
+    if (hasPaneAttentionRef.current) {
+      dispatch(clearPaneAttention({ paneId }))
+    }
     ws.send({ type: 'terminal.input', terminalId: tid, data })
-  }, [dispatch, tabId, ws])
+  }, [dispatch, tabId, paneId, ws])
 
   // Init xterm once
   useEffect(() => {

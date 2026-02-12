@@ -13,6 +13,7 @@ interface PaneProps {
   title?: string
   metaLabel?: string
   metaTooltip?: string
+  needsAttention?: boolean
   status?: TerminalStatus
   content?: PaneContent
   onClose: () => void
@@ -36,6 +37,7 @@ export default function Pane({
   title,
   metaLabel,
   metaTooltip,
+  needsAttention,
   status,
   content,
   onClose,
@@ -77,6 +79,7 @@ export default function Pane({
             title={title}
             metaLabel={metaLabel}
             metaTooltip={metaTooltip}
+            needsAttention={needsAttention}
             status={status || 'creating'}
             isActive={isActive}
             onClose={onClose}
