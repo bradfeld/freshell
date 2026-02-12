@@ -23,7 +23,14 @@
 
 **Architecture:** Replace `SdkBridge`'s internal `child_process.spawn` + WebSocketServer with the official `@anthropic-ai/claude-agent-sdk` TypeScript SDK. The SDK's `query()` function returns an `AsyncGenerator<SDKMessage>` that handles subprocess transport, CLI flags, initialization, and the control protocol. SdkBridge becomes a thin adapter: it creates `query()` instances per session, iterates their message streams, translates `SDKMessage` types into the existing `sdk.*` browser protocol, and handles `canUseTool` callbacks by pausing the SDK and waiting for browser user responses via Promises. The internal WebSocketServer is deleted entirely.
 
-**Tech Stack:** `@anthropic-ai/claude-agent-sdk` (official TS SDK, v0.2.39), existing: Node.js, ws, Zod, Vitest
+**Tech Stack:** `@anthropic-ai/claude-agent-sdk` (official TS SDK, latest), existing: Node.js, ws, Zod, Vitest
+
+**Post-review fixes (2026-02-12):** Independent review identified 3 valid issues (of 6 flagged):
+1. **Permission flow incomplete** — `PermissionResult` is a discriminated union where `deny` requires `message`; `allow` supports `updatedPermissions`. The `canUseTool` options (`suggestions`, `blockedPath`, `decisionReason`, `toolUseID`) must be forwarded to the browser. Fixed throughout Task 2-3.
+2. **Race condition** — `consumeStream` starts before WS subscribers attach, dropping early init/status messages. Fixed with message buffering in Task 3 (`messageBuffer` + replay on first `subscribe()`).
+3. **Test coverage** — `it.todo` placeholders replaced with real type-level tests. Permission round-trip and message buffering tests added to Task 3.
+
+(Issues 2-3 of the original 6 — non-existent SDK types and wrong API names — were false positives: `SDKStatusMessage`, `SDKToolProgressMessage`, `PermissionResult`, `settingSources`, `close()`, and `streamInput()` all exist in the SDK.)
 
 ---
 
@@ -90,16 +97,85 @@ The current `sdk-bridge-types.ts` has Zod schemas for CLI↔Server NDJSON that a
 
 Modify `test/unit/server/sdk-bridge-types.test.ts`. The existing tests validate `CliMessageSchema` (Zod) which we are removing. Replace with tests that validate the new approach — since we'll be using SDK types directly, tests should verify our `toSdkServerMessage()` translation function (written in Task 3).
 
-For now, remove the `CliMessageSchema` validation tests and add placeholder test:
+Remove the `CliMessageSchema` validation tests and replace with tests that verify the SDK re-exports compile and the updated `SdkSessionState` shape:
 
 ```typescript
+import type {
+  SDKMessage,
+  SDKAssistantMessage,
+  SDKResultSuccess,
+  SDKResultError,
+  SDKSystemMessage,
+  SDKPartialAssistantMessage,
+  SDKUserMessage,
+  SDKStatusMessage,
+  SDKToolProgressMessage,
+  SDKToolUseSummaryMessage,
+  SdkOptions,
+  SdkQuery,
+  CanUseTool,
+  PermissionResult,
+} from '../../../server/sdk-bridge-types.js'
+import type { SdkSessionState } from '../../../server/sdk-bridge-types.js'
+
 describe('SDK Bridge Types', () => {
   describe('BrowserSdkMessageSchema', () => {
     // Keep all existing BrowserSdkMessage tests — these are correct
   })
 
-  describe('CliMessageSchema (removed)', () => {
-    it.todo('replaced by official SDK types — see sdk-bridge.ts')
+  describe('SDK re-exports', () => {
+    it('re-exports SDKMessage union type', () => {
+      // Type-level test: verify the re-export compiles
+      const msg: SDKMessage = {
+        type: 'assistant',
+        message: {} as any,
+        parent_tool_use_id: null,
+        uuid: 'test' as any,
+        session_id: 'test',
+      }
+      expect(msg.type).toBe('assistant')
+    })
+
+    it('re-exports PermissionResult discriminated union', () => {
+      const allow: PermissionResult = {
+        behavior: 'allow',
+        updatedInput: { command: 'ls' },
+        updatedPermissions: [],
+      }
+      // deny requires message (not optional)
+      const deny: PermissionResult = {
+        behavior: 'deny',
+        message: 'User denied',
+        interrupt: true,
+      }
+      expect(allow.behavior).toBe('allow')
+      expect(deny.behavior).toBe('deny')
+    })
+  })
+
+  describe('SdkSessionState', () => {
+    it('pendingPermissions stores resolve function and SDK context', () => {
+      const state: SdkSessionState = {
+        sessionId: 'test',
+        status: 'connected',
+        createdAt: Date.now(),
+        messages: [],
+        pendingPermissions: new Map(),
+        costUsd: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+      }
+      const resolveFn = vi.fn()
+      state.pendingPermissions.set('req-1', {
+        toolName: 'Bash',
+        input: { command: 'ls' },
+        toolUseID: 'tool-1',
+        resolve: resolveFn,
+      })
+      const pending = state.pendingPermissions.get('req-1')!
+      pending.resolve({ behavior: 'allow' })
+      expect(resolveFn).toHaveBeenCalledWith({ behavior: 'allow' })
+    })
   })
 })
 ```
@@ -143,6 +219,7 @@ export type {
   Query as SdkQuery,
   CanUseTool,
   PermissionResult,
+  PermissionUpdate,
 } from '@anthropic-ai/claude-agent-sdk'
 ```
 
@@ -168,7 +245,11 @@ export interface SdkSessionState {
   pendingPermissions: Map<string, {
     toolName: string
     input: Record<string, unknown>
-    resolve: (result: { behavior: 'allow' | 'deny'; updatedInput?: Record<string, unknown>; message?: string }) => void
+    toolUseID: string
+    suggestions?: PermissionUpdate[]
+    blockedPath?: string
+    decisionReason?: string
+    resolve: (result: PermissionResult) => void
   }>
   costUsd: number
   totalInputTokens: number
@@ -420,6 +501,102 @@ describe('SdkBridge', () => {
     })
   })
 
+  describe('permission round-trip', () => {
+    it('broadcasts permission request with SDK context fields', async () => {
+      // canUseTool callback is invoked by the SDK internally; test via mock
+      const session = await bridge.createSession({ cwd: '/tmp' })
+      const received: any[] = []
+      bridge.subscribe(session.sessionId, (msg) => received.push(msg))
+
+      // Simulate a permission request arriving (via the SDK calling canUseTool)
+      // Since we mock query(), we test respondPermission directly
+      const state = bridge.getSession(session.sessionId)!
+      const resolvePromise = new Promise<any>((resolve) => {
+        state.pendingPermissions.set('req-1', {
+          toolName: 'Bash',
+          input: { command: 'rm -rf /' },
+          toolUseID: 'tool-1',
+          suggestions: [],
+          resolve,
+        })
+      })
+
+      // Browser user allows with updatedInput
+      bridge.respondPermission(session.sessionId, 'req-1', {
+        behavior: 'allow',
+        updatedInput: { command: 'ls' },
+      })
+
+      const result = await resolvePromise
+      expect(result.behavior).toBe('allow')
+      expect(result.updatedInput).toEqual({ command: 'ls' })
+      expect(state.pendingPermissions.has('req-1')).toBe(false)
+    })
+
+    it('deny requires message field (matches SDK PermissionResult)', async () => {
+      const session = await bridge.createSession({ cwd: '/tmp' })
+      const state = bridge.getSession(session.sessionId)!
+      const resolvePromise = new Promise<any>((resolve) => {
+        state.pendingPermissions.set('req-2', {
+          toolName: 'Bash',
+          input: { command: 'rm -rf /' },
+          toolUseID: 'tool-2',
+          resolve,
+        })
+      })
+
+      bridge.respondPermission(session.sessionId, 'req-2', {
+        behavior: 'deny',
+        message: 'Too dangerous',
+        interrupt: true,
+      })
+
+      const result = await resolvePromise
+      expect(result.behavior).toBe('deny')
+      expect(result.message).toBe('Too dangerous')
+      expect(result.interrupt).toBe(true)
+    })
+  })
+
+  describe('message buffering', () => {
+    it('buffers messages before first subscriber and replays on subscribe', async () => {
+      mockMessages.push(
+        {
+          type: 'system',
+          subtype: 'init',
+          session_id: 'cli-123',
+          model: 'claude-sonnet-4-5-20250929',
+          cwd: '/tmp',
+          tools: ['Bash'],
+          uuid: 'test-uuid-1',
+        },
+        {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: 'Hello' }],
+            model: 'claude-sonnet-4-5-20250929',
+          },
+          parent_tool_use_id: null,
+          uuid: 'test-uuid-2',
+          session_id: 'cli-123',
+        },
+      )
+
+      const session = await bridge.createSession({ cwd: '/tmp' })
+
+      // Wait for stream to be consumed (messages buffered, no subscriber yet)
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      // NOW subscribe — should get buffered messages replayed
+      const received: any[] = []
+      bridge.subscribe(session.sessionId, (msg) => received.push(msg))
+
+      expect(received.length).toBeGreaterThanOrEqual(2)
+      expect(received[0].type).toBe('sdk.session.init')
+      expect(received[1].type).toBe('sdk.assistant')
+    })
+  })
+
   describe('sendUserMessage', () => {
     it('returns false for nonexistent session', () => {
       expect(bridge.sendUserMessage('nonexistent', 'hello')).toBe(false)
@@ -452,6 +629,7 @@ Replace the entire file. The new SdkBridge:
 import { nanoid } from 'nanoid'
 import { EventEmitter } from 'events'
 import { query, type SDKMessage, type Query as SdkQuery } from '@anthropic-ai/claude-agent-sdk'
+import type { PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
 import { logger } from './logger.js'
 import type {
   SdkSessionState,
@@ -465,6 +643,9 @@ interface SessionProcess {
   query: SdkQuery
   abortController: AbortController
   browserListeners: Set<(msg: SdkServerMessage) => void>
+  /** Buffer messages until the first subscriber attaches (prevents race condition) */
+  messageBuffer: SdkServerMessage[]
+  hasSubscribers: boolean
 }
 
 export class SdkBridge extends EventEmitter {
@@ -515,6 +696,8 @@ export class SdkBridge extends EventEmitter {
       query: sdkQuery,
       abortController,
       browserListeners: new Set(),
+      messageBuffer: [],
+      hasSubscribers: false,
     })
 
     // Start consuming the message stream in the background
@@ -698,8 +881,15 @@ export class SdkBridge extends EventEmitter {
     sessionId: string,
     toolName: string,
     input: Record<string, unknown>,
-    _ctx: any,
-  ): Promise<{ behavior: 'allow' | 'deny'; message?: string; updatedInput?: Record<string, unknown> }> {
+    options: {
+      signal: AbortSignal
+      suggestions?: PermissionUpdate[]
+      blockedPath?: string
+      decisionReason?: string
+      toolUseID: string
+      agentID?: string
+    },
+  ): Promise<PermissionResult> {
     const state = this.sessions.get(sessionId)
     if (!state) return { behavior: 'deny', message: 'Session not found' }
 
@@ -710,6 +900,10 @@ export class SdkBridge extends EventEmitter {
       state.pendingPermissions.set(requestId, {
         toolName,
         input,
+        toolUseID: options.toolUseID,
+        suggestions: options.suggestions,
+        blockedPath: options.blockedPath,
+        decisionReason: options.decisionReason,
         resolve,
       })
 
@@ -719,6 +913,10 @@ export class SdkBridge extends EventEmitter {
         requestId,
         subtype: 'can_use_tool',
         tool: { name: toolName, input },
+        toolUseID: options.toolUseID,
+        suggestions: options.suggestions,
+        blockedPath: options.blockedPath,
+        decisionReason: options.decisionReason,
       })
     })
   }
@@ -750,6 +948,19 @@ export class SdkBridge extends EventEmitter {
     const sp = this.processes.get(sessionId)
     if (!sp) return null
     sp.browserListeners.add(listener)
+
+    // Replay buffered messages to the first subscriber (fixes race where
+    // consumeStream starts before WS handler has attached a listener)
+    if (!sp.hasSubscribers) {
+      sp.hasSubscribers = true
+      for (const msg of sp.messageBuffer) {
+        try { listener(msg) } catch (err) {
+          log.warn({ err, sessionId }, 'Buffer replay error')
+        }
+      }
+      sp.messageBuffer.length = 0
+    }
+
     return () => { sp.browserListeners.delete(listener) }
   }
 
@@ -790,16 +1001,14 @@ export class SdkBridge extends EventEmitter {
   respondPermission(
     sessionId: string,
     requestId: string,
-    behavior: 'allow' | 'deny',
-    updatedInput?: Record<string, unknown>,
-    message?: string,
+    decision: PermissionResult,
   ): boolean {
     const state = this.sessions.get(sessionId)
     const pending = state?.pendingPermissions.get(requestId)
     if (!pending) return false
 
     state!.pendingPermissions.delete(requestId)
-    pending.resolve({ behavior, updatedInput, message })
+    pending.resolve(decision)
     return true
   }
 
@@ -822,6 +1031,13 @@ export class SdkBridge extends EventEmitter {
   private broadcastToSession(sessionId: string, msg: SdkServerMessage): void {
     const sp = this.processes.get(sessionId)
     if (!sp) return
+
+    // Buffer messages until the first subscriber attaches
+    if (!sp.hasSubscribers) {
+      sp.messageBuffer.push(msg)
+      return
+    }
+
     for (const listener of sp.browserListeners) {
       try { listener(msg) } catch (err) {
         log.warn({ err, sessionId }, 'Browser listener error')
