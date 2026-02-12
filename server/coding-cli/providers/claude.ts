@@ -23,7 +23,11 @@ export type JsonlMeta = {
 
 const CLAUDE_DEFAULT_CONTEXT_WINDOW = 200_000
 const CLAUDE_DEFAULT_COMPACT_PERCENT = 95
-const CLAUDE_DEBUG_TAIL_BYTES = 128 * 1024
+// Claude debug logs are noisy and can grow large. The last `autocompact:` entry can
+// be pushed far away from the end of the file, so start with a cheap tail read and
+// expand if no match is found.
+const CLAUDE_DEBUG_AUTOCOMPACT_TAIL_BYTES = 128 * 1024
+const CLAUDE_DEBUG_AUTOCOMPACT_MAX_READ_BYTES = 4 * 1024 * 1024
 
 const CLAUDE_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'claude-opus-4-20250514': 200_000,
@@ -45,7 +49,17 @@ type ClaudeDebugAutocompactSnapshot = {
   threshold?: number
 }
 
-const claudeDebugAutocompactCache = new Map<string, ClaudeDebugAutocompactSnapshot | null>()
+type ClaudeDebugAutocompactCacheEntry = {
+  checkedAt: number
+  mtimeMs?: number
+  size?: number
+  snapshot: ClaudeDebugAutocompactSnapshot | null
+}
+
+// Debug files are updated during a session. Cache results, but re-check periodically so
+// token counts don't freeze and drift away from what Claude Code is showing.
+const CLAUDE_DEBUG_AUTOCOMPACT_NEGATIVE_TTL_MS = 5_000
+const claudeDebugAutocompactCache = new Map<string, ClaudeDebugAutocompactCacheEntry>()
 
 function toFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -107,35 +121,79 @@ function readClaudeDebugAutocompactSnapshot(
 ): ClaudeDebugAutocompactSnapshot | undefined {
   if (!sessionId || !isValidClaudeSessionId(sessionId)) return undefined
 
-  const cached = claudeDebugAutocompactCache.get(sessionId)
-  if (cached !== undefined) {
-    return cached || undefined
+  const debugPath = path.join(claudeHome, 'debug', `${sessionId}.txt`)
+  const cacheKey = `${claudeHome}:${sessionId}`
+  const now = Date.now()
+
+  const cached = claudeDebugAutocompactCache.get(cacheKey)
+  if (cached) {
+    if (cached.snapshot === null && now - cached.checkedAt < CLAUDE_DEBUG_AUTOCOMPACT_NEGATIVE_TTL_MS) {
+      return undefined
+    }
+
+    try {
+      const stat = fs.statSync(debugPath)
+      const mtimeMs = stat.mtimeMs || stat.mtime.getTime()
+      const size = stat.size
+      if (cached.mtimeMs === mtimeMs && cached.size === size) {
+        return cached.snapshot || undefined
+      }
+    } catch {
+      claudeDebugAutocompactCache.set(cacheKey, {
+        checkedAt: now,
+        snapshot: null,
+      })
+      return undefined
+    }
   }
 
-  const debugPath = path.join(claudeHome, 'debug', `${sessionId}.txt`)
   try {
+    const stat = fs.statSync(debugPath)
     const fd = fs.openSync(debugPath, 'r')
     let snapshot: ClaudeDebugAutocompactSnapshot | undefined
     try {
-      const stat = fs.fstatSync(fd)
-      const bytesToRead = Math.min(stat.size, CLAUDE_DEBUG_TAIL_BYTES)
-      if (bytesToRead <= 0) {
-        claudeDebugAutocompactCache.set(sessionId, null)
+      const maxReadBytes = Math.min(stat.size, CLAUDE_DEBUG_AUTOCOMPACT_MAX_READ_BYTES)
+      if (maxReadBytes <= 0) {
+        claudeDebugAutocompactCache.set(cacheKey, {
+          checkedAt: now,
+          mtimeMs: stat.mtimeMs || stat.mtime.getTime(),
+          size: stat.size,
+          snapshot: null,
+        })
         return undefined
       }
 
-      const start = Math.max(0, stat.size - bytesToRead)
-      const buffer = Buffer.alloc(bytesToRead)
-      const read = fs.readSync(fd, buffer, 0, bytesToRead, start)
-      snapshot = parseAutocompactSnapshotFromDebugText(buffer.subarray(0, read).toString('utf8'))
+      const byteBudgetsRaw = [
+        CLAUDE_DEBUG_AUTOCOMPACT_TAIL_BYTES,
+        512 * 1024,
+        2 * 1024 * 1024,
+        maxReadBytes,
+      ].map((b) => Math.min(b, maxReadBytes))
+      const byteBudgets = byteBudgetsRaw.filter((b, idx, arr) => b > 0 && (idx === 0 || b !== arr[idx - 1]))
+
+      for (const bytesToRead of byteBudgets) {
+        const start = Math.max(0, stat.size - bytesToRead)
+        const buffer = Buffer.alloc(bytesToRead)
+        const read = fs.readSync(fd, buffer, 0, bytesToRead, start)
+        snapshot = parseAutocompactSnapshotFromDebugText(buffer.subarray(0, read).toString('utf8'))
+        if (snapshot) break
+      }
     } finally {
       fs.closeSync(fd)
     }
 
-    claudeDebugAutocompactCache.set(sessionId, snapshot ?? null)
+    claudeDebugAutocompactCache.set(cacheKey, {
+      checkedAt: now,
+      mtimeMs: stat.mtimeMs || stat.mtime.getTime(),
+      size: stat.size,
+      snapshot: snapshot ?? null,
+    })
     return snapshot
   } catch {
-    claudeDebugAutocompactCache.set(sessionId, null)
+    claudeDebugAutocompactCache.set(cacheKey, {
+      checkedAt: now,
+      snapshot: null,
+    })
     return undefined
   }
 }
