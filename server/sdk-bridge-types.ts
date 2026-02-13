@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
 
 // ── Content blocks (from Claude Code NDJSON) ──
 
@@ -44,83 +45,28 @@ export const UsageSchema = z.object({
   cache_read_input_tokens: z.number().int().nonnegative().optional(),
 }).passthrough()
 
-// ── CLI → Server NDJSON messages ──
+// ── SDK type re-exports (from @anthropic-ai/claude-agent-sdk) ──
+// These replace the hand-rolled CLI schemas. The SDK handles CLI message
+// parsing internally; we re-export types for use in the bridge layer.
 
-const CliSystemSchema = z.object({
-  type: z.literal('system'),
-  subtype: z.string(),
-  session_id: z.string().optional(),
-  tools: z.array(z.object({ name: z.string() }).passthrough()).optional(),
-  model: z.string().optional(),
-  cwd: z.string().optional(),
-  permission_mode: z.string().optional(),
-  mcp_servers: z.array(z.unknown()).optional(),
-}).passthrough()
-
-const CliAssistantSchema = z.object({
-  type: z.literal('assistant'),
-  message: z.object({
-    content: z.array(ContentBlockSchema),
-    model: z.string().optional(),
-    usage: UsageSchema.optional(),
-    stop_reason: z.string().optional(),
-  }).passthrough(),
-}).passthrough()
-
-const CliResultSchema = z.object({
-  type: z.literal('result'),
-  result: z.string().optional(),
-  duration_ms: z.number().optional(),
-  cost_usd: z.number().optional(),
-  usage: UsageSchema.optional(),
-}).passthrough()
-
-const CliStreamEventSchema = z.object({
-  type: z.literal('stream_event'),
-  event: z.object({
-    type: z.string(),
-  }).passthrough(),
-}).passthrough()
-
-const CliControlRequestSchema = z.object({
-  type: z.literal('control_request'),
-  id: z.string(),
-  subtype: z.string(),
-  tool: z.object({
-    name: z.string(),
-    input: z.record(z.unknown()).optional(),
-  }).passthrough().optional(),
-}).passthrough()
-
-const CliToolProgressSchema = z.object({
-  type: z.literal('tool_progress'),
-}).passthrough()
-
-const CliToolUseSummarySchema = z.object({
-  type: z.literal('tool_use_summary'),
-}).passthrough()
-
-const CliKeepAliveSchema = z.object({
-  type: z.literal('keep_alive'),
-}).passthrough()
-
-const CliAuthStatusSchema = z.object({
-  type: z.literal('auth_status'),
-}).passthrough()
-
-export const CliMessageSchema = z.discriminatedUnion('type', [
-  CliSystemSchema,
-  CliAssistantSchema,
-  CliResultSchema,
-  CliStreamEventSchema,
-  CliControlRequestSchema,
-  CliToolProgressSchema,
-  CliToolUseSummarySchema,
-  CliKeepAliveSchema,
-  CliAuthStatusSchema,
-])
-
-export type CliMessage = z.infer<typeof CliMessageSchema>
+export type {
+  SDKMessage,
+  SDKAssistantMessage,
+  SDKResultMessage,
+  SDKResultSuccess,
+  SDKResultError,
+  SDKSystemMessage,
+  SDKPartialAssistantMessage,
+  SDKUserMessage,
+  SDKStatusMessage,
+  SDKToolProgressMessage,
+  SDKToolUseSummaryMessage,
+  Options as SdkOptions,
+  Query as SdkQuery,
+  CanUseTool,
+  PermissionResult,
+  PermissionUpdate,
+} from '@anthropic-ai/claude-agent-sdk'
 
 // ── Browser → Server SDK messages ──
 
@@ -149,7 +95,9 @@ export const SdkPermissionRespondSchema = z.object({
   requestId: z.string().min(1),
   behavior: z.enum(['allow', 'deny']),
   updatedInput: z.record(z.unknown()).optional(),
+  updatedPermissions: z.array(z.unknown()).optional(),
   message: z.string().optional(),
+  interrupt: z.boolean().optional(),
 })
 
 export const SdkInterruptSchema = z.object({
@@ -184,9 +132,9 @@ export type SdkServerMessage =
   | { type: 'sdk.created'; requestId: string; sessionId: string }
   | { type: 'sdk.session.init'; sessionId: string; cliSessionId?: string; model?: string; cwd?: string; tools?: Array<{ name: string }> }
   | { type: 'sdk.assistant'; sessionId: string; content: ContentBlock[]; model?: string; usage?: z.infer<typeof UsageSchema> }
-  | { type: 'sdk.stream'; sessionId: string; event: unknown }
+  | { type: 'sdk.stream'; sessionId: string; event: unknown; parentToolUseId?: string | null }
   | { type: 'sdk.result'; sessionId: string; result?: string; durationMs?: number; costUsd?: number; usage?: z.infer<typeof UsageSchema> }
-  | { type: 'sdk.permission.request'; sessionId: string; requestId: string; subtype: string; tool?: { name: string; input?: Record<string, unknown> } }
+  | { type: 'sdk.permission.request'; sessionId: string; requestId: string; subtype: string; tool?: { name: string; input?: Record<string, unknown> }; toolUseID?: string; suggestions?: unknown[]; blockedPath?: string; decisionReason?: string }
   | { type: 'sdk.permission.cancelled'; sessionId: string; requestId: string }
   | { type: 'sdk.status'; sessionId: string; status: SdkSessionStatus }
   | { type: 'sdk.error'; sessionId: string; message: string }
@@ -208,7 +156,15 @@ export interface SdkSessionState {
   status: SdkSessionStatus
   createdAt: number
   messages: Array<{ role: 'user' | 'assistant'; content: ContentBlock[]; timestamp: string }>
-  pendingPermissions: Map<string, { subtype: string; tool?: { name: string; input?: Record<string, unknown> } }>
+  pendingPermissions: Map<string, {
+    toolName: string
+    input: Record<string, unknown>
+    toolUseID: string
+    suggestions?: PermissionUpdate[]
+    blockedPath?: string
+    decisionReason?: string
+    resolve: (result: PermissionResult) => void
+  }>
   costUsd: number
   totalInputTokens: number
   totalOutputTokens: number

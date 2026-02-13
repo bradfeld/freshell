@@ -1,79 +1,65 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
-  CliMessageSchema,
   BrowserSdkMessageSchema,
+} from '../../../server/sdk-bridge-types.js'
+import type {
+  SDKMessage,
+  PermissionResult,
+  SdkSessionState,
 } from '../../../server/sdk-bridge-types.js'
 
 describe('SDK Protocol Types', () => {
-  describe('CliMessageSchema', () => {
-    it('validates system/init message', () => {
-      const msg = {
-        type: 'system',
-        subtype: 'init',
-        session_id: 'abc-123',
-        tools: [{ name: 'Bash' }],
-        model: 'claude-sonnet-4-5-20250929',
-        cwd: '/home/user/project',
-      }
-      const result = CliMessageSchema.safeParse(msg)
-      expect(result.success).toBe(true)
-    })
-
-    it('validates assistant message with content blocks', () => {
-      const msg = {
+  describe('SDK re-exports', () => {
+    it('re-exports SDKMessage union type', () => {
+      // Type-level test: verify the re-export compiles
+      const msg: SDKMessage = {
         type: 'assistant',
-        message: {
-          content: [
-            { type: 'text', text: 'Hello world' },
-            { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'ls' } },
-          ],
-          model: 'claude-sonnet-4-5-20250929',
-          usage: { input_tokens: 100, output_tokens: 50 },
-        },
+        message: {} as any,
+        parent_tool_use_id: null,
+        uuid: 'test' as any,
+        session_id: 'test',
       }
-      const result = CliMessageSchema.safeParse(msg)
-      expect(result.success).toBe(true)
+      expect(msg.type).toBe('assistant')
     })
 
-    it('validates result message', () => {
-      const msg = {
-        type: 'result',
-        result: 'success',
-        duration_ms: 5000,
-        cost_usd: 0.01,
-        usage: { input_tokens: 100, output_tokens: 50 },
+    it('re-exports PermissionResult discriminated union', () => {
+      const allow: PermissionResult = {
+        behavior: 'allow',
+        updatedInput: { command: 'ls' },
+        updatedPermissions: [],
       }
-      const result = CliMessageSchema.safeParse(msg)
-      expect(result.success).toBe(true)
-    })
-
-    it('validates stream_event message', () => {
-      const msg = {
-        type: 'stream_event',
-        event: {
-          type: 'content_block_delta',
-          index: 0,
-          delta: { type: 'text_delta', text: 'Hello' },
-        },
+      const deny: PermissionResult = {
+        behavior: 'deny',
+        message: 'User denied',
+        interrupt: true,
       }
-      const result = CliMessageSchema.safeParse(msg)
-      expect(result.success).toBe(true)
+      expect(allow.behavior).toBe('allow')
+      expect(deny.behavior).toBe('deny')
     })
+  })
 
-    it('validates control_request (permission) message', () => {
-      const msg = {
-        type: 'control_request',
-        id: 'req-1',
-        subtype: 'can_use_tool',
-        tool: { name: 'Bash', input: { command: 'rm -rf /' } },
+  describe('SdkSessionState', () => {
+    it('pendingPermissions stores resolve function and SDK context', () => {
+      const state: SdkSessionState = {
+        sessionId: 'test',
+        status: 'connected',
+        createdAt: Date.now(),
+        messages: [],
+        pendingPermissions: new Map(),
+        costUsd: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
       }
-      const result = CliMessageSchema.safeParse(msg)
-      expect(result.success).toBe(true)
-    })
-
-    it('rejects unknown type', () => {
-      const result = CliMessageSchema.safeParse({ type: 'bogus' })
-      expect(result.success).toBe(false)
+      const resolveFn = vi.fn()
+      state.pendingPermissions.set('req-1', {
+        toolName: 'Bash',
+        input: { command: 'ls' },
+        toolUseID: 'tool-1',
+        resolve: resolveFn,
+      })
+      const pending = state.pendingPermissions.get('req-1')!
+      pending.resolve({ behavior: 'allow' })
+      expect(resolveFn).toHaveBeenCalledWith({ behavior: 'allow' })
     })
   })
 
@@ -105,6 +91,31 @@ describe('SDK Protocol Types', () => {
         sessionId: 'sess-1',
         requestId: 'perm-1',
         behavior: 'allow',
+      }
+      const result = BrowserSdkMessageSchema.safeParse(msg)
+      expect(result.success).toBe(true)
+    })
+
+    it('validates sdk.permission.respond with updatedPermissions', () => {
+      const msg = {
+        type: 'sdk.permission.respond',
+        sessionId: 'sess-1',
+        requestId: 'perm-1',
+        behavior: 'allow',
+        updatedPermissions: [{ tool: 'Bash', permission: 'allow' }],
+      }
+      const result = BrowserSdkMessageSchema.safeParse(msg)
+      expect(result.success).toBe(true)
+    })
+
+    it('validates sdk.permission.respond deny with message', () => {
+      const msg = {
+        type: 'sdk.permission.respond',
+        sessionId: 'sess-1',
+        requestId: 'perm-1',
+        behavior: 'deny',
+        message: 'Not allowed',
+        interrupt: true,
       }
       const result = BrowserSdkMessageSchema.safeParse(msg)
       expect(result.success).toBe(true)

@@ -4,8 +4,6 @@ import { EventEmitter } from 'events'
 import { WebSocketServer, WebSocket } from 'ws'
 import { logger } from './logger.js'
 import {
-  CliMessageSchema,
-  type CliMessage,
   type SdkSessionState,
   type ContentBlock,
   type SdkServerMessage,
