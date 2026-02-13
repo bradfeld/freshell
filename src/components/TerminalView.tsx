@@ -67,6 +67,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const restoreFlagRef = useRef(false)
   const turnCompleteSignalStateRef = useRef(createTurnCompleteSignalParserState())
   const warnExternalLinksRef = useRef(settings.terminal.warnExternalLinks)
+  const debugRef = useRef(!!(settings as any).logging?.debug)
   const attentionDismissRef = useRef(settings.panes?.attentionDismiss ?? 'click')
 
   // Extract terminal-specific fields (safe because we check kind later)
@@ -82,11 +83,20 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   // Keep refs in sync with props
   useEffect(() => {
     if (terminalContent) {
+      const prev = contentRef.current
+      if (prev && terminalContent.resumeSessionId !== prev.resumeSessionId) {
+        if (debugRef.current) console.log('[TRACE resumeSessionId] ref sync from props CHANGED resumeSessionId', {
+          paneId,
+          from: prev.resumeSessionId,
+          to: terminalContent.resumeSessionId,
+          createRequestId: terminalContent.createRequestId,
+        })
+      }
       terminalIdRef.current = terminalContent.terminalId
       requestIdRef.current = terminalContent.createRequestId
       contentRef.current = terminalContent
     }
-  }, [terminalContent])
+  }, [terminalContent, paneId])
 
   useEffect(() => {
     hiddenRef.current = hidden
@@ -100,6 +110,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   hasAttentionRef.current = hasAttention
   hasPaneAttentionRef.current = hasPaneAttention
   attentionDismissRef.current = settings.panes?.attentionDismiss ?? 'click'
+  debugRef.current = !!(settings as any).logging?.debug
 
   const shouldFocusActiveTerminal = !hidden && activeTabId === tabId && activePaneId === paneId
 
@@ -127,6 +138,15 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     const current = contentRef.current
     if (!current) return
     const next = { ...current, ...updates }
+    // Trace resumeSessionId changes
+    if ('resumeSessionId' in updates && updates.resumeSessionId !== current.resumeSessionId) {
+      if (debugRef.current) console.log('[TRACE resumeSessionId] updateContent CHANGING resumeSessionId', {
+        paneId,
+        from: current.resumeSessionId,
+        to: updates.resumeSessionId,
+        stack: new Error().stack?.split('\n').slice(1, 5).join('\n'),
+      })
+    }
     contentRef.current = next
     dispatch(updatePaneContent({
       tabId,
@@ -437,13 +457,21 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     const sendCreate = (requestId: string) => {
       const restore = getRestoreFlag(requestId)
+      const resumeId = getResumeSessionIdFromRef(contentRef)
+      if (debugRef.current) console.log('[TRACE resumeSessionId] sendCreate', {
+        paneId: paneIdRef.current,
+        requestId,
+        resumeSessionId: resumeId,
+        contentRefResumeSessionId: contentRef.current?.resumeSessionId,
+        mode,
+      })
       ws.send({
         type: 'terminal.create',
         requestId,
         mode,
         shell: shell || 'system',
         cwd: initialCwd,
-        resumeSessionId: getResumeSessionIdFromRef(contentRef),
+        resumeSessionId: resumeId,
         ...(restore ? { restore: true } : {}),
       })
     }
@@ -523,6 +551,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
           clearRateLimitRetry()
           const newId = msg.terminalId as string
+          if (debugRef.current) console.log('[TRACE resumeSessionId] terminal.created received', {
+            paneId: paneIdRef.current,
+            requestId: reqId,
+            terminalId: newId,
+            effectiveResumeSessionId: msg.effectiveResumeSessionId,
+            currentResumeSessionId: contentRef.current?.resumeSessionId,
+            willUpdate: !!(msg.effectiveResumeSessionId && msg.effectiveResumeSessionId !== contentRef.current?.resumeSessionId),
+          })
           terminalIdRef.current = newId
           updateContent({ terminalId: newId, status: 'running' })
           // Also update tab for title purposes
@@ -595,6 +631,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         // Message type: { type: 'terminal.session.associated', terminalId: string, sessionId: string }
         if (msg.type === 'terminal.session.associated' && msg.terminalId === tid) {
           const sessionId = msg.sessionId as string
+          if (debugRef.current) console.log('[TRACE resumeSessionId] terminal.session.associated', {
+            paneId: paneIdRef.current,
+            terminalId: tid,
+            oldResumeSessionId: contentRef.current?.resumeSessionId,
+            newResumeSessionId: sessionId,
+          })
           updateContent({ resumeSessionId: sessionId })
           // Mirror to tab so TabContent can reconstruct correct default
           // content if pane layout is lost (e.g., localStorage quota error)
@@ -620,6 +662,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'error' && msg.code === 'INVALID_TERMINAL_ID' && !msg.requestId) {
           const currentTerminalId = terminalIdRef.current
           const current = contentRef.current
+          if (debugRef.current) console.log('[TRACE resumeSessionId] INVALID_TERMINAL_ID received', {
+            paneId: paneIdRef.current,
+            msgTerminalId: msg.terminalId,
+            currentTerminalId,
+            currentResumeSessionId: current?.resumeSessionId,
+            currentStatus: current?.status,
+          })
           if (msg.terminalId && msg.terminalId !== currentTerminalId) {
             // Show feedback if the terminal already exited (the ID was cleared by
             // the exit handler, so msg.terminalId no longer matches the ref)
@@ -634,6 +683,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           if (currentTerminalId && current?.status !== 'exited') {
             term.writeln('\r\n[Reconnecting...]\r\n')
             const newRequestId = nanoid()
+            if (debugRef.current) console.log('[TRACE resumeSessionId] INVALID_TERMINAL_ID reconnecting', {
+              paneId: paneIdRef.current,
+              oldRequestId: requestIdRef.current,
+              newRequestId,
+              resumeSessionId: current?.resumeSessionId,
+            })
             // Preserve the restore flag so the re-creation bypasses rate limiting.
             // The original createRequestId's flag was never consumed (we went
             // through attach, not sendCreate), so check the old ID first.
@@ -659,6 +714,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       unsubReconnect = ws.onReconnect(() => {
         bumpConnectionGeneration()
         const tid = terminalIdRef.current
+        if (debugRef.current) console.log('[TRACE resumeSessionId] onReconnect', {
+          paneId: paneIdRef.current,
+          terminalId: tid,
+          resumeSessionId: contentRef.current?.resumeSessionId,
+        })
         if (tid) attach(tid)
       })
 
@@ -668,6 +728,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       // not re-run when terminalId changes from undefined to defined
       const currentTerminalId = terminalIdRef.current
 
+      if (debugRef.current) console.log('[TRACE resumeSessionId] effect initial decision', {
+        paneId: paneIdRef.current,
+        currentTerminalId,
+        createRequestId,
+        resumeSessionId: contentRef.current?.resumeSessionId,
+        action: currentTerminalId ? 'attach' : 'sendCreate',
+      })
       if (currentTerminalId) {
         attach(currentTerminalId)
       } else {

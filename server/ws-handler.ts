@@ -1079,6 +1079,12 @@ export class WsHandler {
 
       switch (m.type) {
       case 'terminal.create': {
+        log.debug({
+          requestId: m.requestId,
+          connectionId: ws.connectionId,
+          mode: m.mode,
+          resumeSessionId: m.resumeSessionId,
+        }, '[TRACE resumeSessionId] terminal.create received')
         const endCreateTimer = startPerfTimer(
           'terminal_create',
           { connectionId: ws.connectionId, mode: m.mode, shell: m.shell },
@@ -1202,6 +1208,12 @@ export class WsHandler {
             return
           }
 
+          log.debug({
+            requestId: m.requestId,
+            connectionId: ws.connectionId,
+            originalResumeSessionId: m.resumeSessionId,
+            effectiveResumeSessionId,
+          }, '[TRACE resumeSessionId] about to create terminal')
           const record = this.registry.create({
             mode: m.mode as TerminalMode,
             shell: m.shell as 'system' | 'cmd' | 'powershell' | 'wsl',
