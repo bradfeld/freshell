@@ -20,12 +20,12 @@ import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
 import { nanoid } from 'nanoid'
 import { cn } from '@/lib/utils'
-import { Terminal } from 'xterm'
-import { FitAddon } from 'xterm-addon-fit'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import { Loader2 } from 'lucide-react'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
-import 'xterm/css/xterm.css'
+import '@xterm/xterm/css/xterm.css'
 
 const SESSION_ACTIVITY_THROTTLE_MS = 5000
 const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3

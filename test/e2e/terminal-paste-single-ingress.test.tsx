@@ -24,7 +24,7 @@ vi.mock('@/lib/ws-client', () => ({
   getWsClient: () => wsMocks,
 }))
 
-vi.mock('xterm', () => {
+vi.mock('@xterm/xterm', () => {
   class MockTerminal {
     cols = 80
     rows = 24
@@ -67,13 +67,13 @@ vi.mock('xterm', () => {
   return { Terminal: MockTerminal }
 })
 
-vi.mock('xterm-addon-fit', () => ({
+vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
     fit = vi.fn()
   },
 }))
 
-vi.mock('xterm/css/xterm.css', () => ({}))
+vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 
 class MockResizeObserver {
   observe = vi.fn()

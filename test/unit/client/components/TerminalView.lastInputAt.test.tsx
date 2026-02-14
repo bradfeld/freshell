@@ -12,7 +12,7 @@ import type { TerminalPaneContent } from '@/store/paneTypes'
 
 let onDataCallback: ((data: string) => void) | null = null
 
-vi.mock('xterm', () => ({
+vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn().mockImplementation(() => ({
     loadAddon: vi.fn(),
     open: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock('xterm', () => ({
   })),
 }))
 
-vi.mock('xterm-addon-fit', () => ({
+vi.mock('@xterm/addon-fit', () => ({
   FitAddon: vi.fn().mockImplementation(() => ({
     fit: vi.fn(),
   })),

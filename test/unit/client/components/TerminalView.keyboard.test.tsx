@@ -38,7 +38,7 @@ let capturedKeyHandler: ((event: KeyboardEvent) => boolean) | null = null
 let capturedOnData: ((data: string) => void) | null = null
 let capturedTerminal: { paste: ReturnType<typeof vi.fn> } | null = null
 
-vi.mock('xterm', () => {
+vi.mock('@xterm/xterm', () => {
   class MockTerminal {
     options: Record<string, unknown> = {}
     cols = 80
@@ -72,13 +72,13 @@ vi.mock('xterm', () => {
   return { Terminal: MockTerminal }
 })
 
-vi.mock('xterm-addon-fit', () => ({
+vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
     fit = vi.fn()
   },
 }))
 
-vi.mock('xterm/css/xterm.css', () => ({}))
+vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 
 // Mock clipboard
 const clipboardMocks = vi.hoisted(() => ({
