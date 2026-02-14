@@ -409,18 +409,69 @@ Modify `PickerWrapper` in `PaneContainer.tsx` to read the pane tree for the curr
 
 **Files:**
 - Modify: `src/components/panes/PaneContainer.tsx` (PickerWrapper function, ~lines 387-541)
-- Modify: `src/components/panes/DirectoryPicker.tsx` (accept new props)
-- Test: `test/unit/client/components/panes/PaneContainer.test.tsx` (new file — test PickerWrapper integration)
+- Modify: `src/components/panes/DirectoryPicker.tsx` (accept new props, re-rank candidates)
+- Modify: `test/unit/client/components/panes/PaneContainer.test.tsx` (add wiring test)
 
-**Step 1: Write the failing test**
+**Step 1: Write the failing wiring test**
 
-Create `test/unit/client/components/panes/PaneContainer.test.tsx`. This test verifies that when `PickerWrapper` renders a `DirectoryPicker`, it passes the tab-preferred `defaultCwd` instead of the global one. Since `PickerWrapper` is a private function inside `PaneContainer.tsx`, we test indirectly through the rendered `DirectoryPicker` props.
+Add a new `describe` block to the **existing** `test/unit/client/components/panes/PaneContainer.test.tsx`. This test verifies that when a picker pane opens in a tab that already has Claude panes with `initialCwd`, the directory picker pre-fills with the tab-preferred directory instead of the global provider default.
 
-However, given the component complexity (Redux, WS), a more practical approach is to test the wiring via a focused integration test that mocks the Redux store. An even simpler approach: we already unit-tested the pure logic in Task 1-2. For the wiring, we add a simpler test that verifies `DirectoryPicker` receives and uses the new props correctly (Task 4). The `PaneContainer` wiring is thin glue code — a few lines of selector + function calls.
+Add this test at the end of the existing `PickerWrapper shell type handling` describe block, using the existing `createStoreWithClaude` helper and mock setup:
 
-**Instead, focus this task on the wiring changes themselves:**
+```typescript
+    it('pre-fills directory picker with tab-preferred cwd instead of global default', () => {
+      // Tab already has a Claude pane working in /code/tab-project
+      const existingClaude: PaneNode = {
+        type: 'leaf',
+        id: 'pane-existing',
+        content: {
+          kind: 'terminal',
+          mode: 'claude',
+          shell: 'system',
+          createRequestId: 'cr-existing',
+          status: 'running',
+          terminalId: 'term-existing',
+          initialCwd: '/code/tab-project',
+        },
+      }
+      const pickerNode: PaneNode = {
+        type: 'leaf',
+        id: 'pane-1',
+        content: { kind: 'picker' },
+      }
+      const splitNode: PaneNode = {
+        type: 'split',
+        id: 'split-1',
+        direction: 'horizontal',
+        sizes: [50, 50],
+        children: [existingClaude, pickerNode],
+      }
 
-**Step 1: Update `DirectoryPicker` props**
+      // Global provider default is /code/global-default — should NOT be used
+      const store = createStoreWithClaude(splitNode, { cwd: '/code/global-default' })
+
+      renderWithStore(
+        <PaneContainer tabId="tab-1" node={splitNode} />,
+        store
+      )
+
+      // Navigate to directory picker by selecting Claude
+      const container = document.querySelector('[data-context="pane-picker"]')!
+      fireEvent.keyDown(container, { key: 'l' })
+      fireEvent.transitionEnd(container)
+
+      // The input should pre-fill with the tab's directory, not the global default
+      const input = screen.getByLabelText('Starting directory for Claude') as HTMLInputElement
+      expect(input.value).toBe('/code/tab-project')
+    })
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npx vitest run test/unit/client/components/panes/PaneContainer.test.tsx -t "pre-fills directory picker"`
+Expected: FAIL — input will show `/code/global-default` (current behavior) instead of `/code/tab-project`
+
+**Step 3: Update `DirectoryPicker` props**
 
 In `src/components/panes/DirectoryPicker.tsx`, add two new optional props:
 
@@ -436,7 +487,7 @@ type DirectoryPickerProps = {
 }
 ```
 
-**Step 2: Update `DirectoryPicker` to re-rank candidates**
+**Step 4: Update `DirectoryPicker` to re-rank candidates**
 
 In the `useEffect` that fetches `/api/files/candidate-dirs` (~line 69-84), after merging candidates, apply `rankCandidateDirectories`:
 
@@ -460,7 +511,7 @@ import { rankCandidateDirectories } from '@/lib/tab-directory-preference'
 
 Also update the dependency array of this `useEffect` to include `tabDirectories` and `globalDefault`.
 
-**Step 3: Update `PickerWrapper` to compute and pass tab preference**
+**Step 5: Update `PickerWrapper` to compute and pass tab preference**
 
 In `PaneContainer.tsx`, add the import and selector:
 
@@ -498,15 +549,18 @@ if (step.step === 'directory') {
 }
 ```
 
-**Step 4: Run full tests to verify nothing broke**
+**Step 6: Run tests to verify the wiring test passes and nothing broke**
 
-Run: `npm test`
+Run: `npx vitest run test/unit/client/components/panes/PaneContainer.test.tsx -t "pre-fills directory picker"`
+Expected: PASS — input now shows `/code/tab-project`
+
+Then: `npm test`
 Expected: PASS — all existing tests still pass. The new props are optional, so no existing call sites break.
 
-**Step 5: Commit**
+**Step 7: Commit**
 
 ```bash
-git add src/components/panes/PaneContainer.tsx src/components/panes/DirectoryPicker.tsx
+git add src/components/panes/PaneContainer.tsx src/components/panes/DirectoryPicker.tsx test/unit/client/components/panes/PaneContainer.test.tsx
 git commit -m "feat: wire tab-aware directory preference into PickerWrapper
 
 PickerWrapper now computes the tab's directory preference from the pane
@@ -523,106 +577,74 @@ the global default above general candidates."
 Test that `DirectoryPicker` correctly re-ranks candidates when `tabDirectories` and `globalDefault` are provided.
 
 **Files:**
-- Create: `test/unit/client/components/panes/DirectoryPicker.test.tsx`
+- Modify: `test/unit/client/components/panes/DirectoryPicker.test.tsx` (add tests to existing file)
 
 **Step 1: Write the tests**
 
+Add a new `describe` block to the **existing** `test/unit/client/components/panes/DirectoryPicker.test.tsx`. The file already has `mockApiGet`/`mockApiPost` hoisted mocks and a `renderDirectoryPicker` helper. Add the new tests inside the existing top-level `describe('DirectoryPicker', ...)` block:
+
 ```typescript
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import DirectoryPicker from '@/components/panes/DirectoryPicker'
+  describe('tab-aware candidate re-ranking', () => {
+    it('renders candidates from API in original order without tab context', async () => {
+      mockApiGet.mockResolvedValueOnce({
+        directories: ['/code/gamma', '/code/alpha', '/code/beta'],
+      })
 
-// Mock the api module
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-  },
-}))
+      renderDirectoryPicker({ defaultCwd: '' })
 
-import { api } from '@/lib/api'
+      await waitFor(() => {
+        expect(screen.getByRole('listbox')).toBeInTheDocument()
+      })
 
-describe('DirectoryPicker', () => {
-  const defaultProps = {
-    providerType: 'claude' as const,
-    providerLabel: 'Claude',
-    onConfirm: vi.fn(),
-    onBack: vi.fn(),
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('renders candidates from API in original order without tab context', async () => {
-    vi.mocked(api.get).mockResolvedValueOnce({
-      directories: ['/code/gamma', '/code/alpha', '/code/beta'],
-    })
-
-    render(<DirectoryPicker {...defaultProps} />)
-
-    await waitFor(() => {
-      expect(screen.getByRole('listbox')).toBeInTheDocument()
-    })
-
-    const options = screen.getAllByRole('option')
-    expect(options.map(o => o.textContent)).toEqual([
-      '/code/gamma',
-      '/code/alpha',
-      '/code/beta',
-    ])
-  })
-
-  it('boosts tab directories and global default above API candidates', async () => {
-    vi.mocked(api.get).mockResolvedValueOnce({
-      directories: ['/code/gamma', '/code/alpha', '/code/beta', '/code/delta'],
-    })
-
-    render(
-      <DirectoryPicker
-        {...defaultProps}
-        tabDirectories={['/code/beta', '/code/alpha']}
-        globalDefault="/code/delta"
-      />
-    )
-
-    await waitFor(() => {
       const options = screen.getAllByRole('option')
-      expect(options.length).toBeGreaterThanOrEqual(4)
+      expect(options.map(o => o.textContent)).toEqual([
+        '/code/gamma',
+        '/code/alpha',
+        '/code/beta',
+      ])
     })
 
-    const options = screen.getAllByRole('option')
-    // Tab dirs first (in provided order), then global default, then rest
-    expect(options.map(o => o.textContent)).toEqual([
-      '/code/beta',
-      '/code/alpha',
-      '/code/delta',
-      '/code/gamma',
-    ])
+    it('boosts tab directories and global default above API candidates', async () => {
+      mockApiGet.mockResolvedValueOnce({
+        directories: ['/code/gamma', '/code/alpha', '/code/beta', '/code/delta'],
+      })
+
+      renderDirectoryPicker({
+        defaultCwd: '',
+        tabDirectories: ['/code/beta', '/code/alpha'],
+        globalDefault: '/code/delta',
+      })
+
+      await waitFor(() => {
+        const options = screen.getAllByRole('option')
+        expect(options.length).toBeGreaterThanOrEqual(4)
+      })
+
+      const options = screen.getAllByRole('option')
+      // Tab dirs first (in provided order), then global default, then rest
+      expect(options.map(o => o.textContent)).toEqual([
+        '/code/beta',
+        '/code/alpha',
+        '/code/delta',
+        '/code/gamma',
+      ])
+    })
+
+    it('pre-fills input with tab-preferred defaultCwd', () => {
+      mockApiGet.mockResolvedValueOnce({ directories: [] })
+
+      renderDirectoryPicker({ defaultCwd: '/code/tab-preferred' })
+
+      const input = screen.getByRole('combobox')
+      expect(input).toHaveValue('/code/tab-preferred')
+    })
   })
-
-  it('pre-fills input with tab-preferred defaultCwd', () => {
-    vi.mocked(api.get).mockResolvedValueOnce({ directories: [] })
-
-    render(
-      <DirectoryPicker
-        {...defaultProps}
-        defaultCwd="/code/tab-preferred"
-      />
-    )
-
-    const input = screen.getByRole('combobox')
-    expect(input).toHaveValue('/code/tab-preferred')
-  })
-})
 ```
 
-**Step 2: Run tests to verify they fail then pass**
+**Step 2: Run tests to verify they pass**
 
-Run: `npx vitest run test/unit/client/components/panes/DirectoryPicker.test.ts`
-Expected: The boost test should fail before Task 3's changes, pass after.
-
-Note: This task can run in parallel with Task 3 or after it. If running after, all tests should pass immediately.
+Run: `npx vitest run test/unit/client/components/panes/DirectoryPicker.test.tsx`
+Expected: PASS — all existing + new tests pass (Task 3's implementation is already in place).
 
 **Step 3: Commit**
 
