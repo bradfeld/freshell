@@ -148,7 +148,6 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
   )
   const lastSavedAt = useAppSelector((s) => s.settings.lastSavedAt)
   const networkStatus = useAppSelector((s) => s.network.status)
-  const networkConfiguring = useAppSelector((s) => s.network.configuring)
   const enabledProviders = useMemo(
     () => settings.codingCli?.enabledProviders ?? [],
     [settings.codingCli?.enabledProviders],
@@ -542,7 +541,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
                   >
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">{networkStatus.firewall.platform}</span>
-                      {networkStatus.firewall.active && networkStatus.firewall.portOpen !== true && networkStatus.firewall.commands.length > 0 && (
+                      {networkStatus.firewall.active && networkStatus.firewall.portOpen !== true && (
                         <button
                           onClick={async () => {
                             try {

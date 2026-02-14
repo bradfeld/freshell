@@ -15,24 +15,31 @@ vi.mock('lean-qr/extras/svg', () => ({
 }))
 
 // Mock the api module
+const mockPost = vi.fn().mockResolvedValue({
+  configured: true,
+  host: '0.0.0.0',
+  port: 3001,
+  lanIps: ['192.168.1.100'],
+  machineHostname: 'test',
+  mdns: { enabled: true, hostname: 'freshell' },
+  firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+  rebinding: false,
+  devMode: false,
+  accessUrl: 'http://192.168.1.100:3001/?token=abc',
+  rebindScheduled: false,
+})
 vi.mock('@/lib/api', () => ({
   api: {
     get: vi.fn().mockResolvedValue({}),
-    post: vi.fn().mockResolvedValue({
-      configured: true,
-      host: '0.0.0.0',
-      port: 3001,
-      lanIps: ['192.168.1.100'],
-      machineHostname: 'test',
-      mdns: { enabled: true, hostname: 'freshell' },
-      firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
-      rebinding: false,
-      devMode: false,
-      accessUrl: 'http://192.168.1.100:3001/?token=abc',
-      rebindScheduled: false,
-    }),
+    post: (...args: any[]) => mockPost(...args),
     patch: vi.fn().mockResolvedValue({}),
   },
+}))
+
+// Mock firewall-configure for firewall button tests
+const mockFetchFirewallConfig = vi.fn()
+vi.mock('@/lib/firewall-configure', () => ({
+  fetchFirewallConfig: (...args: any[]) => mockFetchFirewallConfig(...args),
 }))
 
 const defaultNetworkStatus = {
@@ -146,5 +153,104 @@ describe('SetupWizard', () => {
     )
     // Step 1 renders by default, but we can verify the component exists
     expect(screen.getByText(/from your phone and other computers/i)).toBeInTheDocument()
+  })
+
+  it('auto-triggers bind when initialStep=2 (re-enable remote access)', async () => {
+    const store = createTestStore()
+    render(
+      <Provider store={store}>
+        <SetupWizard onComplete={vi.fn()} initialStep={2} />
+      </Provider>,
+    )
+
+    // Should auto-dispatch configureNetwork with host: '0.0.0.0'
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/api/network/configure',
+        expect.objectContaining({ host: '0.0.0.0', configured: true }),
+      )
+    })
+  })
+
+  it('shows "Configure now" button for WSL2 firewall (empty commands)', async () => {
+    const store = createTestStore({
+      status: {
+        ...defaultNetworkStatus,
+        configured: true,
+        host: '0.0.0.0',
+        firewall: { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false },
+        rebinding: false,
+      },
+    })
+    // Render at step 2, wait for bind to complete
+    // Mock post to return bound state with active firewall + portOpen false
+    mockPost.mockResolvedValueOnce({
+      ...defaultNetworkStatus,
+      configured: true,
+      host: '0.0.0.0',
+      firewall: { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false },
+      rebinding: false,
+    })
+
+    render(
+      <Provider store={store}>
+        <SetupWizard onComplete={vi.fn()} initialStep={2} />
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /configure firewall/i })).toBeInTheDocument()
+    })
+  })
+
+  it('reports firewall error when portOpen is false after configuring completes', async () => {
+    mockFetchFirewallConfig.mockResolvedValue({ method: 'wsl2', status: 'ok' })
+    const firewallActive = { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false }
+    const store = createTestStore({
+      status: {
+        ...defaultNetworkStatus,
+        configured: true,
+        host: '0.0.0.0',
+        firewall: firewallActive,
+        rebinding: false,
+      },
+    })
+
+    // Mock the configureNetwork response (auto-bind)
+    mockPost.mockResolvedValueOnce({
+      ...defaultNetworkStatus,
+      configured: true,
+      host: '0.0.0.0',
+      firewall: firewallActive,
+      rebinding: false,
+    })
+
+    // Mock fetchNetworkStatus to return configuring=false, portOpen=false
+    const mockGet = vi.fn().mockResolvedValue({
+      ...defaultNetworkStatus,
+      configured: true,
+      host: '0.0.0.0',
+      firewall: { ...firewallActive, configuring: false, portOpen: false },
+      rebinding: false,
+    })
+    const { api } = await import('@/lib/api')
+    vi.mocked(api.get).mockImplementation(mockGet)
+
+    render(
+      <Provider store={store}>
+        <SetupWizard onComplete={vi.fn()} initialStep={2} />
+      </Provider>,
+    )
+
+    // Wait for Configure button and click it
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /configure firewall/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /configure firewall/i }))
+
+    // Should show error detail when portOpen is false
+    await waitFor(() => {
+      expect(screen.getByText(/did not open the port/i)).toBeInTheDocument()
+    }, { timeout: 15000 })
   })
 })

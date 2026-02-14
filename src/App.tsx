@@ -38,7 +38,6 @@ import { updateSettingsLocal, markSaved } from '@/store/settingsSlice'
 import { clearIdleWarning, recordIdleWarning } from '@/store/idleWarningsSlice'
 import { setTerminalMetaSnapshot, upsertTerminalMeta, removeTerminalMeta } from '@/store/terminalMetaSlice'
 import { handleSdkMessage } from '@/lib/sdk-message-handler'
-import { initLayout } from '@/store/panesSlice'
 
 // Lazy QR code component to avoid loading lean-qr until the share panel opens
 function ShareQrCode({ url }: { url: string }) {

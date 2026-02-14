@@ -7,7 +7,7 @@ import { fetchFirewallConfig } from '@/lib/firewall-configure'
 import { generate } from 'lean-qr'
 import { toSvgDataURL } from 'lean-qr/extras/svg'
 import { nanoid } from '@reduxjs/toolkit'
-import { Check, Loader2, AlertCircle, Copy, ExternalLink } from 'lucide-react'
+import { Check, Loader2, AlertCircle, Copy } from 'lucide-react'
 import type { AppView } from '@/components/Sidebar'
 
 interface SetupWizardProps {
@@ -59,7 +59,7 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
   const [step, setStep] = useState<1 | 2 | 3>(initialStep)
   const [bindStatus, setBindStatus] = useState<ChecklistItemStatus>('pending')
   const [bindDetail, setBindDetail] = useState<string | undefined>()
-  const [mdnsHostname, setMdnsHostname] = useState(settings?.network?.mdns?.hostname || 'freshell')
+  const mdnsHostname = settings?.network?.mdns?.hostname || 'freshell'
   const [firewallStatus, setFirewallStatus] = useState<ChecklistItemStatus>('pending')
   const [firewallDetail, setFirewallDetail] = useState<string | undefined>()
   const [copied, setCopied] = useState(false)
@@ -105,8 +105,9 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
     }
   }, [step, bindStatus, firewallStatus])
 
-  const handleYes = useCallback(async () => {
-    setStep(2)
+  // Start binding when entering step 2 directly (e.g. re-enabling remote access
+  // from share button after the user previously chose localhost-only).
+  const startBind = useCallback(async () => {
     setBindStatus('active')
     setBindDetail('Binding to network...')
     try {
@@ -115,13 +116,24 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
         configured: true,
         mdns: { enabled: true, hostname: mdnsHostname },
       })).unwrap()
-      // The thunk resolved — config accepted. Polling started for rebind completion.
-      // bindStatus will transition via the useEffect watching networkStatus.rebinding.
     } catch (err: any) {
       setBindStatus('error')
       setBindDetail(err?.message || 'Failed to configure network')
     }
   }, [dispatch, mdnsHostname])
+
+  // Auto-trigger bind when entering at step 2 directly (initialStep=2).
+  // Without this, step 2 shows a pending checklist with no way to progress.
+  useEffect(() => {
+    if (initialStep === 2 && step === 2 && bindStatus === 'pending') {
+      startBind()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- mount-only
+
+  const handleYes = useCallback(async () => {
+    setStep(2)
+    startBind()
+  }, [startBind])
 
   const handleNo = useCallback(async () => {
     setError(null)
@@ -171,8 +183,16 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
           try {
             const action = await dispatch(fetchNetworkStatus()).unwrap()
             if (!action.firewall.configuring) {
-              setFirewallStatus('done')
-              setFirewallDetail('Firewall configured')
+              if (action.firewall.portOpen === true) {
+                setFirewallStatus('done')
+                setFirewallDetail('Firewall configured — port is open')
+              } else if (action.firewall.portOpen === false) {
+                setFirewallStatus('error')
+                setFirewallDetail('Firewall configuration did not open the port')
+              } else {
+                setFirewallStatus('done')
+                setFirewallDetail('Firewall configured')
+              }
               return
             }
           } catch { /* ignore */ }
@@ -250,7 +270,7 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
                 detail={bindStatus === 'done' ? `mDNS name: ${mdnsHostname}.local` : undefined}
               />
               <ChecklistItem label="Checking firewall..." status={firewallStatus} detail={firewallDetail} />
-              {firewallStatus === 'error' && networkStatus?.firewall?.commands && networkStatus.firewall.commands.length > 0 && (
+              {firewallStatus === 'error' && networkStatus?.firewall && (
                 <button
                   onClick={handleConfigureFirewall}
                   className="ml-8 mt-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"

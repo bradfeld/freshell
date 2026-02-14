@@ -128,7 +128,7 @@ describe('Network Setup Wizard (e2e)', () => {
     })
   })
 
-  it('starts at step 2 when initialStep=2', () => {
+  it('starts at step 2 when initialStep=2 and auto-triggers bind', async () => {
     const store = createStore(unconfiguredStatus)
 
     render(
@@ -138,6 +138,14 @@ describe('Network Setup Wizard (e2e)', () => {
     )
 
     expect(screen.queryByText(/from your phone and other computers/i)).not.toBeInTheDocument()
+
+    // Auto-bind should dispatch configureNetwork on mount
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/api/network/configure',
+        expect.objectContaining({ host: '0.0.0.0', configured: true }),
+      )
+    })
   })
 
   it('has accessible dialog role', () => {
