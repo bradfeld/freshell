@@ -600,7 +600,7 @@ export function ContextMenuProvider({
     if (inputLike && ![ContextIds.Editor, ContextIds.Terminal].includes(contextId as any)) return true
 
     const link = targetEl?.closest?.('a[href]')
-    if (link && (contextId === ContextIds.Global || !contextEl)) return true
+    if (link) return true
 
     return false
   }, [])
