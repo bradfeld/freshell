@@ -5,14 +5,19 @@ const FLUSH_THRESHOLD = 200
 
 /**
  * Debounces streaming text updates to limit markdown re-parsing frequency.
- * Flushes every DEBOUNCE_MS or when the buffer delta exceeds FLUSH_THRESHOLD chars.
- * Returns the debounced text string for rendering.
+ * Flushes every DEBOUNCE_MS (periodic) or immediately when the buffer delta
+ * exceeds FLUSH_THRESHOLD chars. Returns the debounced text string for rendering.
+ *
+ * Uses a ref for latest text so the periodic timer always reads current content,
+ * avoiding stale closures and ensuring ~20fps updates during continuous streaming.
  */
 export function useStreamDebounce(text: string, active: boolean): string {
   const [debouncedText, setDebouncedText] = useState(text)
   const lastFlushedLenRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevActiveRef = useRef(active)
+  const latestTextRef = useRef(text)
+  latestTextRef.current = text
 
   useEffect(() => {
     // When streaming is inactive, always show final text and reset
@@ -51,22 +56,30 @@ export function useStreamDebounce(text: string, active: boolean): string {
       return
     }
 
-    // Otherwise debounce
+    // Start periodic timer if not already running. Timer reads latest text
+    // from ref, so it flushes current content even if text changed after
+    // the timer was set. This prevents trailing-edge starvation where
+    // continuous small updates would keep pushing the timer back.
     if (!timerRef.current) {
       timerRef.current = setTimeout(() => {
-        setDebouncedText(text)
-        lastFlushedLenRef.current = text.length
+        setDebouncedText(latestTextRef.current)
+        lastFlushedLenRef.current = latestTextRef.current.length
         timerRef.current = null
       }, DEBOUNCE_MS)
     }
 
+    // No cleanup here — timer must survive re-renders to achieve periodic
+    // flushing. Only cancelled explicitly (flush/deactivation) or on unmount.
+  }, [text, active])
+
+  // Clean up on unmount only
+  useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current)
-        timerRef.current = null
       }
     }
-  }, [text, active])
+  }, [])
 
   return debouncedText
 }

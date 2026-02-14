@@ -51,6 +51,7 @@ function CollapsedTurn({
           type="button"
           onClick={() => setExpanded(false)}
           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          aria-expanded={true}
           aria-label="Collapse turn"
         >
           <ChevronRight className="h-3 w-3 rotate-90 transition-transform" />
@@ -82,6 +83,7 @@ function CollapsedTurn({
       type="button"
       onClick={() => setExpanded(true)}
       className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+      aria-expanded={false}
       aria-label="Expand turn"
     >
       <ChevronRight className="h-3 w-3 shrink-0 transition-transform" />

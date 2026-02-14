@@ -128,8 +128,8 @@ function MessageBubble({
           // Render orphaned results (no matching tool_use) as standalone
           const raw = typeof block.content === 'string'
             ? block.content
-            : JSON.stringify(block.content)
-          const resultContent = stripSystemReminders(raw)
+            : block.content != null ? JSON.stringify(block.content) : ''
+          const resultContent = raw ? stripSystemReminders(raw) : undefined
           return (
             <ToolBlock
               key={block.tool_use_id || i}

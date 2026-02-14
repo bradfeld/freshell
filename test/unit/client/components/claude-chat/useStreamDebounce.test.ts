@@ -54,6 +54,34 @@ describe('useStreamDebounce', () => {
     expect(result.current).toBe('complete')
   })
 
+  it('flushes periodically even under continuous small updates', () => {
+    const { result, rerender } = renderHook(
+      ({ text, active }) => useStreamDebounce(text, active),
+      { initialProps: { text: '', active: true } },
+    )
+
+    // Rapid small updates every 10ms — should still flush at 50ms
+    rerender({ text: 'a', active: true })
+    act(() => { vi.advanceTimersByTime(10) })
+    rerender({ text: 'ab', active: true })
+    act(() => { vi.advanceTimersByTime(10) })
+    rerender({ text: 'abc', active: true })
+    act(() => { vi.advanceTimersByTime(10) })
+    rerender({ text: 'abcd', active: true })
+    act(() => { vi.advanceTimersByTime(10) })
+    rerender({ text: 'abcde', active: true })
+    act(() => { vi.advanceTimersByTime(10) })
+    // 50ms total — timer should have fired with latest text via ref
+    expect(result.current).toBe('abcde')
+
+    // Keep updating — another 50ms should trigger another flush
+    rerender({ text: 'abcdef', active: true })
+    act(() => { vi.advanceTimersByTime(25) })
+    rerender({ text: 'abcdefg', active: true })
+    act(() => { vi.advanceTimersByTime(25) })
+    expect(result.current).toBe('abcdefg')
+  })
+
   it('clears stale text when a new stream starts', () => {
     const { result, rerender } = renderHook(
       ({ text, active }) => useStreamDebounce(text, active),
