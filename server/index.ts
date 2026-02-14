@@ -538,7 +538,7 @@ async function main() {
       const result = await generateText({
         model,
         prompt,
-        maxTokens: promptConfig.maxTokens,
+        maxOutputTokens: promptConfig.maxTokens,
       })
 
       const description = (result.text || '').trim().slice(0, 240) || heuristic()

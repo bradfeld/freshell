@@ -1232,8 +1232,8 @@ export class TerminalRegistry extends EventEmitter {
           }
         }
         this.on('terminal.exit', handler)
-        // Re-check after listener setup (TOCTOU guard)
-        if (term.status === 'exited') {
+        // Re-check after listener setup (TOCTOU guard — status may mutate between filter and here)
+        if ((term.status as string) === 'exited') {
           this.off('terminal.exit', handler)
           resolve()
         }

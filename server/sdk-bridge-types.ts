@@ -17,7 +17,7 @@ export const ToolUseBlockSchema = z.object({
   type: z.literal('tool_use'),
   id: z.string(),
   name: z.string(),
-  input: z.record(z.unknown()),
+  input: z.record(z.string(), z.unknown()),
 })
 
 export const ToolResultBlockSchema = z.object({
@@ -94,7 +94,7 @@ export const SdkPermissionRespondSchema = z.object({
   sessionId: z.string().min(1),
   requestId: z.string().min(1),
   behavior: z.enum(['allow', 'deny']),
-  updatedInput: z.record(z.unknown()).optional(),
+  updatedInput: z.record(z.string(), z.unknown()).optional(),
   updatedPermissions: z.array(z.unknown()).optional(),
   message: z.string().optional(),
   interrupt: z.boolean().optional(),
