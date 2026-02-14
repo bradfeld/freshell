@@ -9,6 +9,7 @@ import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
 import idleWarningsReducer from '@/store/idleWarningsSlice'
+import { networkReducer } from '@/store/networkSlice'
 
 // Ensure DOM is clean even if another test file forgot cleanup.
 beforeEach(() => {
@@ -67,6 +68,10 @@ vi.mock('@/components/OverviewView', () => ({
   default: () => <div data-testid="mock-overview-view">Overview View</div>,
 }))
 
+vi.mock('@/components/SetupWizard', () => ({
+  SetupWizard: () => <div data-testid="mock-setup-wizard">Setup Wizard</div>,
+}))
+
 // Mock the useThemeEffect hook to avoid errors from missing settings.terminal.fontSize
 vi.mock('@/hooks/useTheme', () => ({
   useThemeEffect: () => {},
@@ -81,6 +86,7 @@ function createTestStore() {
       sessions: sessionsReducer,
       panes: panesReducer,
       idleWarnings: idleWarningsReducer,
+      network: networkReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -115,6 +121,12 @@ function createTestStore() {
       },
       idleWarnings: {
         warnings: {},
+      },
+      network: {
+        status: null,
+        loading: false,
+        configuring: false,
+        error: null,
       },
     },
   })
@@ -850,6 +862,7 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         connection: connectionReducer,
         sessions: sessionsReducer,
         panes: panesReducer,
+        network: networkReducer,
       },
       middleware: (getDefault) =>
         getDefault({
@@ -881,6 +894,12 @@ describe('Tab Switching Keyboard Shortcuts', () => {
         panes: {
           layouts: {},
           activePane: {},
+        },
+        network: {
+          status: null,
+          loading: false,
+          configuring: false,
+          error: null,
         },
       },
     })

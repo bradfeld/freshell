@@ -30,6 +30,8 @@ import SettingsView from '@/components/SettingsView'
 import OverviewView from '@/components/OverviewView'
 import PaneDivider from '@/components/panes/PaneDivider'
 import { AuthRequiredModal } from '@/components/AuthRequiredModal'
+import { SetupWizard } from '@/components/SetupWizard'
+import { fetchNetworkStatus } from '@/store/networkSlice'
 import { ContextMenuProvider } from '@/components/context-menu/ContextMenuProvider'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { Wifi, WifiOff, Moon, Sun, Share2, X, Copy, Check, PanelLeftClose, PanelLeft } from 'lucide-react'
@@ -55,9 +57,12 @@ export default function App() {
   const settings = useAppSelector((s) => s.settings.settings)
   const idleWarnings = useAppSelector((s) => (s as any).idleWarnings?.warnings ?? EMPTY_IDLE_WARNINGS)
   const idleWarningCount = Object.keys(idleWarnings).length
+  const networkStatus = useAppSelector((s) => s.network.status)
 
   const [view, setView] = useState<AppView>('terminal')
   const [shareModalUrl, setShareModalUrl] = useState<string | null>(null)
+  const [showSetupWizard, setShowSetupWizard] = useState(false)
+  const [wizardInitialStep, setWizardInitialStep] = useState<1 | 2>(1)
   const [copied, setCopied] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const mainContentRef = useRef<HTMLDivElement>(null)
@@ -227,6 +232,9 @@ export default function App() {
         console.warn('Failed to load sessions', err)
       }
 
+      // Load network status for remote access wizard/settings
+      if (!cancelled) dispatch(fetchNetworkStatus())
+
       const ws = getWsClient()
 
       // Set up hello extension to include session IDs for prioritized repair
@@ -361,6 +369,14 @@ export default function App() {
       void cleanupPromise
     }
   }, [dispatch])
+
+  // Auto-show setup wizard on first run (unconfigured + localhost)
+  useEffect(() => {
+    if (networkStatus && !networkStatus.configured && networkStatus.host === '127.0.0.1') {
+      setWizardInitialStep(1)
+      setShowSetupWizard(true)
+    }
+  }, [networkStatus?.configured, networkStatus?.host])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -588,6 +604,16 @@ export default function App() {
         </div>
       )}
       <AuthRequiredModal />
+      {showSetupWizard && (
+        <SetupWizard
+          initialStep={wizardInitialStep}
+          onNavigate={setView}
+          onComplete={() => {
+            setShowSetupWizard(false)
+            dispatch(fetchNetworkStatus())
+          }}
+        />
+      )}
       </div>
     </ContextMenuProvider>
   )

@@ -9,6 +9,7 @@ import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
 import idleWarningsReducer from '@/store/idleWarningsSlice'
+import { networkReducer } from '@/store/networkSlice'
 
 // Mock heavy child components to avoid xterm/canvas issues
 vi.mock('@/components/TabContent', () => ({
@@ -29,6 +30,9 @@ vi.mock('@/components/OverviewView', () => ({
 }))
 vi.mock('@/hooks/useTheme', () => ({
   useThemeEffect: () => {},
+}))
+vi.mock('@/components/SetupWizard', () => ({
+  SetupWizard: () => <div data-testid="mock-setup-wizard">Setup Wizard</div>,
 }))
 
 const wsMocks = vi.hoisted(() => ({
@@ -69,6 +73,7 @@ function createStore() {
       sessions: sessionsReducer,
       panes: panesReducer,
       idleWarnings: idleWarningsReducer,
+      network: networkReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -81,6 +86,7 @@ function createStore() {
       sessions: { projects: [], expandedProjects: new Set<string>(), isLoading: false, error: null },
       panes: { layouts: {}, activePane: {} },
       idleWarnings: { warnings: {} },
+      network: { status: null, loading: false, configuring: false, error: null },
     },
   })
 }

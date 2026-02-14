@@ -9,6 +9,7 @@ import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
 import panesReducer from '@/store/panesSlice'
 import idleWarningsReducer from '@/store/idleWarningsSlice'
+import { networkReducer } from '@/store/networkSlice'
 
 // Mock the WebSocket client
 const mockSend = vi.fn()
@@ -67,6 +68,9 @@ vi.mock('@/components/OverviewView', () => ({
 vi.mock('@/hooks/useTheme', () => ({
   useThemeEffect: () => {},
 }))
+vi.mock('@/components/SetupWizard', () => ({
+  SetupWizard: () => <div data-testid="mock-setup-wizard">Setup Wizard</div>,
+}))
 
 function createTestStore(options?: {
   sidebarWidth?: number
@@ -80,6 +84,7 @@ function createTestStore(options?: {
       sessions: sessionsReducer,
       panes: panesReducer,
       idleWarnings: idleWarningsReducer,
+      network: networkReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -121,6 +126,7 @@ function createTestStore(options?: {
       idleWarnings: {
         warnings: {},
       },
+      network: { status: null, loading: false, configuring: false, error: null },
     },
   })
 }
