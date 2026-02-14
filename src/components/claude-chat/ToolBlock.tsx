@@ -1,6 +1,7 @@
 import { useState, memo, useMemo } from 'react'
 import { ChevronRight, Terminal, FileText, Eye, Pencil, Search, Globe, Loader2, Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import DiffView from './DiffView'
 
 interface ToolBlockProps {
   name: string
@@ -125,20 +126,32 @@ function ToolBlock({ name, input, output, isError, status, initialExpanded }: To
 
       {expanded && (
         <div className="px-2 py-1.5 border-t border-border/50 text-xs">
-          {input && (
-            <pre className="whitespace-pre-wrap font-mono opacity-80 max-h-48 overflow-y-auto">
-              {name === 'Bash' && typeof input.command === 'string'
-                ? input.command
-                : JSON.stringify(input, null, 2)}
-            </pre>
-          )}
-          {output && (
-            <pre className={cn(
-              'whitespace-pre-wrap font-mono max-h-48 overflow-y-auto mt-1',
-              isError ? 'text-red-500' : 'opacity-80'
-            )}>
-              {output}
-            </pre>
+          {name === 'Edit' && input &&
+            typeof input.old_string === 'string' &&
+            typeof input.new_string === 'string' ? (
+            <DiffView
+              oldStr={input.old_string}
+              newStr={input.new_string}
+              filePath={typeof input.file_path === 'string' ? input.file_path : undefined}
+            />
+          ) : (
+            <>
+              {input && (
+                <pre className="whitespace-pre-wrap font-mono opacity-80 max-h-48 overflow-y-auto">
+                  {name === 'Bash' && typeof input.command === 'string'
+                    ? input.command
+                    : JSON.stringify(input, null, 2)}
+                </pre>
+              )}
+              {output && (
+                <pre className={cn(
+                  'whitespace-pre-wrap font-mono max-h-48 overflow-y-auto mt-1',
+                  isError ? 'text-red-500' : 'opacity-80'
+                )}>
+                  {output}
+                </pre>
+              )}
+            </>
           )}
         </div>
       )}
