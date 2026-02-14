@@ -521,7 +521,7 @@ function PickerWrapper({
 
   if (step.step === 'directory') {
     const providerType = step.providerType
-    const providerLabel = providerType === 'claude-web' ? 'Claude Web' : getProviderLabel(providerType)
+    const providerLabel = providerType === 'claude-web' ? 'freshclaude' : getProviderLabel(providerType)
     const settingsKey = providerType === 'claude-web' ? 'claude' : providerType
     const globalDefault = settings?.codingCli?.providers?.[settingsKey]?.cwd
     const defaultCwd = tabPref.defaultCwd ?? globalDefault

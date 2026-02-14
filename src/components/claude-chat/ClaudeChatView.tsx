@@ -4,9 +4,14 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
 import { addUserMessage, clearPendingCreate, removePermission } from '@/store/claudeChatSlice'
 import { getWsClient } from '@/lib/ws-client'
+import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
 import ChatComposer from './ChatComposer'
+import FreshclaudeSettings from './FreshclaudeSettings'
+
+const DEFAULT_MODEL = 'claude-opus-4-6'
+const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
 
 interface ClaudeChatViewProps {
   tabId: string
@@ -20,6 +25,8 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
   const ws = getWsClient()
   const createSentRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const isAtBottomRef = useRef(true)
   // Keep a ref to the latest paneContent to avoid stale closures in effects
   // while using only primitive deps for triggering.
   const paneContentRef = useRef(paneContent)
@@ -71,6 +78,8 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     ws.send({
       type: 'sdk.create',
       requestId: paneContent.createRequestId,
+      model: paneContent.model ?? DEFAULT_MODEL,
+      permissionMode: paneContent.permissionMode ?? DEFAULT_PERMISSION_MODE,
       ...(paneContent.initialCwd ? { cwd: paneContent.initialCwd } : {}),
       ...(paneContent.resumeSessionId ? { resumeSessionId: paneContent.resumeSessionId } : {}),
     })
@@ -102,9 +111,11 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     })
   }, [paneContent.sessionId, ws])
 
-  // Auto-scroll on new messages
+  // Smart auto-scroll: only scroll if user is already at/near the bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [session?.messages.length, session?.streamingActive])
 
   const handleSend = useCallback((text: string) => {
@@ -130,35 +141,75 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     ws.send({ type: 'sdk.permission.respond', sessionId: paneContent.sessionId, requestId, behavior: 'deny' })
   }, [paneContent.sessionId, dispatch, ws])
 
-  if (hidden) return null
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const threshold = 50
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+  }, [])
+
+  const handleSettingsChange = useCallback((changes: Record<string, unknown>) => {
+    dispatch(updatePaneContent({
+      tabId,
+      paneId,
+      content: { ...paneContentRef.current, ...changes },
+    }))
+  }, [tabId, paneId, dispatch])
+
+  const handleSettingsDismiss = useCallback(() => {
+    dispatch(updatePaneContent({
+      tabId,
+      paneId,
+      content: { ...paneContentRef.current, settingsDismissed: true },
+    }))
+  }, [tabId, paneId, dispatch])
+
+  // Controls (model, permissions) should be locked once sdk.create has been sent.
+  // The pane status transitions from 'creating' to 'starting' immediately after sdk.create,
+  // so any status other than 'creating' means the session is already configured.
+  const sessionStarted = paneContent.status !== 'creating'
 
   const isInteractive = paneContent.status === 'idle' || paneContent.status === 'connected'
   const isRunning = paneContent.status === 'running'
   const pendingPermissions = session ? Object.values(session.pendingPermissions) : []
 
   return (
-    <div className="h-full w-full flex flex-col" role="region" aria-label="Claude Web Chat">
+    <div className={cn('h-full w-full flex flex-col', hidden ? 'tab-hidden' : 'tab-visible')} role="region" aria-label="freshclaude Chat">
       {/* Status bar */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b text-xs text-muted-foreground">
         <span>
-          {paneContent.status === 'creating' && 'Creating session...'}
-          {paneContent.status === 'starting' && 'Starting Claude Code...'}
-          {paneContent.status === 'connected' && 'Connected'}
-          {paneContent.status === 'running' && 'Running...'}
-          {paneContent.status === 'idle' && 'Ready'}
-          {paneContent.status === 'compacting' && 'Compacting context...'}
-          {paneContent.status === 'exited' && 'Session ended'}
+          {pendingPermissions.length > 0 && 'Waiting for answer...'}
+          {pendingPermissions.length === 0 && paneContent.status === 'creating' && 'Creating session...'}
+          {pendingPermissions.length === 0 && paneContent.status === 'starting' && 'Starting Claude Code...'}
+          {pendingPermissions.length === 0 && paneContent.status === 'connected' && 'Connected'}
+          {pendingPermissions.length === 0 && paneContent.status === 'running' && 'Running...'}
+          {pendingPermissions.length === 0 && paneContent.status === 'idle' && 'Ready'}
+          {pendingPermissions.length === 0 && paneContent.status === 'compacting' && 'Compacting context...'}
+          {pendingPermissions.length === 0 && paneContent.status === 'exited' && 'Session ended'}
         </span>
-        {paneContent.initialCwd && (
-          <span className="truncate ml-2">{paneContent.initialCwd}</span>
-        )}
+        <div className="flex items-center gap-2">
+          {paneContent.initialCwd && (
+            <span className="truncate">{paneContent.initialCwd}</span>
+          )}
+          <FreshclaudeSettings
+            model={paneContent.model ?? DEFAULT_MODEL}
+            permissionMode={paneContent.permissionMode ?? DEFAULT_PERMISSION_MODE}
+            showThinking={paneContent.showThinking ?? true}
+            showTools={paneContent.showTools ?? true}
+            showTimecodes={paneContent.showTimecodes ?? false}
+            sessionStarted={sessionStarted}
+            defaultOpen={!paneContent.settingsDismissed}
+            onChange={handleSettingsChange}
+            onDismiss={handleSettingsDismiss}
+          />
+        </div>
       </div>
 
       {/* Message area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-3">
         {!session?.messages.length && (
           <div className="text-center text-muted-foreground text-sm py-8">
-            <p className="font-medium mb-2">Claude Web Chat</p>
+            <p className="font-medium mb-2">freshclaude</p>
             <p>Rich chat UI for Claude Code sessions.</p>
             <p className="text-xs mt-2">Session: {paneContent.sessionId ?? 'pending'}</p>
           </div>
@@ -171,6 +222,9 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
             content={msg.content}
             timestamp={msg.timestamp}
             model={msg.model}
+            showThinking={paneContent.showThinking ?? true}
+            showTools={paneContent.showTools ?? true}
+            showTimecodes={paneContent.showTimecodes ?? false}
           />
         ))}
 
@@ -178,6 +232,9 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
           <MessageBubble
             role="assistant"
             content={[{ type: 'text', text: session.streamingText }]}
+            showThinking={paneContent.showThinking ?? true}
+            showTools={paneContent.showTools ?? true}
+            showTimecodes={paneContent.showTimecodes ?? false}
           />
         )}
 
@@ -207,7 +264,13 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
         onInterrupt={handleInterrupt}
         disabled={!isInteractive && !isRunning}
         isRunning={isRunning}
-        placeholder={isInteractive ? 'Message Claude...' : 'Waiting for connection...'}
+        placeholder={
+          pendingPermissions.length > 0
+            ? 'Waiting for answer...'
+            : isInteractive
+              ? 'Message Claude...'
+              : 'Waiting for connection...'
+        }
       />
     </div>
   )

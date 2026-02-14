@@ -59,7 +59,7 @@ export type PickerPaneContent = {
 export type SdkSessionStatus = 'creating' | 'starting' | 'connected' | 'running' | 'idle' | 'compacting' | 'exited'
 
 /**
- * Claude Web chat pane — rich chat UI powered by Claude Code SDK mode.
+ * freshclaude chat pane — rich chat UI powered by Claude Code SDK mode.
  */
 export type ClaudeChatPaneContent = {
   kind: 'claude-chat'
@@ -73,6 +73,18 @@ export type ClaudeChatPaneContent = {
   resumeSessionId?: string
   /** Working directory */
   initialCwd?: string
+  /** Model to use (default: claude-opus-4-6) */
+  model?: string
+  /** Permission mode (default: bypassPermissions) */
+  permissionMode?: string
+  /** Show thinking blocks in message feed (default: true) */
+  showThinking?: boolean
+  /** Show tool-use blocks in message feed (default: true) */
+  showTools?: boolean
+  /** Show timestamps on messages (default: false) */
+  showTimecodes?: boolean
+  /** Whether the user has dismissed the first-launch settings popover */
+  settingsDismissed?: boolean
 }
 
 /**

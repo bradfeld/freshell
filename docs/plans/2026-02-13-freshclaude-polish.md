@@ -1,0 +1,1771 @@
+# Freshclaude Polish: Claude Chic Parity Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Bring freshclaude's chat UI up to Claude Chic's level of visual polish and information density through progressive disclosure, color-coded message types, smart tool headers, auto-collapse, streaming indicators, and syntax-highlighted diffs.
+
+**Architecture:** Incremental enhancement of existing `MessageBubble`, `ToolBlock`, and `ClaudeChatView` components. Each task is self-contained — no task depends on another unless explicitly noted. New components (`ThinkingIndicator`, `DiffView`, `CollapsedTurn`) are added alongside existing ones. CSS custom properties added for the color-coding system. A `useStreamDebounce` hook wraps the existing Redux streaming state.
+
+**Tech Stack:** React 18, Tailwind CSS, CSS custom properties, `react-markdown` + `remark-gfm` (existing), `rehype-highlight` + `highlight.js` (new — for code blocks), `diff` npm package (new — for computing diffs). Vitest + Testing Library (existing).
+
+**Reference:** [Claude Chic](https://github.com/mrocklin/claudechic) by Matthew Rocklin — Python/Textual TUI wrapping claude-agent-sdk.
+
+---
+
+## Task 1: Add CSS Custom Properties for Message Type Colors
+
+**Files:**
+- Modify: `src/index.css:5-56`
+- Test: Visual inspection (CSS-only change)
+
+**Step 1: Add claude chat color variables to `:root` and `.dark`**
+
+In `src/index.css`, add these custom properties inside the existing `:root` block (after `--warning-foreground`):
+
+```css
+  /* Claude chat message type colors */
+  --claude-user: 30 90% 45%;           /* warm orange */
+  --claude-assistant: 210 60% 55%;     /* sky blue */
+  --claude-tool: 240 5% 55%;           /* neutral gray */
+  --claude-error: 0 72% 51%;           /* red - reuse destructive */
+  --claude-warning: 38 92% 50%;        /* yellow - reuse warning */
+  --claude-success: 142 71% 45%;       /* green - reuse success */
+```
+
+And in the `.dark` block:
+
+```css
+  /* Claude chat message type colors (dark) */
+  --claude-user: 30 85% 55%;
+  --claude-assistant: 210 55% 60%;
+  --claude-tool: 240 5% 45%;
+  --claude-error: 0 62% 50%;
+  --claude-warning: 38 92% 50%;
+  --claude-success: 142 71% 45%;
+```
+
+**Step 2: Verify no build errors**
+
+Run: `npm run build:client`
+Expected: Clean build, no errors
+
+**Step 3: Commit**
+
+```bash
+git add src/index.css
+git commit -m "feat(freshclaude): add CSS custom properties for message type color coding
+
+Add --claude-user (orange), --claude-assistant (blue), --claude-tool (gray),
+--claude-error (red), --claude-warning (yellow), --claude-success (green)
+for both light and dark modes. These power the left-border visual language
+inspired by Claude Chic's scannable message type system."
+```
+
+---
+
+## Task 2: Redesign MessageBubble with Left-Border Visual Language
+
+Replace chat-bubble alignment with a left-border color system for instant scanability. All messages left-aligned, distinguished by colored left border bars.
+
+**Files:**
+- Modify: `src/components/claude-chat/MessageBubble.tsx`
+- Modify: `test/unit/client/components/claude-chat/MessageBubble.test.tsx`
+
+**Step 1: Update MessageBubble tests for new layout**
+
+Replace the existing test file content. Key changes: messages are no longer right/left-aligned — they all have left borders with role-specific colors. User messages have `border-l-[3px]` with `--claude-user` color. Assistant messages have `border-l-2` with `--claude-assistant` color.
+
+```tsx
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import MessageBubble from '../../../../../src/components/claude-chat/MessageBubble'
+import type { ChatContentBlock } from '@/store/claudeChatTypes'
+
+describe('MessageBubble', () => {
+  afterEach(cleanup)
+
+  it('renders user text as left-aligned with orange left border', () => {
+    const { container } = render(
+      <MessageBubble role="user" content={[{ type: 'text', text: 'Hello world' }]} />
+    )
+    expect(screen.getByText('Hello world')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'user message' })).toBeInTheDocument()
+    // User messages have thicker left border
+    const article = container.querySelector('[role="article"]')!
+    expect(article.className).toContain('border-l-[3px]')
+  })
+
+  it('renders assistant text with blue left border and markdown', () => {
+    const { container } = render(
+      <MessageBubble role="assistant" content={[{ type: 'text', text: '**Bold text**' }]} />
+    )
+    expect(screen.getByText('Bold text')).toBeInTheDocument()
+    const article = container.querySelector('[role="article"]')!
+    expect(article.className).toContain('border-l-2')
+  })
+
+  it('constrains content width with max-w-prose', () => {
+    const { container } = render(
+      <MessageBubble role="assistant" content={[{ type: 'text', text: 'Hello' }]} />
+    )
+    const article = container.querySelector('[role="article"]')!
+    expect(article.className).toContain('max-w-prose')
+  })
+
+  it('renders thinking block as collapsible', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[{ type: 'thinking', thinking: 'Let me think...' }]}
+      />
+    )
+    expect(screen.getByText(/Thinking/)).toBeInTheDocument()
+  })
+
+  it('renders tool use block', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls -la' } }]}
+      />
+    )
+    expect(screen.getByText('Bash')).toBeInTheDocument()
+  })
+
+  it('renders timestamp and model', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[{ type: 'text', text: 'Hi' }]}
+        timestamp="2026-02-13T10:00:00Z"
+        model="claude-sonnet-4-5"
+        showTimecodes={true}
+      />
+    )
+    expect(screen.getByText('claude-sonnet-4-5')).toBeInTheDocument()
+  })
+})
+
+describe('MessageBubble display toggles', () => {
+  afterEach(cleanup)
+
+  const textBlock: ChatContentBlock = { type: 'text', text: 'Hello world' }
+  const thinkingBlock: ChatContentBlock = { type: 'thinking', thinking: 'Let me think about this...' }
+  const toolUseBlock: ChatContentBlock = { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }
+  const toolResultBlock: ChatContentBlock = { type: 'tool_result', tool_use_id: 't1', content: 'file.txt' }
+
+  it('hides thinking blocks when showThinking is false', () => {
+    render(
+      <MessageBubble role="assistant" content={[textBlock, thinkingBlock]} showThinking={false} />
+    )
+    expect(screen.queryByText(/Let me think/)).not.toBeInTheDocument()
+    expect(screen.getByText('Hello world')).toBeInTheDocument()
+  })
+
+  it('shows thinking blocks when showThinking is true', () => {
+    render(
+      <MessageBubble role="assistant" content={[thinkingBlock]} showThinking={true} />
+    )
+    expect(screen.getByText(/Let me think/)).toBeInTheDocument()
+  })
+
+  it('hides tool_use blocks when showTools is false', () => {
+    render(
+      <MessageBubble role="assistant" content={[textBlock, toolUseBlock]} showTools={false} />
+    )
+    expect(screen.queryByText('Bash')).not.toBeInTheDocument()
+  })
+
+  it('hides tool_result blocks when showTools is false', () => {
+    render(
+      <MessageBubble role="assistant" content={[textBlock, toolResultBlock]} showTools={false} />
+    )
+    expect(screen.queryByText('Result')).not.toBeInTheDocument()
+  })
+
+  it('shows timestamp when showTimecodes is true', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock]}
+        timestamp="2026-02-13T10:00:00Z"
+        showTimecodes={true}
+      />
+    )
+    expect(screen.getByRole('article').querySelector('time')).toBeInTheDocument()
+  })
+
+  it('hides timestamp when showTimecodes is false', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock]}
+        timestamp="2026-02-13T10:00:00Z"
+        showTimecodes={false}
+      />
+    )
+    expect(screen.getByRole('article').querySelector('time')).not.toBeInTheDocument()
+  })
+
+  it('defaults to showing thinking and tools, hiding timecodes', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={[textBlock, thinkingBlock, toolUseBlock]}
+        timestamp="2026-02-13T10:00:00Z"
+      />
+    )
+    expect(screen.getByText(/Let me think/)).toBeInTheDocument()
+    expect(screen.getByText('Bash')).toBeInTheDocument()
+    expect(screen.getByRole('article').querySelector('time')).not.toBeInTheDocument()
+  })
+})
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/MessageBubble.test.tsx`
+Expected: FAIL — `border-l-[3px]` and `max-w-prose` not present in current output
+
+**Step 3: Rewrite MessageBubble component**
+
+Replace `src/components/claude-chat/MessageBubble.tsx`:
+
+```tsx
+import { memo } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { cn } from '@/lib/utils'
+import type { ChatContentBlock } from '@/store/claudeChatTypes'
+import ToolBlock from './ToolBlock'
+
+interface MessageBubbleProps {
+  role: 'user' | 'assistant'
+  content: ChatContentBlock[]
+  timestamp?: string
+  model?: string
+  showThinking?: boolean
+  showTools?: boolean
+  showTimecodes?: boolean
+}
+
+function MessageBubble({
+  role,
+  content,
+  timestamp,
+  model,
+  showThinking = true,
+  showTools = true,
+  showTimecodes = false,
+}: MessageBubbleProps) {
+  return (
+    <div
+      className={cn(
+        'max-w-prose pl-3 py-1 text-sm',
+        role === 'user'
+          ? 'border-l-[3px] border-l-[hsl(var(--claude-user))]'
+          : 'border-l-2 border-l-[hsl(var(--claude-assistant))]'
+      )}
+      role="article"
+      aria-label={`${role} message`}
+    >
+      {content.map((block, i) => {
+        if (block.type === 'text' && block.text) {
+          if (role === 'user') {
+            return <p key={i} className="whitespace-pre-wrap">{block.text}</p>
+          }
+          return (
+            <div key={i} className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.text}</ReactMarkdown>
+            </div>
+          )
+        }
+
+        if (block.type === 'thinking' && block.thinking) {
+          if (!showThinking) return null
+          return (
+            <details key={i} className="text-xs text-muted-foreground mt-1">
+              <summary className="cursor-pointer select-none">
+                Thinking ({block.thinking.length.toLocaleString()} chars)
+              </summary>
+              <pre className="mt-1 whitespace-pre-wrap text-xs opacity-70">{block.thinking}</pre>
+            </details>
+          )
+        }
+
+        if (block.type === 'tool_use' && block.name) {
+          if (!showTools) return null
+          return (
+            <ToolBlock
+              key={block.id || i}
+              name={block.name}
+              input={block.input}
+              status="running"
+            />
+          )
+        }
+
+        if (block.type === 'tool_result') {
+          if (!showTools) return null
+          const resultContent = typeof block.content === 'string'
+            ? block.content
+            : JSON.stringify(block.content)
+          return (
+            <ToolBlock
+              key={block.tool_use_id || i}
+              name="Result"
+              output={resultContent}
+              isError={block.is_error}
+              status="complete"
+            />
+          )
+        }
+
+        return null
+      })}
+
+      {((showTimecodes && timestamp) || model) && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+          {showTimecodes && timestamp && (
+            <time>{new Date(timestamp).toLocaleTimeString()}</time>
+          )}
+          {model && <span className="opacity-60">{model}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default memo(MessageBubble)
+```
+
+Key changes from original:
+- Removed chat-bubble alignment (`ml-auto`/`mr-auto`) — all messages left-aligned
+- Removed `rounded-lg`, `bg-primary`/`bg-muted` backgrounds — transparent with colored left border
+- User: `border-l-[3px]` with `--claude-user` (orange, thicker = more prominent)
+- Assistant: `border-l-2` with `--claude-assistant` (blue, thinner = less prominent)
+- Added `max-w-prose` (~65ch) for readability
+- Metadata moved from separate flex row to inline `mt-1` below content
+
+**Step 4: Run tests to verify they pass**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/MessageBubble.test.tsx`
+Expected: All PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/components/claude-chat/MessageBubble.tsx test/unit/client/components/claude-chat/MessageBubble.test.tsx
+git commit -m "feat(freshclaude): replace chat bubbles with left-border visual language
+
+Replace right-aligned user bubbles and muted assistant bubbles with a
+Claude Chic-inspired left border color system:
+- User messages: 3px orange left border (--claude-user)
+- Assistant messages: 2px blue left border (--claude-assistant)
+- All messages left-aligned with max-w-prose for readability
+- Transparent backgrounds — border color is the primary differentiator
+
+This provides instant scanability in long conversations without reading content."
+```
+
+---
+
+## Task 3: Smart Tool Headers with Result Summaries
+
+Enhance `ToolBlock` to show context-rich one-line headers and append result summaries after completion. Inspired by Claude Chic's `format_tool_header()`.
+
+**Files:**
+- Modify: `src/components/claude-chat/ToolBlock.tsx`
+- Modify: `test/unit/client/components/claude-chat/ToolBlock.test.tsx`
+
+**Step 1: Write new tests for smart headers and result summaries**
+
+Add to the existing test file:
+
+```tsx
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import ToolBlock from '../../../../../src/components/claude-chat/ToolBlock'
+
+describe('ToolBlock', () => {
+  afterEach(cleanup)
+
+  it('renders tool name and preview', () => {
+    render(<ToolBlock name="Bash" input={{ command: 'ls -la' }} status="running" />)
+    expect(screen.getByText('Bash')).toBeInTheDocument()
+    expect(screen.getByText('$ ls -la')).toBeInTheDocument()
+  })
+
+  it('shows file path preview for Read tool', () => {
+    render(<ToolBlock name="Read" input={{ file_path: '/home/user/file.ts' }} status="complete" />)
+    expect(screen.getByText('/home/user/file.ts')).toBeInTheDocument()
+  })
+
+  it('expands to show details on click', async () => {
+    const user = userEvent.setup()
+    render(<ToolBlock name="Bash" input={{ command: 'echo hello' }} status="complete" />)
+    const button = screen.getByRole('button', { name: 'Bash tool call' })
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    await user.click(button)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('shows error styling when isError is true', () => {
+    render(<ToolBlock name="Result" output="Command failed" isError={true} status="complete" />)
+    expect(screen.getByText('Result')).toBeInTheDocument()
+  })
+
+  // --- New: smart header tests ---
+
+  it('shows Bash description field when available', () => {
+    render(
+      <ToolBlock
+        name="Bash"
+        input={{ command: 'npm install --save-dev vitest', description: 'Install test runner' }}
+        status="running"
+      />
+    )
+    expect(screen.getByText('Install test runner')).toBeInTheDocument()
+  })
+
+  it('shows Grep pattern in preview', () => {
+    render(
+      <ToolBlock
+        name="Grep"
+        input={{ pattern: 'useState', path: 'src/' }}
+        status="running"
+      />
+    )
+    expect(screen.getByText(/useState/)).toBeInTheDocument()
+  })
+
+  it('shows Edit file path with old/new string indicator', () => {
+    render(
+      <ToolBlock
+        name="Edit"
+        input={{ file_path: 'src/App.tsx', old_string: 'foo', new_string: 'bar' }}
+        status="running"
+      />
+    )
+    expect(screen.getByText('src/App.tsx')).toBeInTheDocument()
+  })
+
+  it('appends result summary for completed Read tool', () => {
+    const output = Array(50).fill('line of code').join('\n')
+    render(
+      <ToolBlock name="Read" input={{ file_path: 'src/App.tsx' }} output={output} status="complete" />
+    )
+    // Should show line count summary
+    expect(screen.getByText(/50 lines/)).toBeInTheDocument()
+  })
+
+  it('appends result summary for completed Bash tool with exit code', () => {
+    render(
+      <ToolBlock
+        name="Bash"
+        input={{ command: 'false' }}
+        output="error output"
+        isError={true}
+        status="complete"
+      />
+    )
+    expect(screen.getByText(/error/i)).toBeInTheDocument()
+  })
+
+  it('appends result summary for completed Grep tool', () => {
+    const output = 'file1.ts\nfile2.ts\nfile3.ts'
+    render(
+      <ToolBlock
+        name="Grep"
+        input={{ pattern: 'foo' }}
+        output={output}
+        status="complete"
+      />
+    )
+    expect(screen.getByText(/3 match/)).toBeInTheDocument()
+  })
+
+  it('uses tool-colored left border', () => {
+    const { container } = render(
+      <ToolBlock name="Bash" input={{ command: 'ls' }} status="running" />
+    )
+    const wrapper = container.firstElementChild!
+    expect(wrapper.className).toContain('border-l')
+  })
+})
+```
+
+**Step 2: Run tests to verify new ones fail**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/ToolBlock.test.tsx`
+Expected: New tests FAIL (description field, result summaries, border-l not present)
+
+**Step 3: Rewrite ToolBlock with smart headers and result summaries**
+
+Replace `src/components/claude-chat/ToolBlock.tsx`:
+
+```tsx
+import { useState, memo, useMemo } from 'react'
+import { ChevronRight, Terminal, FileText, Eye, Pencil, Search, Globe, Loader2, Check, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+interface ToolBlockProps {
+  name: string
+  input?: Record<string, unknown>
+  output?: string
+  isError?: boolean
+  status: 'running' | 'complete'
+}
+
+const TOOL_ICONS: Record<string, typeof Terminal> = {
+  Bash: Terminal,
+  Read: Eye,
+  Write: FileText,
+  Edit: Pencil,
+  Grep: Search,
+  Glob: Search,
+  WebFetch: Globe,
+  WebSearch: Globe,
+}
+
+/** Generate a context-rich one-line preview for the tool header. */
+function getToolPreview(name: string, input?: Record<string, unknown>): string {
+  if (!input) return ''
+
+  if (name === 'Bash') {
+    // Prefer description over raw command
+    if (typeof input.description === 'string') return input.description
+    if (typeof input.command === 'string') return `$ ${input.command.slice(0, 120)}`
+    return ''
+  }
+
+  if (name === 'Grep') {
+    const pattern = typeof input.pattern === 'string' ? input.pattern : ''
+    const path = typeof input.path === 'string' ? input.path : ''
+    return path ? `${pattern} in ${path}` : pattern
+  }
+
+  if ((name === 'Read' || name === 'Write' || name === 'Edit') && typeof input.file_path === 'string') {
+    return input.file_path
+  }
+
+  if (name === 'Glob' && typeof input.pattern === 'string') {
+    return input.pattern
+  }
+
+  if ((name === 'WebFetch' || name === 'WebSearch') && typeof input.url === 'string') {
+    return input.url
+  }
+
+  return JSON.stringify(input).slice(0, 100)
+}
+
+/** Generate a short result summary (e.g. "143 lines", "5 matches", "error"). */
+function getResultSummary(name: string, output?: string, isError?: boolean): string | null {
+  if (!output) return null
+  if (isError) return 'error'
+
+  if (name === 'Read' || name === 'Result') {
+    const lineCount = output.split('\n').length
+    return `${lineCount} line${lineCount !== 1 ? 's' : ''}`
+  }
+
+  if (name === 'Grep' || name === 'Glob') {
+    const matchCount = output.trim().split('\n').filter(Boolean).length
+    return `${matchCount} match${matchCount !== 1 ? 'es' : ''}`
+  }
+
+  if (name === 'Bash') {
+    const lineCount = output.split('\n').length
+    if (lineCount > 3) return `${lineCount} lines`
+    return 'done'
+  }
+
+  return 'done'
+}
+
+function ToolBlock({ name, input, output, isError, status }: ToolBlockProps) {
+  const [expanded, setExpanded] = useState(false)
+  const Icon = TOOL_ICONS[name] || Terminal
+  const preview = useMemo(() => getToolPreview(name, input), [name, input])
+  const resultSummary = useMemo(
+    () => status === 'complete' ? getResultSummary(name, output, isError) : null,
+    [name, output, isError, status],
+  )
+
+  return (
+    <div
+      className={cn(
+        'border-l-2 my-1 text-xs',
+        isError
+          ? 'border-l-[hsl(var(--claude-error))]'
+          : 'border-l-[hsl(var(--claude-tool))]'
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full px-2 py-1 text-left hover:bg-accent/50 rounded-r"
+        aria-expanded={expanded}
+        aria-label={`${name} tool call`}
+      >
+        <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90')} />
+        <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="font-medium">{name}</span>
+        {preview && <span className="truncate text-muted-foreground font-mono">{preview}</span>}
+        {resultSummary && (
+          <span className={cn(
+            'shrink-0 text-muted-foreground',
+            isError && 'text-red-500'
+          )}>
+            ({resultSummary})
+          </span>
+        )}
+        <span className="ml-auto shrink-0">
+          {status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+          {status === 'complete' && !isError && <Check className="h-3 w-3 text-green-500" />}
+          {status === 'complete' && isError && <X className="h-3 w-3 text-red-500" />}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="px-2 py-1.5 border-t border-border/50 text-xs">
+          {input && (
+            <pre className="whitespace-pre-wrap font-mono opacity-80 max-h-48 overflow-y-auto">
+              {name === 'Bash' && typeof input.command === 'string'
+                ? input.command
+                : JSON.stringify(input, null, 2)}
+            </pre>
+          )}
+          {output && (
+            <pre className={cn(
+              'whitespace-pre-wrap font-mono max-h-48 overflow-y-auto mt-1',
+              isError ? 'text-red-500' : 'opacity-80'
+            )}>
+              {output}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default memo(ToolBlock)
+```
+
+Key changes:
+- Left border replaces full border box (consistent with message visual language)
+- `getToolPreview()` prefers `description` for Bash, handles Grep pattern+path, Glob, WebFetch
+- `getResultSummary()` appends `(143 lines)`, `(5 matches)`, `(error)`, `(done)` after completion
+- More tool icons: Grep/Glob get Search, WebFetch/WebSearch get Globe
+- Uses `--claude-tool` / `--claude-error` CSS vars
+
+**Step 4: Run tests to verify they pass**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/ToolBlock.test.tsx`
+Expected: All PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/components/claude-chat/ToolBlock.tsx test/unit/client/components/claude-chat/ToolBlock.test.tsx
+git commit -m "feat(freshclaude): smart tool headers with result summaries
+
+Enhance ToolBlock with context-rich one-line headers:
+- Bash: shows description field when available, else truncated command
+- Grep: shows 'pattern in path'
+- Read/Edit/Write: shows file path
+- Result summaries appended after completion: (143 lines), (5 matches), (error)
+- Left border color coding: --claude-tool gray, --claude-error red
+- Additional tool icons for Grep, Glob, WebFetch, WebSearch
+
+Users can now see what happened without expanding every tool block."
+```
+
+---
+
+## Task 4: Auto-Collapse Old Tool Blocks
+
+Only the N most recent tool blocks stay expanded; older ones auto-collapse. Managed at the `ClaudeChatView` level to coordinate across messages.
+
+**Files:**
+- Modify: `src/components/claude-chat/ToolBlock.tsx`
+- Modify: `src/components/claude-chat/MessageBubble.tsx`
+- Create: `test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx`
+
+**Step 1: Write failing test for auto-collapse prop**
+
+Create `test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx`:
+
+```tsx
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import ToolBlock from '../../../../../src/components/claude-chat/ToolBlock'
+
+describe('ToolBlock auto-collapse', () => {
+  afterEach(cleanup)
+
+  it('starts collapsed when defaultCollapsed is true', () => {
+    render(
+      <ToolBlock
+        name="Bash"
+        input={{ command: 'echo hello' }}
+        output="hello"
+        status="complete"
+        defaultCollapsed={true}
+      />
+    )
+    const button = screen.getByRole('button', { name: 'Bash tool call' })
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('starts expanded when defaultCollapsed is false', () => {
+    render(
+      <ToolBlock
+        name="Bash"
+        input={{ command: 'echo hello' }}
+        output="hello"
+        status="complete"
+        defaultCollapsed={false}
+      />
+    )
+    const button = screen.getByRole('button', { name: 'Bash tool call' })
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    // Note: defaultCollapsed=false means "don't force collapse" — the default
+    // is still collapsed (user clicks to expand). This prop is about preventing
+    // an already-expanded tool from being forced collapsed.
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx`
+Expected: FAIL — `defaultCollapsed` prop not accepted
+
+**Step 3: Add `defaultCollapsed` prop to ToolBlock**
+
+In `src/components/claude-chat/ToolBlock.tsx`, update the interface and initial state:
+
+```tsx
+interface ToolBlockProps {
+  name: string
+  input?: Record<string, unknown>
+  output?: string
+  isError?: boolean
+  status: 'running' | 'complete'
+  defaultCollapsed?: boolean
+}
+```
+
+And the component:
+
+```tsx
+function ToolBlock({ name, input, output, isError, status, defaultCollapsed }: ToolBlockProps) {
+  const [expanded, setExpanded] = useState(defaultCollapsed === true ? false : false)
+  // ... rest unchanged
+}
+```
+
+**Step 4: Add `recentToolCount` prop to MessageBubble**
+
+In `src/components/claude-chat/MessageBubble.tsx`, add a new prop `toolCollapseIndex` — tool_use blocks with an index >= this value remain expanded (are "recent"), and those below it are auto-collapsed.
+
+Update the MessageBubble props:
+
+```tsx
+interface MessageBubbleProps {
+  role: 'user' | 'assistant'
+  content: ChatContentBlock[]
+  timestamp?: string
+  model?: string
+  showThinking?: boolean
+  showTools?: boolean
+  showTimecodes?: boolean
+  /** Index offset for this message's tool blocks in the global tool sequence.
+   *  Tools at globalIndex < autoCollapseBelow get defaultCollapsed=true. */
+  toolIndexOffset?: number
+  autoCollapseBelow?: number
+}
+```
+
+Then in the rendering loop for tool_use blocks:
+
+```tsx
+// Track tool index within this message
+let toolIdx = 0
+// ...inside the content.map:
+if (block.type === 'tool_use' && block.name) {
+  if (!showTools) return null
+  const globalIdx = (toolIndexOffset ?? 0) + toolIdx
+  toolIdx++
+  return (
+    <ToolBlock
+      key={block.id || i}
+      name={block.name}
+      input={block.input}
+      status="running"
+      defaultCollapsed={autoCollapseBelow != null && globalIdx < autoCollapseBelow}
+    />
+  )
+}
+```
+
+**Step 5: Wire auto-collapse in ClaudeChatView**
+
+In `src/components/claude-chat/ClaudeChatView.tsx`, compute tool counts and pass collapse indices:
+
+```tsx
+const RECENT_TOOLS_EXPANDED = 3
+
+// Count total tools across all messages
+const messages = session?.messages ?? []
+let totalTools = 0
+const toolOffsets: number[] = []
+for (const msg of messages) {
+  toolOffsets.push(totalTools)
+  totalTools += msg.content.filter(b => b.type === 'tool_use').length
+}
+const autoCollapseBelow = Math.max(0, totalTools - RECENT_TOOLS_EXPANDED)
+
+// In the render:
+{messages.map((msg, i) => (
+  <MessageBubble
+    key={i}
+    role={msg.role}
+    content={msg.content}
+    timestamp={msg.timestamp}
+    model={msg.model}
+    showThinking={paneContent.showThinking ?? true}
+    showTools={paneContent.showTools ?? true}
+    showTimecodes={paneContent.showTimecodes ?? false}
+    toolIndexOffset={toolOffsets[i]}
+    autoCollapseBelow={autoCollapseBelow}
+  />
+))}
+```
+
+**Step 6: Run all claude-chat tests**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/`
+Expected: All PASS
+
+**Step 7: Commit**
+
+```bash
+git add src/components/claude-chat/ToolBlock.tsx src/components/claude-chat/MessageBubble.tsx src/components/claude-chat/ClaudeChatView.tsx test/unit/client/components/claude-chat/ToolBlock.autocollapse.test.tsx
+git commit -m "feat(freshclaude): auto-collapse old tool blocks
+
+Only the 3 most recent tool blocks start in their default state; older
+tools get defaultCollapsed=true. This keeps the conversation focused on
+current activity without losing access to older tool output (click to expand).
+
+Computed globally across all messages via toolIndexOffset + autoCollapseBelow
+passed through MessageBubble to individual ToolBlock instances."
+```
+
+---
+
+## Task 5: In-Chat Thinking/Streaming Indicator
+
+Add a visual "thinking" indicator that appears inline in the chat when Claude is processing but no streaming text has arrived yet.
+
+**Files:**
+- Create: `src/components/claude-chat/ThinkingIndicator.tsx`
+- Create: `test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx`
+- Modify: `src/components/claude-chat/ClaudeChatView.tsx`
+
+**Step 1: Write test for ThinkingIndicator**
+
+Create `test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx`:
+
+```tsx
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import ThinkingIndicator from '../../../../../src/components/claude-chat/ThinkingIndicator'
+
+describe('ThinkingIndicator', () => {
+  afterEach(cleanup)
+
+  it('renders thinking text', () => {
+    render(<ThinkingIndicator />)
+    expect(screen.getByText('Thinking...')).toBeInTheDocument()
+  })
+
+  it('has assistant message styling (blue border)', () => {
+    const { container } = render(<ThinkingIndicator />)
+    const wrapper = container.firstElementChild!
+    expect(wrapper.className).toContain('border-l')
+  })
+
+  it('has status role for accessibility', () => {
+    render(<ThinkingIndicator />)
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx`
+Expected: FAIL — module not found
+
+**Step 3: Create ThinkingIndicator component**
+
+Create `src/components/claude-chat/ThinkingIndicator.tsx`:
+
+```tsx
+import { memo } from 'react'
+
+const DOTS = ['', '.', '..', '...']
+
+function ThinkingIndicator() {
+  return (
+    <div
+      className="border-l-2 border-l-[hsl(var(--claude-assistant))] pl-3 py-1 max-w-prose"
+      role="status"
+      aria-label="Claude is thinking"
+    >
+      <span className="text-sm text-muted-foreground animate-pulse">
+        Thinking...
+      </span>
+    </div>
+  )
+}
+
+export default memo(ThinkingIndicator)
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx`
+Expected: All PASS
+
+**Step 5: Wire into ClaudeChatView**
+
+In `src/components/claude-chat/ClaudeChatView.tsx`, add the indicator between the last message and the scroll anchor, when the session is running but no streaming text has appeared yet:
+
+```tsx
+import ThinkingIndicator from './ThinkingIndicator'
+
+// ... in the render, after the streaming MessageBubble block:
+
+{/* Thinking indicator — shown when running but no streaming text yet */}
+{session?.status === 'running' && !session.streamingActive && (
+  <ThinkingIndicator />
+)}
+```
+
+This replaces the reliance on the status bar "Running..." text with a visible in-chat indicator.
+
+**Step 6: Run all claude-chat tests**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/`
+Expected: All PASS
+
+**Step 7: Commit**
+
+```bash
+git add src/components/claude-chat/ThinkingIndicator.tsx test/unit/client/components/claude-chat/ThinkingIndicator.test.tsx src/components/claude-chat/ClaudeChatView.tsx
+git commit -m "feat(freshclaude): add in-chat thinking indicator
+
+Show a pulsing 'Thinking...' indicator inline in the chat when Claude is
+processing but no streaming text has arrived yet. Uses assistant-style
+blue left border for visual consistency. Appears between the last message
+and the scroll anchor, providing immediate visual feedback that the session
+is active without relying on the status bar."
+```
+
+---
+
+## Task 6: Streaming Debounce Hook
+
+Add a `useStreamDebounce` hook that batches rapid `appendStreamDelta` updates to limit markdown re-parsing to ~20x/sec.
+
+**Files:**
+- Create: `src/components/claude-chat/useStreamDebounce.ts`
+- Create: `test/unit/client/components/claude-chat/useStreamDebounce.test.ts`
+- Modify: `src/components/claude-chat/ClaudeChatView.tsx`
+
+**Step 1: Write test for useStreamDebounce**
+
+Create `test/unit/client/components/claude-chat/useStreamDebounce.test.ts`:
+
+```tsx
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { renderHook, act } from '@testing-library/react'
+import { useStreamDebounce } from '../../../../../src/components/claude-chat/useStreamDebounce'
+
+describe('useStreamDebounce', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('returns raw text immediately for short strings', () => {
+    const { result, rerender } = renderHook(
+      ({ text, active }) => useStreamDebounce(text, active),
+      { initialProps: { text: 'Hello', active: true } },
+    )
+    expect(result.current).toBe('Hello')
+  })
+
+  it('debounces rapid updates', () => {
+    const { result, rerender } = renderHook(
+      ({ text, active }) => useStreamDebounce(text, active),
+      { initialProps: { text: '', active: true } },
+    )
+
+    // Rapid updates
+    rerender({ text: 'a', active: true })
+    rerender({ text: 'ab', active: true })
+    rerender({ text: 'abc', active: true })
+
+    // Should have debounced — may not have latest yet
+    // After timer fires, should catch up
+    act(() => { vi.advanceTimersByTime(50) })
+    expect(result.current).toBe('abc')
+  })
+
+  it('flushes immediately when buffer exceeds threshold', () => {
+    const longText = 'x'.repeat(250)
+    const { result, rerender } = renderHook(
+      ({ text, active }) => useStreamDebounce(text, active),
+      { initialProps: { text: '', active: true } },
+    )
+    rerender({ text: longText, active: true })
+    // Should flush immediately due to size threshold
+    expect(result.current).toBe(longText)
+  })
+
+  it('returns final text when streaming stops', () => {
+    const { result, rerender } = renderHook(
+      ({ text, active }) => useStreamDebounce(text, active),
+      { initialProps: { text: 'partial', active: true } },
+    )
+    rerender({ text: 'complete', active: false })
+    expect(result.current).toBe('complete')
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/useStreamDebounce.test.ts`
+Expected: FAIL — module not found
+
+**Step 3: Create useStreamDebounce hook**
+
+Create `src/components/claude-chat/useStreamDebounce.ts`:
+
+```ts
+import { useEffect, useRef, useState } from 'react'
+
+const DEBOUNCE_MS = 50
+const FLUSH_THRESHOLD = 200
+
+/**
+ * Debounces streaming text updates to limit markdown re-parsing frequency.
+ * Flushes every DEBOUNCE_MS or when the buffer delta exceeds FLUSH_THRESHOLD chars.
+ * Returns the debounced text string for rendering.
+ */
+export function useStreamDebounce(text: string, active: boolean): string {
+  const [debouncedText, setDebouncedText] = useState(text)
+  const lastFlushedLenRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    // When streaming is inactive, always show final text
+    if (!active) {
+      setDebouncedText(text)
+      lastFlushedLenRef.current = text.length
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      return
+    }
+
+    const delta = text.length - lastFlushedLenRef.current
+
+    // Flush immediately if buffer is large enough
+    if (delta >= FLUSH_THRESHOLD) {
+      setDebouncedText(text)
+      lastFlushedLenRef.current = text.length
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      return
+    }
+
+    // Otherwise debounce
+    if (!timerRef.current) {
+      timerRef.current = setTimeout(() => {
+        setDebouncedText(text)
+        lastFlushedLenRef.current = text.length
+        timerRef.current = null
+      }, DEBOUNCE_MS)
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
+  }, [text, active])
+
+  return debouncedText
+}
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/useStreamDebounce.test.ts`
+Expected: All PASS
+
+**Step 5: Wire into ClaudeChatView**
+
+In `src/components/claude-chat/ClaudeChatView.tsx`:
+
+```tsx
+import { useStreamDebounce } from './useStreamDebounce'
+
+// Inside the component:
+const debouncedStreamingText = useStreamDebounce(
+  session?.streamingText ?? '',
+  session?.streamingActive ?? false,
+)
+
+// Replace the streaming MessageBubble:
+{session?.streamingActive && debouncedStreamingText && (
+  <MessageBubble
+    role="assistant"
+    content={[{ type: 'text', text: debouncedStreamingText }]}
+    showThinking={paneContent.showThinking ?? true}
+    showTools={paneContent.showTools ?? true}
+    showTimecodes={paneContent.showTimecodes ?? false}
+  />
+)}
+```
+
+**Step 6: Run all tests**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/`
+Expected: All PASS
+
+**Step 7: Commit**
+
+```bash
+git add src/components/claude-chat/useStreamDebounce.ts test/unit/client/components/claude-chat/useStreamDebounce.test.ts src/components/claude-chat/ClaudeChatView.tsx
+git commit -m "feat(freshclaude): debounce streaming text to limit re-renders
+
+Add useStreamDebounce hook that batches rapid appendStreamDelta updates:
+- Flushes every 50ms (limits markdown re-parsing to ~20x/sec)
+- Immediately flushes when delta exceeds 200 chars (prevents visual stutter)
+- Always shows final text when streaming stops
+Inspired by Claude Chic's MarkdownStream debounce strategy."
+```
+
+---
+
+## Task 7: System Reminder Stripping
+
+Strip `<system-reminder>...</system-reminder>` tags from tool result output before rendering.
+
+**Files:**
+- Modify: `src/components/claude-chat/MessageBubble.tsx`
+- Add to: `test/unit/client/components/claude-chat/MessageBubble.test.tsx`
+
+**Step 1: Write failing test**
+
+Add to `MessageBubble.test.tsx`:
+
+```tsx
+it('strips system-reminder tags from tool result content', () => {
+  render(
+    <MessageBubble
+      role="assistant"
+      content={[{
+        type: 'tool_result',
+        tool_use_id: 't1',
+        content: 'actual content\n<system-reminder>\nHidden system text\n</system-reminder>\nmore content',
+      }]}
+    />
+  )
+  expect(screen.queryByText(/Hidden system text/)).not.toBeInTheDocument()
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/MessageBubble.test.tsx`
+Expected: FAIL — system-reminder text is visible
+
+**Step 3: Add stripping utility**
+
+In `src/components/claude-chat/MessageBubble.tsx`, add before the component:
+
+```tsx
+/** Strip SDK-injected <system-reminder>...</system-reminder> tags from text. */
+function stripSystemReminders(text: string): string {
+  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim()
+}
+```
+
+Then update the tool_result rendering:
+
+```tsx
+if (block.type === 'tool_result') {
+  if (!showTools) return null
+  const raw = typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
+  const resultContent = stripSystemReminders(raw)
+  return (
+    <ToolBlock
+      key={block.tool_use_id || i}
+      name="Result"
+      output={resultContent}
+      isError={block.is_error}
+      status="complete"
+    />
+  )
+}
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/MessageBubble.test.tsx`
+Expected: All PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/components/claude-chat/MessageBubble.tsx test/unit/client/components/claude-chat/MessageBubble.test.tsx
+git commit -m "feat(freshclaude): strip system-reminder tags from tool results
+
+SDK injects <system-reminder> tags into tool result content. These are
+internal metadata not meant for user display. Strip them before rendering
+to reduce visual noise."
+```
+
+---
+
+## Task 8: Collapsed Turns for Long Conversations
+
+Older turns (user+assistant pairs) collapse into single-line summaries for navigability. Only the N most recent turns show in full.
+
+**Files:**
+- Create: `src/components/claude-chat/CollapsedTurn.tsx`
+- Create: `test/unit/client/components/claude-chat/CollapsedTurn.test.tsx`
+- Modify: `src/components/claude-chat/ClaudeChatView.tsx`
+
+**Step 1: Write test for CollapsedTurn**
+
+Create `test/unit/client/components/claude-chat/CollapsedTurn.test.tsx`:
+
+```tsx
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import CollapsedTurn from '../../../../../src/components/claude-chat/CollapsedTurn'
+import type { ChatMessage } from '@/store/claudeChatTypes'
+
+const userMsg: ChatMessage = {
+  role: 'user',
+  content: [{ type: 'text', text: 'Fix the authentication bug in login flow' }],
+  timestamp: '2026-02-13T10:00:00Z',
+}
+
+const assistantMsg: ChatMessage = {
+  role: 'assistant',
+  content: [
+    { type: 'text', text: 'I will fix that.' },
+    { type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: 'auth.ts' } },
+    { type: 'tool_result', tool_use_id: 't1', content: 'done' },
+    { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'npm test' } },
+    { type: 'tool_result', tool_use_id: 't2', content: 'all pass' },
+    { type: 'text', text: 'Fixed!' },
+  ],
+  timestamp: '2026-02-13T10:01:00Z',
+}
+
+describe('CollapsedTurn', () => {
+  afterEach(cleanup)
+
+  it('renders a summary line with truncated user text and block counts', () => {
+    render(<CollapsedTurn userMessage={userMsg} assistantMessage={assistantMsg} />)
+    // User text truncated to ~40 chars
+    expect(screen.getByText(/Fix the authentication/)).toBeInTheDocument()
+    // Tool count
+    expect(screen.getByText(/2 tools/)).toBeInTheDocument()
+  })
+
+  it('starts collapsed', () => {
+    render(<CollapsedTurn userMessage={userMsg} assistantMessage={assistantMsg} />)
+    expect(screen.getByRole('button', { name: /expand turn/i })).toBeInTheDocument()
+  })
+
+  it('expands to show full messages on click', async () => {
+    const user = userEvent.setup()
+    render(<CollapsedTurn userMessage={userMsg} assistantMessage={assistantMsg} />)
+    await user.click(screen.getByRole('button', { name: /expand turn/i }))
+    // After expanding, should show the actual message content
+    expect(screen.getByText('I will fix that.')).toBeInTheDocument()
+    expect(screen.getByText('Fixed!')).toBeInTheDocument()
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/CollapsedTurn.test.tsx`
+Expected: FAIL — module not found
+
+**Step 3: Create CollapsedTurn component**
+
+Create `src/components/claude-chat/CollapsedTurn.tsx`:
+
+```tsx
+import { memo, useState, useMemo } from 'react'
+import { ChevronRight } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import type { ChatMessage } from '@/store/claudeChatTypes'
+import MessageBubble from './MessageBubble'
+
+interface CollapsedTurnProps {
+  userMessage: ChatMessage
+  assistantMessage: ChatMessage
+  showThinking?: boolean
+  showTools?: boolean
+  showTimecodes?: boolean
+}
+
+function makeSummary(userMsg: ChatMessage, assistantMsg: ChatMessage): string {
+  // Truncate user text
+  const userTextBlock = userMsg.content.find(b => b.type === 'text' && b.text)
+  let userText = userTextBlock?.text?.trim().replace(/\n/g, ' ') ?? '(no text)'
+  if (userText.length > 40) {
+    userText = userText.slice(0, 37) + '...'
+  }
+
+  // Count assistant blocks
+  const toolCount = assistantMsg.content.filter(b => b.type === 'tool_use').length
+  const textCount = assistantMsg.content.filter(b => b.type === 'text').length
+
+  const parts: string[] = []
+  if (toolCount) parts.push(`${toolCount} tool${toolCount > 1 ? 's' : ''}`)
+  if (textCount) parts.push(`${textCount} msg${textCount > 1 ? 's' : ''}`)
+
+  const responseSummary = parts.length ? parts.join(', ') : 'empty'
+  return `${userText} → ${responseSummary}`
+}
+
+function CollapsedTurn({
+  userMessage,
+  assistantMessage,
+  showThinking = true,
+  showTools = true,
+  showTimecodes = false,
+}: CollapsedTurnProps) {
+  const [expanded, setExpanded] = useState(false)
+  const summary = useMemo(
+    () => makeSummary(userMessage, assistantMessage),
+    [userMessage, assistantMessage],
+  )
+
+  if (expanded) {
+    return (
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Collapse turn"
+        >
+          <ChevronRight className="h-3 w-3 rotate-90 transition-transform" />
+          <span className="font-mono opacity-70">{summary}</span>
+        </button>
+        <MessageBubble
+          role={userMessage.role}
+          content={userMessage.content}
+          timestamp={userMessage.timestamp}
+          showThinking={showThinking}
+          showTools={showTools}
+          showTimecodes={showTimecodes}
+        />
+        <MessageBubble
+          role={assistantMessage.role}
+          content={assistantMessage.content}
+          timestamp={assistantMessage.timestamp}
+          model={assistantMessage.model}
+          showThinking={showThinking}
+          showTools={showTools}
+          showTimecodes={showTimecodes}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded(true)}
+      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+      aria-label="Expand turn"
+    >
+      <ChevronRight className="h-3 w-3 shrink-0 transition-transform" />
+      <span className="font-mono truncate">{summary}</span>
+    </button>
+  )
+}
+
+export default memo(CollapsedTurn)
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/CollapsedTurn.test.tsx`
+Expected: All PASS
+
+**Step 5: Wire into ClaudeChatView**
+
+In `src/components/claude-chat/ClaudeChatView.tsx`, pair messages into turns and collapse old ones:
+
+```tsx
+import CollapsedTurn from './CollapsedTurn'
+
+const RECENT_TURNS_FULL = 3
+
+// Group messages into turns (user + assistant pairs)
+const turns: Array<{ user: ChatMessage; assistant: ChatMessage }> = []
+const trailing: ChatMessage[] = [] // messages not yet paired
+
+for (const msg of messages) {
+  if (msg.role === 'user') {
+    trailing.push(msg)
+  } else if (msg.role === 'assistant' && trailing.length > 0) {
+    const userMsg = trailing.pop()!
+    turns.push({ user: userMsg, assistant: msg })
+    // If there were extra user messages before this one, render them as trailing
+  } else {
+    trailing.push(msg)
+  }
+}
+
+const collapsedTurns = turns.slice(0, Math.max(0, turns.length - RECENT_TURNS_FULL))
+const recentTurns = turns.slice(Math.max(0, turns.length - RECENT_TURNS_FULL))
+
+// Render:
+{collapsedTurns.map((turn, i) => (
+  <CollapsedTurn
+    key={`collapsed-${i}`}
+    userMessage={turn.user}
+    assistantMessage={turn.assistant}
+    showThinking={paneContent.showThinking ?? true}
+    showTools={paneContent.showTools ?? true}
+    showTimecodes={paneContent.showTimecodes ?? false}
+  />
+))}
+
+{recentTurns.map((turn, i) => (
+  <React.Fragment key={`turn-${i}`}>
+    <MessageBubble role={turn.user.role} content={turn.user.content} ... />
+    <MessageBubble role={turn.assistant.role} content={turn.assistant.content} ... />
+  </React.Fragment>
+))}
+
+{/* Trailing unpaired messages (e.g. user message waiting for response) */}
+{trailing.map((msg, i) => (
+  <MessageBubble key={`trailing-${i}`} role={msg.role} content={msg.content} ... />
+))}
+```
+
+This replaces the flat `messages.map()` with a turn-aware renderer that collapses old turns.
+
+**Step 6: Run all tests**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/`
+Expected: All PASS
+
+**Step 7: Commit**
+
+```bash
+git add src/components/claude-chat/CollapsedTurn.tsx test/unit/client/components/claude-chat/CollapsedTurn.test.tsx src/components/claude-chat/ClaudeChatView.tsx
+git commit -m "feat(freshclaude): collapse old turns into summary lines
+
+Group messages into user+assistant turn pairs. Only the 3 most recent
+turns show in full; older turns collapse into single-line summaries like
+'Fix the auth bug → 2 tools, 1 msg'. Click to expand and see full content.
+Uses lazy rendering — collapsed turns don't mount MessageBubble children
+until expanded, improving performance for long conversations."
+```
+
+---
+
+## Task 9: Syntax-Highlighted Diffs for Edit Tool
+
+Render Edit tool results as proper diffs with syntax highlighting. This is the largest task.
+
+**Files:**
+- Install: `diff` npm package
+- Create: `src/components/claude-chat/DiffView.tsx`
+- Create: `test/unit/client/components/claude-chat/DiffView.test.tsx`
+- Modify: `src/components/claude-chat/ToolBlock.tsx`
+
+**Step 1: Install diff package**
+
+Run: `npm install diff`
+
+**Step 2: Write test for DiffView**
+
+Create `test/unit/client/components/claude-chat/DiffView.test.tsx`:
+
+```tsx
+import { describe, it, expect, afterEach } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import DiffView from '../../../../../src/components/claude-chat/DiffView'
+
+describe('DiffView', () => {
+  afterEach(cleanup)
+
+  it('renders removed and added lines', () => {
+    const { container } = render(
+      <DiffView oldStr="const foo = 1" newStr="const bar = 1" />
+    )
+    // Should show removed line with - prefix or red styling
+    expect(container.textContent).toContain('foo')
+    expect(container.textContent).toContain('bar')
+  })
+
+  it('renders with line numbers', () => {
+    const { container } = render(
+      <DiffView oldStr="line1\nline2\nline3" newStr="line1\nchanged\nline3" />
+    )
+    expect(container.textContent).toContain('changed')
+  })
+
+  it('shows no-changes message when strings are identical', () => {
+    render(<DiffView oldStr="same" newStr="same" />)
+    expect(screen.getByText(/no changes/i)).toBeInTheDocument()
+  })
+
+  it('uses semantic role', () => {
+    render(<DiffView oldStr="a" newStr="b" />)
+    expect(screen.getByRole('figure', { name: /diff/i })).toBeInTheDocument()
+  })
+})
+```
+
+**Step 3: Run test to verify it fails**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/DiffView.test.tsx`
+Expected: FAIL — module not found
+
+**Step 4: Create DiffView component**
+
+Create `src/components/claude-chat/DiffView.tsx`:
+
+```tsx
+import { memo, useMemo } from 'react'
+import { diffLines } from 'diff'
+import { cn } from '@/lib/utils'
+
+interface DiffViewProps {
+  oldStr: string
+  newStr: string
+  filePath?: string
+}
+
+function DiffView({ oldStr, newStr, filePath }: DiffViewProps) {
+  const hunks = useMemo(() => diffLines(oldStr, newStr), [oldStr, newStr])
+
+  const hasChanges = hunks.some(h => h.added || h.removed)
+
+  if (!hasChanges) {
+    return (
+      <div role="figure" aria-label="diff view" className="text-xs text-muted-foreground italic py-1">
+        No changes detected
+      </div>
+    )
+  }
+
+  // Build line-numbered output
+  const lines: Array<{ type: 'added' | 'removed' | 'context'; text: string; lineNo: string }> = []
+  let oldLine = 1
+  let newLine = 1
+
+  for (const hunk of hunks) {
+    const hunkLines = hunk.value.replace(/\n$/, '').split('\n')
+    for (const line of hunkLines) {
+      if (hunk.removed) {
+        lines.push({ type: 'removed', text: line, lineNo: String(oldLine++) })
+      } else if (hunk.added) {
+        lines.push({ type: 'added', text: line, lineNo: String(newLine++) })
+      } else {
+        lines.push({ type: 'context', text: line, lineNo: String(newLine) })
+        oldLine++
+        newLine++
+      }
+    }
+  }
+
+  return (
+    <div role="figure" aria-label="diff view" className="text-xs font-mono overflow-x-auto">
+      {filePath && (
+        <div className="text-muted-foreground px-2 py-0.5 border-b border-border/50 text-2xs">
+          {filePath}
+        </div>
+      )}
+      <div className="leading-relaxed">
+        {lines.map((line, i) => (
+          <div
+            key={i}
+            className={cn(
+              'flex px-1',
+              line.type === 'removed' && 'bg-red-500/10 text-red-400',
+              line.type === 'added' && 'bg-green-500/10 text-green-400',
+              line.type === 'context' && 'text-muted-foreground',
+            )}
+          >
+            <span className="w-8 shrink-0 text-right pr-2 select-none opacity-50">
+              {line.lineNo}
+            </span>
+            <span className="shrink-0 w-4 select-none">
+              {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
+            </span>
+            <span className="whitespace-pre">{line.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default memo(DiffView)
+```
+
+**Step 5: Run test to verify it passes**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/DiffView.test.tsx`
+Expected: All PASS
+
+**Step 6: Wire DiffView into ToolBlock for Edit results**
+
+In `src/components/claude-chat/ToolBlock.tsx`, when `name === 'Edit'` and the tool has `old_string`/`new_string` in input, render a `DiffView` inside the expanded content instead of raw JSON:
+
+```tsx
+import DiffView from './DiffView'
+
+// Inside the expanded content section:
+{expanded && (
+  <div className="px-2 py-1.5 border-t border-border/50 text-xs">
+    {name === 'Edit' && input &&
+      typeof input.old_string === 'string' &&
+      typeof input.new_string === 'string' ? (
+      <DiffView
+        oldStr={input.old_string}
+        newStr={input.new_string}
+        filePath={typeof input.file_path === 'string' ? input.file_path : undefined}
+      />
+    ) : (
+      <>
+        {input && (
+          <pre className="whitespace-pre-wrap font-mono opacity-80 max-h-48 overflow-y-auto">
+            {name === 'Bash' && typeof input.command === 'string'
+              ? input.command
+              : JSON.stringify(input, null, 2)}
+          </pre>
+        )}
+        {output && (
+          <pre className={cn(
+            'whitespace-pre-wrap font-mono max-h-48 overflow-y-auto mt-1',
+            isError ? 'text-red-500' : 'opacity-80'
+          )}>
+            {output}
+          </pre>
+        )}
+      </>
+    )}
+  </div>
+)}
+```
+
+**Step 7: Run all tests**
+
+Run: `npm run test:client -- --run test/unit/client/components/claude-chat/`
+Expected: All PASS
+
+**Step 8: Commit**
+
+```bash
+git add package.json package-lock.json src/components/claude-chat/DiffView.tsx test/unit/client/components/claude-chat/DiffView.test.tsx src/components/claude-chat/ToolBlock.tsx
+git commit -m "feat(freshclaude): syntax-highlighted diff view for Edit tool results
+
+Add DiffView component that renders Edit tool old_string/new_string as
+a proper line diff with:
+- Red/green color coding for removed/added lines
+- Line numbers in a dimmed gutter
+- File path header when available
+- 'No changes' message for identical strings
+Uses the 'diff' npm package for reliable diff computation.
+
+Edit tool blocks now show the diff inline when expanded, replacing
+raw JSON display of old_string/new_string."
+```
+
+---
+
+## Task 10: Final Integration and Cleanup
+
+Run full test suite, verify build, update docs/index.html.
+
+**Step 1: Run full test suite**
+
+Run: `npm test`
+Expected: All PASS
+
+**Step 2: Verify build**
+
+Run: `npm run verify`
+Expected: Clean build + all tests pass
+
+**Step 3: Run lint**
+
+Run: `npm run lint`
+Expected: No a11y violations
+
+**Step 4: Update docs/index.html**
+
+If the docs mock references the freshclaude chat UI, update it to reflect the new visual style (left borders instead of chat bubbles, collapsed turns, diff views).
+
+**Step 5: Final commit**
+
+```bash
+git add -A
+git commit -m "chore(freshclaude): final integration cleanup and lint fixes
+
+Ensure all tests pass, build is clean, lint has no violations.
+Update docs mock if applicable."
+```
+
+---
+
+## Summary
+
+| Task | Feature | New Files | Modified Files |
+|------|---------|-----------|----------------|
+| 1 | CSS color variables | — | `src/index.css` |
+| 2 | Left-border message layout | — | `MessageBubble.tsx` + test |
+| 3 | Smart tool headers + summaries | — | `ToolBlock.tsx` + test |
+| 4 | Auto-collapse old tools | 1 test | `ToolBlock.tsx`, `MessageBubble.tsx`, `ClaudeChatView.tsx` |
+| 5 | Thinking indicator | `ThinkingIndicator.tsx` + test | `ClaudeChatView.tsx` |
+| 6 | Streaming debounce | `useStreamDebounce.ts` + test | `ClaudeChatView.tsx` |
+| 7 | System reminder stripping | — | `MessageBubble.tsx` + test |
+| 8 | Collapsed turns | `CollapsedTurn.tsx` + test | `ClaudeChatView.tsx` |
+| 9 | Diff view for Edit tool | `DiffView.tsx` + test, `diff` pkg | `ToolBlock.tsx` |
+| 10 | Integration & cleanup | — | Various |
