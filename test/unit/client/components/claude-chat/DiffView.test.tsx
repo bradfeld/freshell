@@ -14,11 +14,37 @@ describe('DiffView', () => {
     expect(container.textContent).toContain('bar')
   })
 
-  it('renders with line numbers', () => {
-    const { container } = render(
-      <DiffView oldStr="line1\nline2\nline3" newStr="line1\nchanged\nline3" />
-    )
-    expect(container.textContent).toContain('changed')
+  it('renders with line numbers and diff prefixes', () => {
+    const oldStr = ['line1', 'line2', 'line3'].join('\n')
+    const newStr = ['line1', 'changed', 'line3'].join('\n')
+    render(<DiffView oldStr={oldStr} newStr={newStr} />)
+
+    const figure = screen.getByRole('figure', { name: /diff/i })
+
+    // DiffView renders each diff line as div.flex > [span(lineNo), span(prefix), span(text)].
+    // For this diff: context(line1), removed(line2), added(changed), context(line3) = 4 line divs.
+    // Each line div has exactly 3 child spans.
+    const lineDivs = Array.from(figure.querySelectorAll('.leading-relaxed > div'))
+    expect(lineDivs).toHaveLength(4)
+
+    // Extract line numbers and prefixes from each line div
+    const parsed = lineDivs.map(div => {
+      const spans = div.querySelectorAll('span')
+      return {
+        lineNo: spans[0]?.textContent?.trim(),
+        prefix: spans[1]?.textContent?.trim(),
+        text: spans[2]?.textContent?.trim(),
+      }
+    })
+
+    // Context line1: line 1, space prefix
+    expect(parsed[0]).toEqual({ lineNo: '1', prefix: '', text: 'line1' })
+    // Removed line2: old line 2, minus prefix
+    expect(parsed[1]).toEqual({ lineNo: '2', prefix: '−', text: 'line2' })
+    // Added changed: new line 2, plus prefix
+    expect(parsed[2]).toEqual({ lineNo: '2', prefix: '+', text: 'changed' })
+    // Context line3: line 3, space prefix
+    expect(parsed[3]).toEqual({ lineNo: '3', prefix: '', text: 'line3' })
   })
 
   it('shows no-changes message when strings are identical', () => {
