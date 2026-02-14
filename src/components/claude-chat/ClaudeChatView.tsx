@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ClaudeChatPaneContent } from '@/store/paneTypes'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updatePaneContent } from '@/store/panesSlice'
@@ -11,6 +11,8 @@ import ChatComposer from './ChatComposer'
 import FreshclaudeSettings from './FreshclaudeSettings'
 import ThinkingIndicator from './ThinkingIndicator'
 import { useStreamDebounce } from './useStreamDebounce'
+import CollapsedTurn from './CollapsedTurn'
+import type { ChatMessage } from '@/store/claudeChatTypes'
 
 const DEFAULT_MODEL = 'claude-opus-4-6'
 const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
@@ -213,6 +215,35 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
     [debouncedStreamingText],
   )
 
+  // Build render items: pair adjacent user→assistant into turns, everything else standalone.
+  const RECENT_TURNS_FULL = 3
+  type RenderItem =
+    | { kind: 'turn'; user: ChatMessage; assistant: ChatMessage; msgIndices: [number, number] }
+    | { kind: 'standalone'; message: ChatMessage; msgIndex: number }
+
+  const renderItems = useMemo(() => {
+    const items: RenderItem[] = []
+    let mi = 0
+    while (mi < messages.length) {
+      const msg = messages[mi]
+      if (
+        msg.role === 'user' &&
+        mi + 1 < messages.length &&
+        messages[mi + 1].role === 'assistant'
+      ) {
+        items.push({ kind: 'turn', user: msg, assistant: messages[mi + 1], msgIndices: [mi, mi + 1] })
+        mi += 2
+      } else {
+        items.push({ kind: 'standalone', message: msg, msgIndex: mi })
+        mi++
+      }
+    }
+    return items
+  }, [messages])
+
+  const turnItems = renderItems.filter(r => r.kind === 'turn')
+  const collapseThreshold = Math.max(0, turnItems.length - RECENT_TURNS_FULL)
+
   return (
     <div className={cn('h-full w-full flex flex-col', hidden ? 'tab-hidden' : 'tab-visible')} role="region" aria-label="freshclaude Chat">
       {/* Status bar */}
@@ -255,20 +286,65 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <MessageBubble
-            key={i}
-            role={msg.role}
-            content={msg.content}
-            timestamp={msg.timestamp}
-            model={msg.model}
-            showThinking={paneContent.showThinking ?? true}
-            showTools={paneContent.showTools ?? true}
-            showTimecodes={paneContent.showTimecodes ?? false}
-            completedToolOffset={completedToolOffsets[i]}
-            autoExpandAbove={autoExpandAbove}
-          />
-        ))}
+        {(() => {
+          let turnIndex = 0
+          return renderItems.map((item, i) => {
+            if (item.kind === 'turn') {
+              const isOld = turnIndex < collapseThreshold
+              turnIndex++
+              if (isOld) {
+                return (
+                  <CollapsedTurn
+                    key={`turn-${i}`}
+                    userMessage={item.user}
+                    assistantMessage={item.assistant}
+                    showThinking={paneContent.showThinking ?? true}
+                    showTools={paneContent.showTools ?? true}
+                    showTimecodes={paneContent.showTimecodes ?? false}
+                  />
+                )
+              }
+              return (
+                <React.Fragment key={`turn-${i}`}>
+                  <MessageBubble
+                    role={item.user.role}
+                    content={item.user.content}
+                    timestamp={item.user.timestamp}
+                    showThinking={paneContent.showThinking ?? true}
+                    showTools={paneContent.showTools ?? true}
+                    showTimecodes={paneContent.showTimecodes ?? false}
+                  />
+                  <MessageBubble
+                    role={item.assistant.role}
+                    content={item.assistant.content}
+                    timestamp={item.assistant.timestamp}
+                    model={item.assistant.model}
+                    showThinking={paneContent.showThinking ?? true}
+                    showTools={paneContent.showTools ?? true}
+                    showTimecodes={paneContent.showTimecodes ?? false}
+                    completedToolOffset={completedToolOffsets[item.msgIndices[1]]}
+                    autoExpandAbove={autoExpandAbove}
+                  />
+                </React.Fragment>
+              )
+            }
+            // Standalone messages
+            return (
+              <MessageBubble
+                key={`msg-${i}`}
+                role={item.message.role}
+                content={item.message.content}
+                timestamp={item.message.timestamp}
+                model={item.message.model}
+                showThinking={paneContent.showThinking ?? true}
+                showTools={paneContent.showTools ?? true}
+                showTimecodes={paneContent.showTimecodes ?? false}
+                completedToolOffset={completedToolOffsets[item.msgIndex]}
+                autoExpandAbove={autoExpandAbove}
+              />
+            )
+          })
+        })()}
 
         {session?.streamingActive && streamingContent.length > 0 && (
           <MessageBubble
