@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+
 type TerminalSearchBarProps = {
   query: string
   onQueryChange: (value: string) => void
@@ -13,12 +15,18 @@ export function TerminalSearchBar({
   onFindPrevious,
   onClose,
 }: TerminalSearchBarProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
   return (
     <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-border bg-background/95 p-2 shadow-md">
       <input
+        ref={inputRef}
         aria-label="Terminal search"
         value={query}
-        autoFocus
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
