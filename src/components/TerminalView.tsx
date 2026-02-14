@@ -27,6 +27,7 @@ import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
 import { Osc52PromptModal } from '@/components/terminal/Osc52PromptModal'
+import { TerminalSearchBar } from '@/components/terminal/TerminalSearchBar'
 import {
   createTerminalRuntime,
   type TerminalRuntime,
@@ -67,6 +68,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const [isAttaching, setIsAttaching] = useState(false)
   const [pendingLinkUri, setPendingLinkUri] = useState<string | null>(null)
   const [pendingOsc52Event, setPendingOsc52Event] = useState<Osc52Event | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const setPendingLinkUriRef = useRef(setPendingLinkUri)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -298,6 +301,23 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     ws.send({ type: 'terminal.input', terminalId: tid, data })
   }, [dispatch, tabId, paneId, ws])
 
+  const findNext = useCallback((value: string = searchQuery) => {
+    if (!value) return
+    runtimeRef.current?.findNext(value, { caseSensitive: false, incremental: true })
+  }, [searchQuery])
+
+  const findPrevious = useCallback((value: string = searchQuery) => {
+    if (!value) return
+    runtimeRef.current?.findPrevious(value, { caseSensitive: false, incremental: true })
+  }, [searchQuery])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    requestAnimationFrame(() => {
+      termRef.current?.focus()
+    })
+  }, [])
+
   // Init xterm once
   useEffect(() => {
     if (!isTerminal) return
@@ -382,6 +402,19 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     })
 
     term.attachCustomKeyEventHandler((event) => {
+      if (
+        event.ctrlKey &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.type === 'keydown' &&
+        event.key.toLowerCase() === 'f'
+      ) {
+        event.preventDefault()
+        setSearchOpen(true)
+        return false
+      }
+
       // Ctrl+Shift+C to copy (ignore key repeat)
       if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown' && !event.repeat) {
         const selection = term.getSelection()
@@ -885,6 +918,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             </span>
           </div>
         </div>
+      )}
+      {searchOpen && (
+        <TerminalSearchBar
+          query={searchQuery}
+          onQueryChange={(value) => {
+            setSearchQuery(value)
+            findNext(value)
+          }}
+          onFindNext={() => findNext()}
+          onFindPrevious={() => findPrevious()}
+          onClose={closeSearch}
+        />
       )}
       {snapshotWarning && (
         <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded border border-amber-300 bg-amber-50/95 px-2 py-1 text-xs text-amber-900">

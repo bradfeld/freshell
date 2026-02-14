@@ -428,6 +428,28 @@ describe('TerminalView keyboard handling', () => {
     })
   })
 
+  describe('search shortcut', () => {
+    it('returns false for Ctrl+F to open terminal search', async () => {
+      const { store, tabId, paneId, paneContent } = createTestStore('term-1')
+
+      render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(capturedKeyHandler).not.toBeNull()
+      })
+
+      const event = createKeyboardEvent('f', { ctrlKey: true })
+      const result = capturedKeyHandler!(event)
+
+      expect(result).toBe(false)
+      expect(event.preventDefault).toHaveBeenCalled()
+    })
+  })
+
   describe('terminal actions paste', () => {
     it('context-menu paste uses term.paste and emits exactly one terminal.input via onData', async () => {
       clipboardMocks.readText.mockResolvedValue('pasted content')
