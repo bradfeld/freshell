@@ -422,7 +422,7 @@ export default function App() {
 
   const content = (() => {
     if (view === 'sessions') return <HistoryView onOpenSession={() => setView('terminal')} />
-    if (view === 'settings') return <SettingsView />
+    if (view === 'settings') return <SettingsView onNavigate={setView} />
     if (view === 'overview') return <OverviewView onOpenTab={() => setView('terminal')} />
     return (
       <div className="flex flex-col h-full">

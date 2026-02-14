@@ -7,6 +7,7 @@ import settingsReducer, { defaultSettings, SettingsState } from '@/store/setting
 import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
+import { networkReducer } from '@/store/networkSlice'
 import { LOCAL_TERMINAL_FONT_KEY } from '@/lib/terminal-fonts'
 
 // Mock the api module
@@ -32,6 +33,7 @@ function createTestStore(settingsState?: Partial<SettingsState>) {
       tabs: tabsReducer,
       connection: connectionReducer,
       sessions: sessionsReducer,
+      network: networkReducer,
     },
     middleware: (getDefault) =>
       getDefault({
@@ -718,7 +720,7 @@ describe('SettingsView Component', () => {
 
       const showBadgesRow = screen.getByText('Show project badges').closest('div')
       expect(showBadgesRow).toBeTruthy()
-      const showBadgesToggle = within(showBadgesRow!).getByRole('button')
+      const showBadgesToggle = within(showBadgesRow!).getByRole('switch')
       fireEvent.click(showBadgesToggle)
 
       expect(store.getState().settings.settings.sidebar.showProjectBadges).toBe(false)
@@ -735,7 +737,7 @@ describe('SettingsView Component', () => {
 
       const soundRow = screen.getByText('Sound on completion').closest('div')
       expect(soundRow).toBeTruthy()
-      const soundToggle = within(soundRow!).getByRole('button')
+      const soundToggle = within(soundRow!).getByRole('switch')
       fireEvent.click(soundToggle)
 
       expect(store.getState().settings.settings.notifications.soundEnabled).toBe(false)
@@ -760,7 +762,7 @@ describe('SettingsView Component', () => {
 
       const cursorBlinkRow = screen.getByText('Cursor blink').closest('div')
       expect(cursorBlinkRow).toBeTruthy()
-      const cursorBlinkToggle = within(cursorBlinkRow!).getByRole('button')
+      const cursorBlinkToggle = within(cursorBlinkRow!).getByRole('switch')
       fireEvent.click(cursorBlinkToggle)
 
       expect(store.getState().settings.settings.terminal.cursorBlink).toBe(false)
@@ -785,7 +787,7 @@ describe('SettingsView Component', () => {
 
       const debugRow = screen.getByText('Debug logging').closest('div')
       expect(debugRow).toBeTruthy()
-      const debugToggle = within(debugRow!).getByRole('button')
+      const debugToggle = within(debugRow!).getByRole('switch')
       fireEvent.click(debugToggle)
 
       expect(store.getState().settings.settings.logging.debug).toBe(true)
@@ -1079,6 +1081,60 @@ describe('SettingsView Component', () => {
     it('API mocks are reset between tests', () => {
       // This test verifies that vi.clearAllMocks() in beforeEach works
       expect(api.patch).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Network Access settings', () => {
+    it('renders remote access toggle', () => {
+      const store = createTestStore()
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} />
+        </Provider>,
+      )
+      expect(screen.getByText(/remote access/i)).toBeInTheDocument()
+    })
+
+    it('renders mDNS hostname field when remote access enabled', () => {
+      const store = configureStore({
+        reducer: {
+          settings: settingsReducer,
+          tabs: tabsReducer,
+          connection: connectionReducer,
+          sessions: sessionsReducer,
+          network: networkReducer,
+        },
+        preloadedState: {
+          settings: {
+            settings: defaultSettings,
+            loaded: true,
+            lastSavedAt: undefined,
+          },
+          network: {
+            status: {
+              configured: true,
+              host: '0.0.0.0' as const,
+              port: 3001,
+              lanIps: ['192.168.1.100'],
+              machineHostname: 'my-laptop',
+              mdns: { enabled: true, hostname: 'freshell' },
+              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+              rebinding: false,
+              devMode: false,
+              accessUrl: 'http://192.168.1.100:3001/?token=abc',
+            },
+            loading: false,
+            configuring: false,
+            error: null,
+          },
+        },
+      })
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} />
+        </Provider>,
+      )
+      expect(screen.getByLabelText(/mDNS hostname/i)).toBeInTheDocument()
     })
   })
 })

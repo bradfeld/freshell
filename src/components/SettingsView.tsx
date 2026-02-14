@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils'
 import { terminalThemes, darkThemes, lightThemes, getTerminalTheme } from '@/lib/terminal-themes'
 import { resolveTerminalFontFamily, saveLocalTerminalFontFamily } from '@/lib/terminal-fonts'
 import type { SidebarSortMode, TerminalTheme, CodexSandboxMode, ClaudePermissionMode, CodingCliProviderName } from '@/store/types'
+import { configureNetwork, fetchNetworkStatus } from '@/store/networkSlice'
+import type { AppView } from '@/components/Sidebar'
 import { CODING_CLI_PROVIDER_CONFIGS } from '@/lib/coding-cli-utils'
 
 /** Monospace fonts with good Unicode block element support for terminal use */
@@ -133,7 +135,7 @@ function normalizePreviewLine(tokens: PreviewToken[], width: number): PreviewTok
   return normalized
 }
 
-export default function SettingsView() {
+export default function SettingsView({ onNavigate }: { onNavigate?: (view: AppView) => void } = {}) {
   const dispatch = useAppDispatch()
   const rawSettings = useAppSelector((s) => s.settings.settings)
   const settings = useMemo(
@@ -141,6 +143,8 @@ export default function SettingsView() {
     [rawSettings],
   )
   const lastSavedAt = useAppSelector((s) => s.settings.lastSavedAt)
+  const networkStatus = useAppSelector((s) => s.network.status)
+  const networkConfiguring = useAppSelector((s) => s.network.configuring)
   const enabledProviders = useMemo(
     () => settings.codingCli?.enabledProviders ?? [],
     [settings.codingCli?.enabledProviders],
@@ -152,6 +156,7 @@ export default function SettingsView() {
   const [defaultCwdInput, setDefaultCwdInput] = useState(settings.defaultCwd ?? '')
   const [defaultCwdError, setDefaultCwdError] = useState<string | null>(null)
   const terminalAdvancedId = useId()
+  const [mdnsHostname, setMdnsHostname] = useState(settings.network?.mdns?.hostname || 'freshell')
 
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultCwdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -482,6 +487,67 @@ export default function SettingsView() {
               ))}
             </div>
           </div>
+
+          {/* Network Access */}
+          <SettingsSection title="Network Access" description="Control how Freshell is accessible on your network">
+            <SettingsRow label="Remote access" description="Allow connections from other devices on your network">
+              <Toggle
+                checked={networkStatus?.host === '0.0.0.0'}
+                aria-label="Remote access"
+                onChange={async (checked) => {
+                  const mdns = settings.network?.mdns ?? { enabled: false, hostname: 'freshell' }
+                  await dispatch(configureNetwork({
+                    host: checked ? '0.0.0.0' : '127.0.0.1',
+                    configured: true,
+                    mdns,
+                  })).unwrap()
+                }}
+              />
+            </SettingsRow>
+
+            {networkStatus?.host === '0.0.0.0' && (
+              <>
+                <SettingsRow label="mDNS service name" description="Name for network discovery">
+                  <input
+                    aria-label="mDNS hostname"
+                    type="text"
+                    value={mdnsHostname}
+                    onChange={(e) => setMdnsHostname(e.target.value)}
+                    onBlur={async () => {
+                      const trimmed = mdnsHostname.trim().toLowerCase()
+                      if (!trimmed || trimmed === (networkStatus.mdns?.hostname ?? 'freshell')) return
+                      await dispatch(configureNetwork({
+                        host: '0.0.0.0',
+                        configured: true,
+                        mdns: { enabled: true, hostname: trimmed },
+                      })).unwrap()
+                    }}
+                    className="w-40 rounded border bg-background px-2 py-1 text-sm"
+                  />
+                </SettingsRow>
+
+                {networkStatus.firewall && (
+                  <SettingsRow
+                    label="Firewall"
+                    description={
+                      !networkStatus.firewall.active ? 'No firewall detected'
+                        : networkStatus.firewall.portOpen === true ? 'Port is open'
+                        : networkStatus.firewall.portOpen === false ? 'Port may be blocked'
+                        : 'Firewall detected'
+                    }
+                  >
+                    <span className="text-xs text-muted-foreground">{networkStatus.firewall.platform}</span>
+                  </SettingsRow>
+                )}
+
+                {networkStatus.accessUrl && (
+                  <SettingsRow label="Access URL" description="Share this URL with your devices">
+                    <code className="max-w-[200px] truncate rounded bg-muted px-2 py-1 text-xs">{networkStatus.accessUrl}</code>
+                  </SettingsRow>
+                )}
+              </>
+            )}
+          </SettingsSection>
 
           {/* Appearance */}
           <SettingsSection title="Appearance" description="Theme and visual preferences">
@@ -1008,14 +1074,23 @@ function SettingsSection({
 
 function SettingsRow({
   label,
+  description,
   children,
 }: {
   label: string
+  description?: string
   children: React.ReactNode
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-sm text-muted-foreground">{label}</span>
+      {description ? (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm text-muted-foreground">{label}</span>
+          <span className="text-xs text-muted-foreground/60">{description}</span>
+        </div>
+      ) : (
+        <span className="text-sm text-muted-foreground">{label}</span>
+      )}
       {children}
     </div>
   )
@@ -1053,15 +1128,18 @@ function SegmentedControl({
 function Toggle({
   checked,
   onChange,
+  'aria-label': ariaLabel,
 }: {
   checked: boolean
   onChange: (checked: boolean) => void
+  'aria-label'?: string
 }) {
   return (
     <button
+      role="switch"
       onClick={() => onChange(!checked)}
-      aria-label={checked ? 'Toggle off' : 'Toggle on'}
-      aria-pressed={checked}
+      aria-label={ariaLabel ?? (checked ? 'Toggle off' : 'Toggle on')}
+      aria-checked={checked}
       className={cn(
         'relative w-9 h-5 rounded-full transition-colors',
         checked ? 'bg-foreground' : 'bg-muted'
