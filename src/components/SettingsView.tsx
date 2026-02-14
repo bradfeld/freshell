@@ -575,6 +575,12 @@ export default function SettingsView({ onNavigate, onFirewallTerminal }: { onNav
                     <code className="max-w-[200px] truncate rounded bg-muted px-2 py-1 text-xs">{networkStatus.accessUrl}</code>
                   </SettingsRow>
                 )}
+
+                {networkStatus.devMode && (
+                  <div className="rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-300" role="alert">
+                    Dev mode: restart <code className="font-mono text-xs">npm run dev</code> for the Vite server to bind to the new address.
+                  </div>
+                )}
               </>
             )}
           </SettingsSection>

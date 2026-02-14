@@ -1178,5 +1178,50 @@ describe('SettingsView Component', () => {
       )
       expect(screen.getByRole('button', { name: /fix firewall/i })).toBeInTheDocument()
     })
+
+    it('shows dev-mode restart warning when devMode is true', () => {
+      const store = configureStore({
+        reducer: {
+          settings: settingsReducer,
+          tabs: tabsReducer,
+          connection: connectionReducer,
+          sessions: sessionsReducer,
+          network: networkReducer,
+        },
+        preloadedState: {
+          settings: {
+            settings: defaultSettings,
+            loaded: true,
+            lastSavedAt: undefined,
+          },
+          network: {
+            status: {
+              configured: true,
+              host: '0.0.0.0' as const,
+              port: 3001,
+              lanIps: ['192.168.1.100'],
+              machineHostname: 'my-laptop',
+              mdns: { enabled: true, hostname: 'freshell' },
+              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+              rebinding: false,
+              devMode: true,
+              devPort: 5173,
+              accessUrl: 'http://192.168.1.100:5173/?token=abc',
+            },
+            loading: false,
+            configuring: false,
+            error: null,
+          },
+        },
+      })
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} />
+        </Provider>,
+      )
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+      expect(screen.getByText(/dev mode/i)).toBeInTheDocument()
+      expect(screen.getByText(/npm run dev/i)).toBeInTheDocument()
+    })
   })
 })

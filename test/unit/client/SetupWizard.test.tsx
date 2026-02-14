@@ -253,4 +253,100 @@ describe('SetupWizard', () => {
       expect(screen.getByText(/did not open the port/i)).toBeInTheDocument()
     }, { timeout: 15000 })
   })
+
+  it('sets error status when firewall polling times out after 10 attempts', async () => {
+    mockFetchFirewallConfig.mockResolvedValue({ method: 'wsl2', status: 'ok' })
+    const firewallActive = { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false }
+    const store = createTestStore({
+      status: {
+        ...defaultNetworkStatus,
+        configured: true,
+        host: '0.0.0.0',
+        firewall: firewallActive,
+        rebinding: false,
+      },
+    })
+
+    // Mock the configureNetwork response (auto-bind)
+    mockPost.mockResolvedValueOnce({
+      ...defaultNetworkStatus,
+      configured: true,
+      host: '0.0.0.0',
+      firewall: firewallActive,
+      rebinding: false,
+    })
+
+    // Mock fetchNetworkStatus to always return configuring=true (never completes)
+    const mockGet = vi.fn().mockResolvedValue({
+      ...defaultNetworkStatus,
+      configured: true,
+      host: '0.0.0.0',
+      firewall: { ...firewallActive, configuring: true },
+      rebinding: false,
+    })
+    const { api } = await import('@/lib/api')
+    vi.mocked(api.get).mockImplementation(mockGet)
+
+    render(
+      <Provider store={store}>
+        <SetupWizard onComplete={vi.fn()} initialStep={2} />
+      </Provider>,
+    )
+
+    // Wait for Configure button and click it
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /configure firewall/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /configure firewall/i }))
+
+    // After 10 polls × 1s each, the timeout error should appear
+    await waitFor(() => {
+      expect(screen.getByText(/timed out/i)).toBeInTheDocument()
+    }, { timeout: 15000 })
+  }, 20000)
+
+  it('shows dev-mode restart warning on step 3 when devMode is true', async () => {
+    // Mock the configureNetwork response to include devMode
+    mockPost.mockResolvedValueOnce({
+      ...defaultNetworkStatus,
+      configured: true,
+      host: '0.0.0.0',
+      accessUrl: 'http://192.168.1.100:5173/?token=abc',
+      mdns: { enabled: true, hostname: 'freshell' },
+      firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+      devMode: true,
+      devPort: 5173,
+      rebinding: false,
+    })
+
+    const store = createTestStore({
+      status: {
+        ...defaultNetworkStatus,
+        configured: true,
+        host: '0.0.0.0',
+        accessUrl: 'http://192.168.1.100:5173/?token=abc',
+        mdns: { enabled: true, hostname: 'freshell' },
+        devMode: true,
+        devPort: 5173,
+      },
+    })
+    render(
+      <Provider store={store}>
+        <SetupWizard onComplete={vi.fn()} />
+      </Provider>,
+    )
+
+    // Click "Yes" to start, then advance through steps
+    fireEvent.click(screen.getByRole('button', { name: /yes/i }))
+
+    // Wait for step 3 (auto-advance after bind completes)
+    await waitFor(() => {
+      expect(screen.getByText(/you're all set/i)).toBeInTheDocument()
+    }, { timeout: 5000 })
+
+    // Dev-mode warning should be visible
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.getByText(/dev mode/i)).toBeInTheDocument()
+    expect(screen.getByText(/npm run dev/i)).toBeInTheDocument()
+  })
 })

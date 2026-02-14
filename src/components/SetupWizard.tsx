@@ -97,9 +97,10 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
     }
   }, [bindStatus, networkStatus?.firewall])
 
-  // Auto-advance to step 3 when all checklist items are done
+  // Auto-advance to step 3 when all checklist items are done.
+  // Firewall errors stay on step 2 so the user can see and act on them.
   useEffect(() => {
-    if (step === 2 && bindStatus === 'done' && (firewallStatus === 'done' || firewallStatus === 'error')) {
+    if (step === 2 && bindStatus === 'done' && firewallStatus === 'done') {
       const timer = setTimeout(() => setStep(3), 800)
       return () => clearTimeout(timer)
     }
@@ -179,7 +180,11 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
         setFirewallStatus('active')
         setFirewallDetail('Configuring firewall...')
         const pollFirewall = async (attempts = 0) => {
-          if (attempts >= 10) return
+          if (attempts >= 10) {
+            setFirewallStatus('error')
+            setFirewallDetail('Firewall configuration timed out')
+            return
+          }
           try {
             const action = await dispatch(fetchNetworkStatus()).unwrap()
             if (!action.firewall.configuring) {
@@ -297,6 +302,16 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
                 </button>
               </div>
             )}
+
+            {bindStatus === 'done' && firewallStatus === 'error' && (
+              <button
+                onClick={() => setStep(3)}
+                className="w-full rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90"
+                aria-label="Continue anyway"
+              >
+                Continue anyway
+              </button>
+            )}
           </div>
         )}
 
@@ -331,6 +346,12 @@ export function SetupWizard({ onComplete, initialStep = 1, onNavigate, onFirewal
                     <span className="font-mono">{networkStatus.mdns.hostname}.local:{networkStatus.port}</span>
                   </p>
                 )}
+              </div>
+            )}
+
+            {networkStatus?.devMode && (
+              <div className="rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-300" role="alert">
+                You&apos;re running in dev mode. Restart <code className="font-mono text-xs">npm run dev</code> for the Vite dev server to bind to the new address.
               </div>
             )}
 
