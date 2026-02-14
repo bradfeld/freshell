@@ -9,6 +9,7 @@ import MessageBubble from './MessageBubble'
 import PermissionBanner from './PermissionBanner'
 import ChatComposer from './ChatComposer'
 import FreshclaudeSettings from './FreshclaudeSettings'
+import ThinkingIndicator from './ThinkingIndicator'
 
 const DEFAULT_MODEL = 'claude-opus-4-6'
 const DEFAULT_PERMISSION_MODE = 'bypassPermissions'
@@ -261,6 +262,20 @@ export default function ClaudeChatView({ tabId, paneId, paneContent, hidden }: C
             showTools={paneContent.showTools ?? true}
             showTimecodes={paneContent.showTimecodes ?? false}
           />
+        )}
+
+        {/* Thinking indicator — shown when running but no response content yet.
+            Three guards prevent false positives:
+            1. status === 'running' — Claude is actively processing
+            2. !streamingActive — no text currently streaming
+            3. lastMessage.role === 'user' — no assistant content committed yet
+            The component self-debounces with a 200ms render delay to prevent
+            flash during brief SDK gaps (content_block_stop → sdk.assistant). */}
+        {session?.status === 'running' &&
+          !session.streamingActive &&
+          messages.length > 0 &&
+          messages[messages.length - 1].role === 'user' && (
+          <ThinkingIndicator />
         )}
 
         {/* Permission banners */}
