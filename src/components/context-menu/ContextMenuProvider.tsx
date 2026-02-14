@@ -746,6 +746,12 @@ export function ContextMenuProvider({
         copyTerminalCwd,
         copyMessageText,
         copyMessageCode,
+        copyFreshclaudeCodeBlock: () => {},
+        copyFreshclaudeToolInput: () => {},
+        copyFreshclaudeToolOutput: () => {},
+        copyFreshclaudeDiffNew: () => {},
+        copyFreshclaudeDiffOld: () => {},
+        copyFreshclaudeFilePath: () => {},
       },
     })
   }, [

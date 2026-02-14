@@ -50,6 +50,12 @@ export type MenuActions = {
   copyTerminalCwd: (terminalId: string) => void
   copyMessageText: (contextEl: HTMLElement | null) => void
   copyMessageCode: (contextEl: HTMLElement | null) => void
+  copyFreshclaudeCodeBlock: (clickTarget: HTMLElement | null) => void
+  copyFreshclaudeToolInput: (clickTarget: HTMLElement | null) => void
+  copyFreshclaudeToolOutput: (clickTarget: HTMLElement | null) => void
+  copyFreshclaudeDiffNew: (clickTarget: HTMLElement | null) => void
+  copyFreshclaudeDiffOld: (clickTarget: HTMLElement | null) => void
+  copyFreshclaudeFilePath: (clickTarget: HTMLElement | null) => void
 }
 
 export type MenuBuildContext = {
@@ -445,6 +451,36 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
       { type: 'separator', id: 'claude-sep' },
       { type: 'item', id: 'claude-copy-session', label: 'Copy session ID', onSelect: () => actions.copySessionId(target.sessionId) },
       { type: 'item', id: 'claude-open-session', label: 'Open session in new tab', onSelect: () => actions.openSessionInNewTab(target.sessionId, target.provider) },
+    ]
+  }
+
+  if (target.kind === 'freshclaude-chat') {
+    const selection = window.getSelection()
+    const hasSelection = !!(selection && selection.toString().trim())
+    return [
+      {
+        type: 'item',
+        id: 'fc-copy',
+        label: 'Copy',
+        onSelect: () => {
+          if (hasSelection) document.execCommand('copy')
+        },
+        disabled: !hasSelection,
+      },
+      {
+        type: 'item',
+        id: 'fc-select-all',
+        label: 'Select all',
+        onSelect: () => {
+          const range = document.createRange()
+          if (contextElement) {
+            range.selectNodeContents(contextElement)
+            const sel = window.getSelection()
+            sel?.removeAllRanges()
+            sel?.addRange(range)
+          }
+        },
+      },
     ]
   }
 

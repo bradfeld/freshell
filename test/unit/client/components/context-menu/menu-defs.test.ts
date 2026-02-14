@@ -45,6 +45,12 @@ function createMockActions(): MenuActions {
     copyTerminalCwd: vi.fn(),
     copyMessageText: vi.fn(),
     copyMessageCode: vi.fn(),
+    copyFreshclaudeCodeBlock: vi.fn(),
+    copyFreshclaudeToolInput: vi.fn(),
+    copyFreshclaudeToolOutput: vi.fn(),
+    copyFreshclaudeDiffNew: vi.fn(),
+    copyFreshclaudeDiffOld: vi.fn(),
+    copyFreshclaudeFilePath: vi.fn(),
   }
 }
 
@@ -131,6 +137,39 @@ describe('buildMenuItems — pane context menu', () => {
     const splitDownIdx = items.findIndex(i => i.type === 'item' && i.id === 'split-down')
     const separatorAfterSplit = items[splitDownIdx + 1]
     expect(separatorAfterSplit?.type).toBe('separator')
+  })
+})
+
+describe('buildMenuItems — freshclaude-chat context', () => {
+  it('returns Copy and Select all for freshclaude-chat target', () => {
+    const mockActions = createMockActions()
+    const mockContext = createMockContext(mockActions)
+    const target: ContextTarget = { kind: 'freshclaude-chat', sessionId: 'sess-1' }
+    const items = buildMenuItems(target, mockContext)
+    const ids = items.filter(i => i.type === 'item').map(i => i.id)
+    expect(ids).toContain('fc-copy')
+    expect(ids).toContain('fc-select-all')
+  })
+
+  it('returns exactly 2 items (Copy and Select all)', () => {
+    const mockActions = createMockActions()
+    const mockContext = createMockContext(mockActions)
+    const target: ContextTarget = { kind: 'freshclaude-chat', sessionId: 'sess-1' }
+    const items = buildMenuItems(target, mockContext)
+    const actionItems = items.filter(i => i.type === 'item')
+    expect(actionItems).toHaveLength(2)
+  })
+
+  it('disables Copy when no selection', () => {
+    const mockActions = createMockActions()
+    const mockContext = createMockContext(mockActions)
+    const target: ContextTarget = { kind: 'freshclaude-chat', sessionId: 'sess-1' }
+    const items = buildMenuItems(target, mockContext)
+    const copyItem = items.find(i => i.type === 'item' && i.id === 'fc-copy')
+    expect(copyItem).toBeDefined()
+    if (copyItem?.type === 'item') {
+      expect(copyItem.disabled).toBe(true)
+    }
   })
 })
 
