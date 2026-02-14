@@ -1322,6 +1322,7 @@ describe('TerminalView lifecycle updates', () => {
           panes: panesReducer,
           settings: settingsReducer,
           connection: connectionReducer,
+          turnCompletion: turnCompletionReducer,
         },
         preloadedState: {
           tabs: {
@@ -1543,6 +1544,7 @@ describe('TerminalView lifecycle updates', () => {
           panes: panesReducer,
           settings: settingsReducer,
           connection: connectionReducer,
+          turnCompletion: turnCompletionReducer,
         },
         preloadedState: {
           tabs: {
@@ -1561,8 +1563,18 @@ describe('TerminalView lifecycle updates', () => {
             activePane: { [tabId]: paneId },
             paneTitles: {},
           },
-          settings: { settings: defaultSettings, status: 'loaded' },
+          settings: {
+            settings: {
+              ...defaultSettings,
+              terminal: {
+                ...defaultSettings.terminal,
+                osc52Clipboard: 'never',
+              },
+            },
+            status: 'loaded',
+          },
           connection: { status: 'connected', error: null },
+          turnCompletion: { seq: 0, lastEvent: null, pendingEvents: [], attentionByTab: {}, attentionByPane: {} },
         },
       })
       return { tabId, paneId, paneContent, store }
@@ -1601,6 +1613,7 @@ describe('TerminalView lifecycle updates', () => {
 
     it('clears xterm on terminal.created with non-empty snapshot', async () => {
       const { tabId, paneId, paneContent, store } = setupTerminal()
+      const osc52 = '\u001b]52;c;Y29weQ==\u0007'
 
       render(
         <Provider store={store}>
@@ -1621,12 +1634,53 @@ describe('TerminalView lifecycle updates', () => {
           type: 'terminal.created',
           requestId: 'req-clear-1',
           terminalId: 'term-1',
-          snapshot: 'hello world',
+          snapshot: `hello${osc52} world`,
         })
       })
 
       expect(term.clear).toHaveBeenCalled()
       expect(term.write).toHaveBeenCalledWith('hello world')
+      expect(store.getState().turnCompletion.lastEvent).toBeNull()
+    })
+
+    it('sanitizes terminal.snapshot replay and does not emit turn completion', async () => {
+      const { tabId, paneId, paneContent, store } = setupTerminal()
+      const osc52 = '\u001b]52;c;Y29weQ==\u0007'
+
+      render(
+        <Provider store={store}>
+          <TerminalView tabId={tabId} paneId={paneId} paneContent={paneContent} />
+        </Provider>
+      )
+
+      await waitFor(() => {
+        expect(messageHandler).not.toBeNull()
+      })
+
+      act(() => {
+        messageHandler!({
+          type: 'terminal.created',
+          requestId: 'req-clear-1',
+          terminalId: 'term-1',
+          snapshot: '',
+        })
+      })
+
+      const term = terminalInstances[terminalInstances.length - 1]
+      term.clear.mockClear()
+      term.write.mockClear()
+
+      act(() => {
+        messageHandler!({
+          type: 'terminal.snapshot',
+          terminalId: 'term-1',
+          snapshot: `snap${osc52}shot`,
+        })
+      })
+
+      expect(term.clear).toHaveBeenCalled()
+      expect(term.write).toHaveBeenCalledWith('snapshot')
+      expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
 
     it('clears xterm on terminal.attached with empty snapshot', async () => {
@@ -1671,6 +1725,7 @@ describe('TerminalView lifecycle updates', () => {
 
     it('clears xterm on terminal.attached with non-empty snapshot', async () => {
       const { tabId, paneId, paneContent, store } = setupTerminal()
+      const osc52 = '\u001b]52;c;Y29weQ==\u0007'
 
       render(
         <Provider store={store}>
@@ -1701,12 +1756,13 @@ describe('TerminalView lifecycle updates', () => {
         messageHandler!({
           type: 'terminal.attached',
           terminalId: 'term-1',
-          snapshot: 'attached content',
+          snapshot: `attached ${osc52}content`,
         })
       })
 
       expect(term.clear).toHaveBeenCalled()
       expect(term.write).toHaveBeenCalledWith('attached content')
+      expect(store.getState().turnCompletion.lastEvent).toBeNull()
     })
   })
 })

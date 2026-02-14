@@ -3,7 +3,9 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
+import { updateSettingsLocal } from '@/store/settingsSlice'
 import { recordTurnComplete, clearTabAttention, clearPaneAttention } from '@/store/turnCompletionSlice'
+import { api } from '@/lib/api'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
@@ -15,9 +17,16 @@ import {
   createTurnCompleteSignalParserState,
   extractTurnCompleteSignals,
 } from '@/lib/turn-complete-signal'
+import {
+  createOsc52ParserState,
+  extractOsc52Events,
+  type Osc52Event,
+  type Osc52Policy,
+} from '@/lib/terminal-osc52'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { resolveTerminalFontFamily } from '@/lib/terminal-fonts'
 import { useChunkedAttach } from '@/components/terminal/useChunkedAttach'
+import { Osc52PromptModal } from '@/components/terminal/Osc52PromptModal'
 import {
   createTerminalRuntime,
   type TerminalRuntime,
@@ -57,6 +66,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const ws = useMemo(() => getWsClient(), [])
   const [isAttaching, setIsAttaching] = useState(false)
   const [pendingLinkUri, setPendingLinkUri] = useState<string | null>(null)
+  const [pendingOsc52Event, setPendingOsc52Event] = useState<Osc52Event | null>(null)
   const setPendingLinkUriRef = useRef(setPendingLinkUri)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -69,6 +79,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const restoreRequestIdRef = useRef<string | null>(null)
   const restoreFlagRef = useRef(false)
   const turnCompleteSignalStateRef = useRef(createTurnCompleteSignalParserState())
+  const osc52ParserRef = useRef(createOsc52ParserState())
+  const osc52PolicyRef = useRef<Osc52Policy>(settings.terminal.osc52Clipboard)
+  const pendingOsc52EventRef = useRef<Osc52Event | null>(null)
+  const osc52QueueRef = useRef<Osc52Event[]>([])
   const warnExternalLinksRef = useRef(settings.terminal.warnExternalLinks)
   const debugRef = useRef(!!(settings as any).logging?.debug)
   const attentionDismissRef = useRef(settings.panes?.attentionDismiss ?? 'click')
@@ -108,6 +122,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   useEffect(() => {
     warnExternalLinksRef.current = settings.terminal.warnExternalLinks
   }, [settings.terminal.warnExternalLinks])
+
+  useEffect(() => {
+    osc52PolicyRef.current = settings.terminal.osc52Clipboard
+  }, [settings.terminal.osc52Clipboard])
+
+  useEffect(() => {
+    pendingOsc52EventRef.current = pendingOsc52Event
+  }, [pendingOsc52Event])
 
   // Sync during render (not in useEffect) so refs always have latest values
   hasAttentionRef.current = hasAttention
@@ -162,14 +184,84 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     ws.send(msg)
   }, [ws])
 
+  const attemptOsc52ClipboardWrite = useCallback((text: string) => {
+    void copyText(text).catch(() => {})
+  }, [])
+
+  const persistOsc52Policy = useCallback((policy: Osc52Policy) => {
+    osc52PolicyRef.current = policy
+    dispatch(updateSettingsLocal({ terminal: { osc52Clipboard: policy } } as any))
+    void api.patch('/api/settings', {
+      terminal: { osc52Clipboard: policy },
+    }).catch(() => {})
+  }, [dispatch])
+
+  const advanceOsc52Prompt = useCallback(() => {
+    const next = osc52QueueRef.current.shift() ?? null
+    pendingOsc52EventRef.current = next
+    setPendingOsc52Event(next)
+  }, [])
+
+  const closeOsc52Prompt = useCallback(() => {
+    pendingOsc52EventRef.current = null
+    setPendingOsc52Event(null)
+  }, [])
+
+  const handleOsc52Event = useCallback((event: Osc52Event) => {
+    const policy = osc52PolicyRef.current
+    if (policy === 'always') {
+      attemptOsc52ClipboardWrite(event.text)
+      return
+    }
+    if (policy === 'never') {
+      return
+    }
+    if (pendingOsc52EventRef.current) {
+      osc52QueueRef.current.push(event)
+      return
+    }
+    pendingOsc52EventRef.current = event
+    setPendingOsc52Event(event)
+  }, [attemptOsc52ClipboardWrite])
+
+  const handleTerminalSnapshot = useCallback((snapshot: string | undefined, term: Terminal) => {
+    const osc = extractOsc52Events(snapshot ?? '', createOsc52ParserState())
+    try { term.clear() } catch { /* disposed */ }
+    if (osc.cleaned) {
+      try { term.write(osc.cleaned) } catch { /* disposed */ }
+    }
+    for (const event of osc.events) {
+      handleOsc52Event(event)
+    }
+  }, [handleOsc52Event])
+
+  const handleTerminalOutput = useCallback((raw: string, mode: TerminalPaneContent['mode'], term: Terminal, tid?: string) => {
+    const osc = extractOsc52Events(raw, osc52ParserRef.current)
+    const { cleaned, count } = extractTurnCompleteSignals(osc.cleaned, mode, turnCompleteSignalStateRef.current)
+
+    if (count > 0 && tid) {
+      dispatch(recordTurnComplete({
+        tabId,
+        paneId: paneIdRef.current,
+        terminalId: tid,
+        at: Date.now(),
+      }))
+    }
+
+    if (cleaned) {
+      term.write(cleaned)
+    }
+
+    for (const event of osc.events) {
+      handleOsc52Event(event)
+    }
+  }, [dispatch, handleOsc52Event, tabId])
+
   const applyChunkedSnapshot = useCallback((snapshot: string) => {
     const term = termRef.current
     if (!term) return
-    try { term.clear() } catch { /* disposed */ }
-    if (snapshot) {
-      try { term.write(snapshot) } catch { /* disposed */ }
-    }
-  }, [])
+    handleTerminalSnapshot(snapshot, term)
+  }, [handleTerminalSnapshot])
 
   const markChunkedRunning = useCallback(() => {
     updateContent({ status: 'running' })
@@ -435,6 +527,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (!termCandidate) return
     const term = termCandidate
     turnCompleteSignalStateRef.current = createTurnCompleteSignalParserState()
+    osc52ParserRef.current = createOsc52ParserState()
+    osc52QueueRef.current = []
+    pendingOsc52EventRef.current = null
+    setPendingOsc52Event(null)
 
     // NOTE: We intentionally don't destructure terminalId here.
     // We read it from terminalIdRef.current to avoid stale closures.
@@ -530,27 +626,11 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.output' && msg.terminalId === tid) {
           const raw = msg.data || ''
           const mode = contentRef.current?.mode || 'shell'
-          const { cleaned, count } = extractTurnCompleteSignals(raw, mode, turnCompleteSignalStateRef.current)
-
-          if (count > 0 && tid) {
-            dispatch(recordTurnComplete({
-              tabId,
-              paneId: paneIdRef.current,
-              terminalId: tid,
-              at: Date.now(),
-            }))
-          }
-
-          if (cleaned) {
-            term.write(cleaned)
-          }
+          handleTerminalOutput(raw, mode, term, tid)
         }
 
         if (msg.type === 'terminal.snapshot' && msg.terminalId === tid) {
-          try { term.clear() } catch { /* disposed */ }
-          if (msg.snapshot) {
-            try { term.write(msg.snapshot) } catch { /* disposed */ }
-          }
+          handleTerminalSnapshot(msg.snapshot, term)
         }
 
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
@@ -578,10 +658,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           if (isSnapshotChunked) {
             markSnapshotChunkedCreated()
           } else {
-            try { term.clear() } catch { /* disposed */ }
-            if (msg.snapshot) {
-              try { term.write(msg.snapshot) } catch { /* disposed */ }
-            }
+            handleTerminalSnapshot(msg.snapshot, term)
           }
           // Creator is already attached server-side for this terminal.
           // Avoid sending terminal.attach here: it can race with terminal.output and lead to
@@ -595,10 +672,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (msg.type === 'terminal.attached' && msg.terminalId === tid) {
           clearRateLimitRetry()
           setIsAttaching(false)
-          try { term.clear() } catch { /* disposed */ }
-          if (msg.snapshot) {
-            try { term.write(msg.snapshot) } catch { /* disposed */ }
-          }
+          handleTerminalSnapshot(msg.snapshot, term)
           updateContent({ status: 'running' })
         }
 
@@ -782,6 +856,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     bumpConnectionGeneration,
     clearChunkedAttachState,
     handleChunkLifecycleMessage,
+    handleTerminalOutput,
+    handleTerminalSnapshot,
     markSnapshotChunkedCreated,
   ])
 
@@ -815,6 +891,34 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           {snapshotWarning}
         </div>
       )}
+      <Osc52PromptModal
+        open={pendingOsc52Event !== null}
+        onYes={() => {
+          if (pendingOsc52EventRef.current) {
+            attemptOsc52ClipboardWrite(pendingOsc52EventRef.current.text)
+          }
+          advanceOsc52Prompt()
+        }}
+        onNo={() => {
+          advanceOsc52Prompt()
+        }}
+        onAlways={() => {
+          if (pendingOsc52EventRef.current) {
+            attemptOsc52ClipboardWrite(pendingOsc52EventRef.current.text)
+          }
+          for (const queued of osc52QueueRef.current) {
+            attemptOsc52ClipboardWrite(queued.text)
+          }
+          osc52QueueRef.current = []
+          persistOsc52Policy('always')
+          closeOsc52Prompt()
+        }}
+        onNever={() => {
+          osc52QueueRef.current = []
+          persistOsc52Policy('never')
+          closeOsc52Prompt()
+        }}
+      />
       <ConfirmModal
         open={pendingLinkUri !== null}
         title="Open external link?"
