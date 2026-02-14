@@ -66,6 +66,10 @@ Update runtime deps:
 }
 ```
 
+Remove legacy deps in the same edit:
+- delete `"xterm": "^5.3.0"`
+- delete `"xterm-addon-fit": "^0.8.0"`
+
 Update imports:
 ```ts
 import { Terminal } from '@xterm/xterm'
@@ -82,9 +86,10 @@ Run:
 ```bash
 npm install
 npm run typecheck:client
+rg -n "\"xterm\"|xterm-addon-fit|xterm/css/xterm.css" src test package.json
 ```
 
-Expected: typecheck passes with new module paths.
+Expected: typecheck passes with new module paths and `rg` only matches historical docs/plan files (not runtime code/tests).
 
 **Step 4: Commit**
 
@@ -146,7 +151,11 @@ export type TerminalRuntime = {
 
 **Step 4: Integrate runtime into `TerminalView`**
 
-Replace direct `FitAddon` reference fields with runtime wrapper calls where practical.
+Replace direct `FitAddon` reference fields completely. Remove `fitRef` from `TerminalView` and migrate all fit call sites to runtime methods:
+- initial mount fit after `term.open(...)`
+- `ResizeObserver` callback fit + resize send
+- settings-change fit (when visible)
+- hidden->visible fit + resize send
 
 **Step 5: Re-run tests**
 
@@ -212,6 +221,15 @@ Decision mapping:
 - UI default remains `ask`
 - Renderer policy selected by user decision `3b` is implemented by defaulting to `'auto'` and enabling WebGL where supported.
 
+Critical server details:
+- Update duplicated server `AppSettings` type in `server/config-store.ts` (it is not shared with client type definitions).
+- Extend `mergeSettings` terminal allowlist in `server/config-store.ts` to include:
+```ts
+osc52Clipboard: terminalPatch.osc52Clipboard,
+renderer: terminalPatch.renderer,
+```
+Without this, API patch calls silently drop the new fields.
+
 **Step 4: Re-run tests**
 
 Run:
@@ -259,8 +277,9 @@ Expected: FAIL (UI not present).
 
 Add terminal subsection:
 ```tsx
-<button aria-expanded={advancedOpen} aria-controls="terminal-advanced">Advanced</button>
-<div id="terminal-advanced" hidden={!advancedOpen}>...</div>
+const advancedId = useId()
+<button aria-expanded={advancedOpen} aria-controls={advancedId}>Advanced</button>
+<div id={advancedId} hidden={!advancedOpen}>...</div>
 ```
 
 Inside advanced:
@@ -303,7 +322,7 @@ Example:
 ```ts
 it('extracts OSC52 payload and returns cleaned output', () => {
   const input = "hello\u001b]52;c;Y29weQ==\u0007world"
-  const result = extractOsc52Events(input, initOsc52State())
+  const result = extractOsc52Events(input, createOsc52ParserState())
   expect(result.cleaned).toBe('helloworld')
   expect(result.events[0].text).toBe('copy')
 })
@@ -355,7 +374,6 @@ git commit -m "feat(terminal): add OSC52 parser and stream-safe extraction utili
 **Files:**
 - Modify: `src/components/TerminalView.tsx`
 - Create: `src/components/terminal/Osc52PromptModal.tsx`
-- Modify: `src/components/ui/confirm-modal.tsx` (optional: only if extending instead of new modal)
 - Modify: `test/unit/client/components/TerminalView.lifecycle.test.tsx`
 - Create: `test/unit/client/components/TerminalView.osc52.test.tsx`
 
@@ -381,10 +399,17 @@ Expected: FAIL.
 
 **Step 3: Implement in output path**
 
+Apply stream transforms in this exact order to preserve existing turn-complete behavior:
+1. `raw` -> `extractOsc52Events` (strip OSC52, collect clipboard events)
+2. resulting text -> `extractTurnCompleteSignals`
+3. write final cleaned text to terminal
+4. process emitted OSC52 clipboard events
+
 In `terminal.output` handling:
 ```ts
 const osc = extractOsc52Events(raw, osc52ParserRef.current)
-if (osc.cleaned) term.write(osc.cleaned)
+const turn = extractTurnCompleteSignals(osc.cleaned, mode, turnCompleteSignalStateRef.current)
+if (turn.cleaned) term.write(turn.cleaned)
 for (const event of osc.events) handleOsc52Event(event)
 ```
 
@@ -450,7 +475,6 @@ runtime.findPrevious(query, { caseSensitive: false, incremental: true })
 Keyboard interception:
 ```ts
 if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'f') {
-  event.preventDefault()
   setSearchOpen(true)
   return false
 }
@@ -565,7 +589,7 @@ Expected: pass.
 **Step 5: Commit**
 
 ```bash
-git add test/e2e/terminal-search-flow.test.tsx test/e2e/terminal-osc52-policy-flow.test.tsx src/components/TerminalView.tsx src/components/SettingsView.tsx
+git add test/e2e/terminal-search-flow.test.tsx test/e2e/terminal-osc52-policy-flow.test.tsx test/e2e/tab-focus-behavior.test.tsx
 
 git commit -m "test(e2e): cover terminal search flow and OSC52 Ask/Always/Never policy behavior"
 ```
@@ -617,4 +641,3 @@ git commit -m "docs(terminal): reflect v6 search and advanced OSC52 settings; fi
 - [ ] WebGL attempted automatically with robust fallback.
 - [ ] Unit + e2e coverage added for all new behaviors.
 - [ ] `npm run test` and `npm run verify` pass.
-
