@@ -8,6 +8,8 @@ import { collectTerminalIds, collectPaneContents } from '@/lib/pane-utils'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import TabItem from './TabItem'
 import { cancelCodingCliRequest } from '@/store/codingCliSlice'
+import { useMobile } from '@/hooks/useMobile'
+import { MobileTabStrip } from './MobileTabStrip'
 import {
   DndContext,
   closestCenter,
@@ -234,7 +236,13 @@ export default function TabBar() {
 
   const activeTab = activeId ? tabs.find((t: Tab) => t.id === activeId) : null
 
+  const isMobile = useMobile()
+
   if (tabs.length === 0) return null
+
+  if (isMobile) {
+    return <MobileTabStrip />
+  }
 
   return (
     <div className="relative z-20 h-12 md:h-10 flex items-end px-2 bg-background" data-context={ContextIds.Global}>
