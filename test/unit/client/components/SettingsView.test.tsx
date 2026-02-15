@@ -10,14 +10,6 @@ import sessionsReducer from '@/store/sessionsSlice'
 import { networkReducer } from '@/store/networkSlice'
 import { LOCAL_TERMINAL_FONT_KEY } from '@/lib/terminal-fonts'
 
-// Mock lean-qr for QR code tests
-vi.mock('lean-qr', () => ({
-  generate: () => ({ toDataArray: () => [] }),
-}))
-vi.mock('lean-qr/extras/svg', () => ({
-  toSvgDataURL: () => 'data:image/svg+xml,mock-qr',
-}))
-
 // Mock the api module
 vi.mock('@/lib/api', () => ({
   api: {
@@ -1103,48 +1095,6 @@ describe('SettingsView Component', () => {
       expect(screen.getByText(/remote access/i)).toBeInTheDocument()
     })
 
-    it('renders mDNS hostname field when remote access enabled', () => {
-      const store = configureStore({
-        reducer: {
-          settings: settingsReducer,
-          tabs: tabsReducer,
-          connection: connectionReducer,
-          sessions: sessionsReducer,
-          network: networkReducer,
-        },
-        preloadedState: {
-          settings: {
-            settings: defaultSettings,
-            loaded: true,
-            lastSavedAt: undefined,
-          },
-          network: {
-            status: {
-              configured: true,
-              host: '0.0.0.0' as const,
-              port: 3001,
-              lanIps: ['192.168.1.100'],
-              machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
-              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
-              rebinding: false,
-              devMode: false,
-              accessUrl: 'http://192.168.1.100:3001/?token=abc',
-            },
-            loading: false,
-            configuring: false,
-            error: null,
-          },
-        },
-      })
-      render(
-        <Provider store={store}>
-          <SettingsView onNavigate={vi.fn()} />
-        </Provider>,
-      )
-      expect(screen.getByLabelText(/mDNS hostname/i)).toBeInTheDocument()
-    })
-
     it('shows firewall Fix button for WSL2 even with empty commands', () => {
       const store = configureStore({
         reducer: {
@@ -1167,7 +1117,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false },
               rebinding: false,
               devMode: false,
@@ -1209,7 +1158,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
               rebinding: false,
               devMode: true,
@@ -1254,7 +1202,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false },
               rebinding: false,
               devMode: true,
@@ -1297,7 +1244,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
               rebinding: true,
               devMode: false,
@@ -1340,7 +1286,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
               rebinding: false,
               devMode: false,
@@ -1361,7 +1306,7 @@ describe('SettingsView Component', () => {
       expect(toggle).toBeDisabled()
     })
 
-    it('renders copy URL and QR code toggle buttons when access URL is present', () => {
+    it('renders Get link button when access URL is present', () => {
       const store = configureStore({
         reducer: {
           settings: settingsReducer,
@@ -1383,7 +1328,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
               rebinding: false,
               devMode: false,
@@ -1400,11 +1344,11 @@ describe('SettingsView Component', () => {
           <SettingsView onNavigate={vi.fn()} />
         </Provider>,
       )
-      expect(screen.getByRole('button', { name: /copy url/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /show qr code/i })).toBeInTheDocument()
+      expect(screen.getByText('Get link')).toBeInTheDocument()
     })
 
-    it('toggles QR code button label when clicked', () => {
+    it('calls onSharePanel when Get link is clicked', () => {
+      const onSharePanel = vi.fn()
       const store = configureStore({
         reducer: {
           settings: settingsReducer,
@@ -1426,7 +1370,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
               rebinding: false,
               devMode: false,
@@ -1440,64 +1383,11 @@ describe('SettingsView Component', () => {
       })
       render(
         <Provider store={store}>
-          <SettingsView onNavigate={vi.fn()} />
+          <SettingsView onNavigate={vi.fn()} onSharePanel={onSharePanel} />
         </Provider>,
       )
-      // Button initially says "Show QR code"
-      const qrButton = screen.getByRole('button', { name: /show qr code/i })
-      expect(qrButton).toHaveAttribute('aria-pressed', 'false')
-
-      // Click the QR toggle
-      fireEvent.click(qrButton)
-
-      // Button should now say "Hide QR code" and be pressed
-      expect(screen.getByRole('button', { name: /hide qr code/i })).toHaveAttribute('aria-pressed', 'true')
-    })
-
-    it('shows access URL with break-all wrapping (no truncation)', () => {
-      const longUrl = 'http://192.168.1.100:3001/?token=very-long-token-that-would-be-truncated'
-      const store = configureStore({
-        reducer: {
-          settings: settingsReducer,
-          tabs: tabsReducer,
-          connection: connectionReducer,
-          sessions: sessionsReducer,
-          network: networkReducer,
-        },
-        preloadedState: {
-          settings: {
-            settings: defaultSettings,
-            loaded: true,
-            lastSavedAt: undefined,
-          },
-          network: {
-            status: {
-              configured: true,
-              host: '0.0.0.0' as const,
-              port: 3001,
-              lanIps: ['192.168.1.100'],
-              machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
-              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
-              rebinding: false,
-              devMode: false,
-              accessUrl: longUrl,
-            },
-            loading: false,
-            configuring: false,
-            error: null,
-          },
-        },
-      })
-      render(
-        <Provider store={store}>
-          <SettingsView onNavigate={vi.fn()} />
-        </Provider>,
-      )
-      const codeEl = screen.getByText(longUrl)
-      expect(codeEl).toBeInTheDocument()
-      expect(codeEl.className).toContain('break-all')
-      expect(codeEl.className).not.toContain('truncate')
+      fireEvent.click(screen.getByText('Get link'))
+      expect(onSharePanel).toHaveBeenCalledOnce()
     })
   })
 })
