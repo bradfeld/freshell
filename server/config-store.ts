@@ -43,6 +43,7 @@ export type AppSettings = {
       | 'github-light'
   }
   defaultCwd?: string
+  allowedFilePaths?: string[]
   logging: {
     debug: boolean
   }
@@ -112,6 +113,7 @@ export const defaultSettings: AppSettings = {
     theme: 'auto',
   },
   defaultCwd: undefined,
+  allowedFilePaths: undefined,
   logging: {
     debug: resolveDefaultLoggingDebug(),
   },
