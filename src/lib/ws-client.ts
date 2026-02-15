@@ -5,6 +5,16 @@ type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'ready'
 type MessageHandler = (msg: any) => void
 type ReconnectHandler = () => void
 type HelloExtensionProvider = () => { sessions?: { active?: string; visible?: string[]; background?: string[] } }
+type TabsSyncPushPayload = {
+  deviceId: string
+  deviceLabel: string
+  records: unknown[]
+}
+type TabsSyncQueryPayload = {
+  requestId: string
+  deviceId: string
+  rangeDays?: number
+}
 
 const CONNECTION_TIMEOUT_MS = 10_000
 const perfConfig = getClientPerfConfig()
@@ -319,6 +329,20 @@ export class WsClient {
         }, 'warn')
       }
     }
+  }
+
+  sendTabsSyncPush(payload: TabsSyncPushPayload) {
+    this.send({
+      type: 'tabs.sync.push',
+      ...payload,
+    })
+  }
+
+  sendTabsSyncQuery(payload: TabsSyncQueryPayload) {
+    this.send({
+      type: 'tabs.sync.query',
+      ...payload,
+    })
   }
 
   onMessage(handler: MessageHandler): () => void {

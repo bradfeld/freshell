@@ -187,6 +187,7 @@ async function main() {
       }
     },
     () => terminalMetadata.list(),
+    tabsRegistryStore,
   )
   const port = Number(process.env.PORT || 3001)
   const isDev = process.env.NODE_ENV !== 'production'
