@@ -1302,6 +1302,18 @@ export class TerminalRegistry extends EventEmitter {
     })
     if (bound.ok) {
       canonical.resumeSessionId = sessionId
+    } else {
+      logger.warn(
+        {
+          provider,
+          sessionId,
+          canonicalTerminalId: canonical.terminalId,
+          reason: bound.reason,
+          ...(bound.reason === 'session_already_owned' ? { ownerTerminalId: bound.owner } : {}),
+          ...(bound.reason === 'terminal_already_bound' ? { existingBinding: bound.existing } : {}),
+        },
+        'session_bind_repair_failed',
+      )
     }
 
     const clearedTerminalIds: string[] = []
@@ -1312,6 +1324,18 @@ export class TerminalRegistry extends EventEmitter {
     }
 
     const repaired = clearedTerminalIds.length > 0 || bound.ok
+    if (repaired && (clearedTerminalIds.length > 0 || owner !== canonical.terminalId)) {
+      logger.info(
+        {
+          provider,
+          sessionId,
+          canonicalTerminalId: canonical.terminalId,
+          previousOwnerTerminalId: owner,
+          clearedTerminalIds,
+        },
+        'session_bind_repair_applied',
+      )
+    }
     return {
       repaired,
       canonicalTerminalId: canonical.terminalId,
@@ -1373,7 +1397,30 @@ export class TerminalRegistry extends EventEmitter {
     if (!normalized) return { ok: false, reason: 'invalid_session_id' }
 
     const bound = this.bindingAuthority.bind({ provider, sessionId: normalized, terminalId })
-    if (!bound.ok) return bound
+    if (!bound.ok) {
+      if (bound.reason === 'session_already_owned') {
+        logger.warn(
+          {
+            provider,
+            sessionId: normalized,
+            ownerTerminalId: bound.owner,
+            attemptedTerminalId: terminalId,
+          },
+          'session_bind_conflict',
+        )
+      } else {
+        logger.warn(
+          {
+            provider,
+            sessionId: normalized,
+            terminalId,
+            existingBinding: bound.existing,
+          },
+          'session_terminal_already_bound',
+        )
+      }
+      return bound
+    }
 
     term.resumeSessionId = normalized
     return { ok: true, terminalId, sessionId: normalized }

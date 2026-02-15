@@ -916,10 +916,11 @@ async function main() {
       const result = associationCoordinator.associateSingleSession(session)
       if (!result.associated || !result.terminalId) continue
       log.info({
+        event: 'session_bind_applied',
         terminalId: result.terminalId,
         sessionId: session.sessionId,
         provider: session.provider,
-      }, 'Associating terminal with coding CLI session')
+      }, 'session_bind_applied')
       try {
         wsHandler.broadcast({
           type: 'terminal.session.associated' as const,
@@ -1011,7 +1012,12 @@ async function main() {
     })
     if (!result.associated || !result.terminalId) return
     const terminalId = result.terminalId
-    log.info({ terminalId, sessionId: session.sessionId }, 'Associating terminal with new Claude session')
+    log.info({
+      event: 'session_bind_applied',
+      provider: 'claude',
+      terminalId,
+      sessionId: session.sessionId,
+    }, 'session_bind_applied')
     try {
       wsHandler.broadcast({
         type: 'terminal.session.associated' as const,
@@ -1023,7 +1029,7 @@ async function main() {
         broadcastTerminalMetaUpserts([metaUpsert])
       }
     } catch (err) {
-      log.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
+      log.warn({ err, terminalId, sessionId: session.sessionId }, 'Failed to broadcast session association')
     }
 
     void (async () => {
