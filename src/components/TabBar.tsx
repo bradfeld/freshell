@@ -10,6 +10,7 @@ import TabItem from './TabItem'
 import { cancelCodingCliRequest } from '@/store/codingCliSlice'
 import { useMobile } from '@/hooks/useMobile'
 import { MobileTabStrip } from './MobileTabStrip'
+import { TabSwitcher } from './TabSwitcher'
 import {
   DndContext,
   closestCenter,
@@ -173,6 +174,7 @@ export default function TabBar() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [showSwitcher, setShowSwitcher] = useState(false)
 
   useEffect(() => {
     if (!renameRequestTabId) return
@@ -241,7 +243,12 @@ export default function TabBar() {
   if (tabs.length === 0) return null
 
   if (isMobile) {
-    return <MobileTabStrip />
+    return (
+      <>
+        <MobileTabStrip onOpenSwitcher={() => setShowSwitcher(true)} />
+        {showSwitcher && <TabSwitcher onClose={() => setShowSwitcher(false)} />}
+      </>
+    )
   }
 
   return (
