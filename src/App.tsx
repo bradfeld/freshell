@@ -172,6 +172,33 @@ export default function App() {
     }
   )
 
+  // Swipe gesture: left/right on terminal content area switches tabs
+  const bindTabSwipe = useDrag(
+    ({ movement: [mx], velocity: [vx], direction: [dx], last }) => {
+      if (!isMobile || !last) return
+
+      const swipedLeft = dx < 0 && (Math.abs(mx) > 50 || vx > 0.5)
+      const swipedRight = dx > 0 && (mx > 50 || vx > 0.5)
+
+      if (swipedLeft) {
+        dispatch(switchToNextTab())
+      } else if (swipedRight) {
+        // If on first tab, open sidebar instead
+        const currentIndex = tabs.findIndex(t => t.id === activeTabId)
+        if (currentIndex === 0 && sidebarCollapsed) {
+          toggleSidebarCollapse()
+        } else {
+          dispatch(switchToPrevTab())
+        }
+      }
+    },
+    {
+      axis: 'x',
+      filterTaps: true,
+      pointer: { touch: true },
+    }
+  )
+
   const toggleTheme = async () => {
     const newTheme = settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'
     dispatch(updateSettingsLocal({ theme: newTheme }))
@@ -585,7 +612,11 @@ export default function App() {
             )}
           </div>
         )}
-        <div className="flex-1 min-w-0 flex flex-col">
+        <div
+          className="flex-1 min-w-0 flex flex-col"
+          {...(isMobile ? bindTabSwipe() : {})}
+          style={isMobile ? { touchAction: 'pan-y' } : undefined}
+        >
           {content}
         </div>
       </div>
