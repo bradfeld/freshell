@@ -7,6 +7,7 @@ import settingsReducer, { defaultSettings, type SettingsState } from '@/store/se
 import tabsReducer from '@/store/tabsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionsReducer from '@/store/sessionsSlice'
+import { networkReducer } from '@/store/networkSlice'
 import { api } from '@/lib/api'
 
 vi.mock('@/lib/api', () => ({
@@ -28,6 +29,7 @@ function createTestStore(settingsState?: Partial<SettingsState>) {
       tabs: tabsReducer,
       connection: connectionReducer,
       sessions: sessionsReducer,
+      network: networkReducer,
     },
     middleware: (getDefault) =>
       getDefault({
