@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { updateSettingsLocal, markSaved, defaultSettings, mergeSettings } from '@/store/settingsSlice'
+import {
+  persistDeviceAlias,
+  persistOwnDeviceLabel,
+  setTabRegistryDeviceAliases,
+  setTabRegistryDeviceLabel,
+} from '@/store/tabRegistrySlice'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { terminalThemes, darkThemes, lightThemes, getTerminalTheme } from '@/lib/terminal-themes'
@@ -154,12 +160,22 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
     () => settings.codingCli?.enabledProviders ?? [],
     [settings.codingCli?.enabledProviders],
   )
+  const tabRegistryState = useAppSelector((s) => (s as any).tabRegistry)
+  const tabRegistry = tabRegistryState ?? {
+    deviceId: 'local-device',
+    deviceLabel: 'local-device',
+    deviceAliases: {} as Record<string, string>,
+    localOpen: [],
+    remoteOpen: [],
+    closed: [],
+  }
 
   const [availableTerminalFonts, setAvailableTerminalFonts] = useState(terminalFonts)
   const [fontsReady, setFontsReady] = useState(false)
   const [terminalAdvancedOpen, setTerminalAdvancedOpen] = useState(false)
   const [defaultCwdInput, setDefaultCwdInput] = useState(settings.defaultCwd ?? '')
   const [defaultCwdError, setDefaultCwdError] = useState<string | null>(null)
+  const [deviceNameInputs, setDeviceNameInputs] = useState<Record<string, string>>({})
   const terminalAdvancedId = useId()
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultCwdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -343,6 +359,68 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
     scheduleSave({ codingCli: { enabledProviders: next } })
   }, [dispatch, enabledProviders, scheduleSave])
 
+  const knownDevices = useMemo(() => {
+    const entries = new Map<string, { deviceId: string; baseLabel: string; isOwn: boolean }>()
+    entries.set(tabRegistry.deviceId, {
+      deviceId: tabRegistry.deviceId,
+      baseLabel: tabRegistry.deviceLabel,
+      isOwn: true,
+    })
+
+    const addRecord = (record: { deviceId: string; deviceLabel: string }) => {
+      if (!entries.has(record.deviceId)) {
+        entries.set(record.deviceId, {
+          deviceId: record.deviceId,
+          baseLabel: record.deviceLabel,
+          isOwn: record.deviceId === tabRegistry.deviceId,
+        })
+      }
+    }
+
+    tabRegistry.localOpen.forEach(addRecord)
+    tabRegistry.remoteOpen.forEach(addRecord)
+    tabRegistry.closed.forEach(addRecord)
+
+    return [...entries.values()]
+      .map((entry) => ({
+        ...entry,
+        effectiveLabel: entry.isOwn
+          ? tabRegistry.deviceLabel
+          : (tabRegistry.deviceAliases[entry.deviceId] || entry.baseLabel),
+      }))
+      .sort((a, b) => Number(b.isOwn) - Number(a.isOwn) || a.effectiveLabel.localeCompare(b.effectiveLabel))
+  }, [tabRegistry])
+
+  useEffect(() => {
+    setDeviceNameInputs((current) => {
+      const next: Record<string, string> = {}
+      for (const device of knownDevices) {
+        next[device.deviceId] = current[device.deviceId] ?? device.effectiveLabel
+      }
+      const changed =
+        Object.keys(current).length !== Object.keys(next).length ||
+        Object.entries(next).some(([key, value]) => current[key] !== value)
+      return changed ? next : current
+    })
+  }, [knownDevices])
+
+  const saveDeviceName = useCallback((deviceId: string, isOwn: boolean) => {
+    const nextValue = (deviceNameInputs[deviceId] || '').trim()
+    if (isOwn) {
+      const persisted = persistOwnDeviceLabel(nextValue || tabRegistry.deviceLabel)
+      dispatch(setTabRegistryDeviceLabel(persisted))
+      setDeviceNameInputs((current) => ({ ...current, [deviceId]: persisted }))
+      return
+    }
+    const aliases = persistDeviceAlias(deviceId, nextValue || undefined)
+    dispatch(setTabRegistryDeviceAliases(aliases))
+    const fallbackLabel = knownDevices.find((d) => d.deviceId === deviceId)?.baseLabel || ''
+    setDeviceNameInputs((current) => ({
+      ...current,
+      [deviceId]: aliases[deviceId] || fallbackLabel,
+    }))
+  }, [deviceNameInputs, dispatch, knownDevices, tabRegistry.deviceLabel])
+
   useEffect(() => {
     let cancelled = false
 
@@ -524,6 +602,40 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               />
             </SettingsRow>
 
+          </SettingsSection>
+
+          <SettingsSection
+            title="Devices"
+            description="Rename devices for the Tabs workspace. Remote device aliases apply only on this machine."
+          >
+            {knownDevices.map((device) => (
+              <SettingsRow
+                key={device.deviceId}
+                label={device.isOwn ? 'This machine' : device.baseLabel}
+                description={device.isOwn ? 'Renaming this updates what other machines see.' : 'Alias stored locally on this machine only.'}
+              >
+                <div className="flex w-full items-center gap-2 md:w-auto">
+                  <input
+                    type="text"
+                    value={deviceNameInputs[device.deviceId] ?? device.effectiveLabel}
+                    onChange={(event) => setDeviceNameInputs((current) => ({
+                      ...current,
+                      [device.deviceId]: event.target.value,
+                    }))}
+                    className="h-10 w-full min-w-[14rem] px-3 text-sm bg-muted border-0 rounded-md focus:outline-none focus:ring-1 focus:ring-border md:h-8 md:w-[20rem]"
+                    aria-label={`Device name for ${device.effectiveLabel}`}
+                    placeholder={device.baseLabel}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveDeviceName(device.deviceId, device.isOwn)}
+                    className="h-10 px-3 text-sm rounded-md border border-border hover:bg-muted md:h-8"
+                  >
+                    Save
+                  </button>
+                </div>
+              </SettingsRow>
+            ))}
           </SettingsSection>
 
           {/* Sidebar */}

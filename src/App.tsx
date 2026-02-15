@@ -26,6 +26,7 @@ import { useTurnCompletionNotifications } from '@/hooks/useTurnCompletionNotific
 import { useDrag } from '@use-gesture/react'
 import { installCrossTabSync } from '@/store/crossTabSync'
 import { startTabRegistrySync } from '@/store/tabRegistrySync'
+import { resolveAndPersistDeviceMeta, setTabRegistryDeviceMeta } from '@/store/tabRegistrySlice'
 import Sidebar, { AppView } from '@/components/Sidebar'
 import TabBar from '@/components/TabBar'
 import TabContent from '@/components/TabContent'
@@ -332,12 +333,20 @@ export default function App() {
       }
 
       try {
-        const platformInfo = await api.get<{ platform: string; availableClis?: Record<string, boolean> }>('/api/platform')
+        const platformInfo = await api.get<{
+          platform: string
+          availableClis?: Record<string, boolean>
+          hostName?: string
+        }>('/api/platform')
         if (!cancelled) {
           dispatch(setPlatform(platformInfo.platform))
           if (platformInfo.availableClis) {
             dispatch(setAvailableClis(platformInfo.availableClis))
           }
+          dispatch(setTabRegistryDeviceMeta(resolveAndPersistDeviceMeta({
+            platform: platformInfo.platform,
+            hostName: platformInfo.hostName,
+          })))
         }
       } catch (err: any) {
         console.warn('Failed to load platform info', err)
