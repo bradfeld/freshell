@@ -13,6 +13,7 @@ import { copyText, readText } from '@/lib/clipboard'
 import { registerTerminalActions } from '@/lib/pane-action-registry'
 import { consumeTerminalRestoreRequestId, addTerminalRestoreRequestId } from '@/lib/terminal-restore'
 import { isTerminalPasteShortcut } from '@/lib/terminal-input-policy'
+import { useMobile } from '@/hooks/useMobile'
 import {
   createTurnCompleteSignalParserState,
   extractTurnCompleteSignals,
@@ -44,6 +45,7 @@ const SESSION_ACTIVITY_THROTTLE_MS = 5000
 const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
 const RATE_LIMIT_RETRY_BASE_MS = 250
 const RATE_LIMIT_RETRY_MAX_MS = 1000
+const KEYBOARD_INSET_ACTIVATION_PX = 80
 
 const SEARCH_DECORATIONS = {
   matchBackground: '#515C6A',
@@ -74,6 +76,7 @@ interface TerminalViewProps {
 
 export default function TerminalView({ tabId, paneId, paneContent, hidden }: TerminalViewProps) {
   const dispatch = useAppDispatch()
+  const isMobile = useMobile()
   const tab = useAppSelector((s) => s.tabs.tabs.find((t) => t.id === tabId))
   const activeTabId = useAppSelector((s) => s.tabs.activeTabId)
   const activePaneId = useAppSelector((s) => s.panes.activePane[tabId])
@@ -91,6 +94,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ resultIndex: number; resultCount: number } | null>(null)
+  const [keyboardInsetPx, setKeyboardInsetPx] = useState(0)
   const setPendingLinkUriRef = useRef(setPendingLinkUri)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -179,6 +183,39 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   useEffect(() => {
     lastSessionActivityAtRef.current = 0
   }, [terminalContent?.resumeSessionId])
+
+  useEffect(() => {
+    if (!isMobile || typeof window === 'undefined' || !window.visualViewport) {
+      setKeyboardInsetPx(0)
+      return
+    }
+
+    const viewport = window.visualViewport
+    let rafId: number | null = null
+
+    const updateKeyboardInset = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+      }
+      rafId = requestAnimationFrame(() => {
+        const rawInset = Math.max(0, window.innerHeight - (viewport.height + viewport.offsetTop))
+        const nextInset = rawInset >= KEYBOARD_INSET_ACTIVATION_PX ? Math.round(rawInset) : 0
+        setKeyboardInsetPx((prev) => (prev === nextInset ? prev : nextInset))
+      })
+    }
+
+    updateKeyboardInset()
+    viewport.addEventListener('resize', updateKeyboardInset)
+    viewport.addEventListener('scroll', updateKeyboardInset)
+
+    return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+      }
+      viewport.removeEventListener('resize', updateKeyboardInset)
+      viewport.removeEventListener('scroll', updateKeyboardInset)
+    }
+  }, [isMobile])
 
   // Helper to update pane content - uses ref to avoid recreation on content changes
   // This is CRITICAL: if updateContent depended on terminalContent directly,
@@ -944,6 +981,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   }
 
   const showSpinner = terminalContent.status === 'creating' || isAttaching
+  const terminalContainerStyle = useMemo(() => {
+    if (!isMobile) return undefined
+
+    return {
+      touchAction: 'none' as const,
+      ...(keyboardInsetPx > 0 ? { height: `calc(100% - ${keyboardInsetPx}px)` } : {}),
+    }
+  }, [isMobile, keyboardInsetPx])
 
   return (
     <div
@@ -952,7 +997,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       data-pane-id={paneId}
       data-tab-id={tabId}
     >
-      <div ref={containerRef} className="h-full w-full" />
+      <div
+        ref={containerRef}
+        data-testid="terminal-xterm-container"
+        className="h-full w-full"
+        style={terminalContainerStyle}
+      />
       {showSpinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
           <div className="flex flex-col items-center gap-3">

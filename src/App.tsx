@@ -602,12 +602,12 @@ export default function App() {
         )}
         {/* Sidebar - on mobile it overlays, on desktop it's inline */}
         {!sidebarCollapsed && (
-          <div className={isMobile ? 'absolute left-0 top-0 bottom-0 z-20' : 'contents'}>
+          <div className={isMobile ? 'absolute inset-y-0 left-0 right-0 z-20' : 'contents'}>
             <Sidebar view={view} onNavigate={(v) => {
               setView(v)
               // On mobile, collapse sidebar after navigation
               if (isMobile) toggleSidebarCollapse()
-            }} width={sidebarWidth} />
+            }} width={sidebarWidth} fullWidth={isMobile} />
             {!isMobile && (
               <PaneDivider
                 direction="horizontal"
