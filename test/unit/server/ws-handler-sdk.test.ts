@@ -169,6 +169,7 @@ describe('WS Handler SDK Integration', () => {
     let mockSdkBridge: any
 
     beforeEach(async () => {
+      process.env.AUTH_TOKEN = 'testtoken-testtoken'
       server = http.createServer()
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
       registry = new TerminalRegistry()
@@ -197,6 +198,7 @@ describe('WS Handler SDK Integration', () => {
     })
 
     afterEach(async () => {
+      delete process.env.AUTH_TOKEN
       handler.close()
       registry.shutdown()
       if (server.listening) {
@@ -545,6 +547,7 @@ describe('WS Handler SDK Integration', () => {
     let registry: TerminalRegistry
 
     beforeEach(async () => {
+      process.env.AUTH_TOKEN = 'testtoken-testtoken'
       server = http.createServer()
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
       registry = new TerminalRegistry()
@@ -554,6 +557,7 @@ describe('WS Handler SDK Integration', () => {
     })
 
     afterEach(async () => {
+      delete process.env.AUTH_TOKEN
       handler.close()
       registry.shutdown()
       if (server.listening) {
