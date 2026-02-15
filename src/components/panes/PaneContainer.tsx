@@ -560,8 +560,7 @@ function renderContent(tabId: string, paneId: string, content: PaneContent, isOn
   if (content.kind === 'terminal') {
     return (
       <ErrorBoundary key={paneId} label="Terminal">
-        {/* Keep pane-specific key on terminal to preserve lifecycle behavior across pane reuse */}
-        <TerminalView key={paneId} tabId={tabId} paneId={paneId} paneContent={content} hidden={hidden} />
+        <TerminalView tabId={tabId} paneId={paneId} paneContent={content} hidden={hidden} />
       </ErrorBoundary>
     )
   }
@@ -593,7 +592,7 @@ function renderContent(tabId: string, paneId: string, content: PaneContent, isOn
   if (content.kind === 'claude-chat') {
     return (
       <ErrorBoundary key={paneId} label="Chat">
-        <ClaudeChatView key={paneId} tabId={tabId} paneId={paneId} paneContent={content} hidden={hidden} />
+        <ClaudeChatView tabId={tabId} paneId={paneId} paneContent={content} hidden={hidden} />
       </ErrorBoundary>
     )
   }

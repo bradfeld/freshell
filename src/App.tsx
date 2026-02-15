@@ -805,12 +805,12 @@ export default function App() {
                   >
                     <span className="truncate">🐚🔥freshell</span>
                     {updateAvailable && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
-                  </button>
-                </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {updateAvailable ? (
-                  <div>
-                    <div>v{currentVersion} - {latestVersion ? `v${latestVersion} available` : 'update available'}</div>
+                </button>
+              </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {updateAvailable ? (
+                    <div>
+                      <div>v{currentVersion} - {latestVersion ? `v${latestVersion} available` : 'update available'}</div>
                       <div className="text-muted-foreground">Click for update instructions</div>
                     </div>
                   ) : (

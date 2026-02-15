@@ -25,9 +25,9 @@ export function findLocalFilePaths(line: string): FilePathMatch[] {
   const tildeRegex = /~\/[^\s"')\]>,;`]+/g
   let match
   while ((match = tildeRegex.exec(line)) !== null) {
-    const path = stripTrailingPunctuation(match[0])
-    if (path.length >= 3) {
-      results.push({ path, startIndex: match.index, endIndex: match.index + path.length })
+    const filePath = stripTrailingPunctuation(match[0])
+    if (filePath.length >= 3) {
+      results.push({ path: filePath, startIndex: match.index, endIndex: match.index + filePath.length })
     }
   }
 
@@ -46,12 +46,12 @@ export function findLocalFilePaths(line: string): FilePathMatch[] {
       if (/[a-zA-Z]+:$/.test(before)) continue
     }
 
-    const path = stripTrailingPunctuation(raw)
-    if (path === '/') continue
+    const filePath = stripTrailingPunctuation(raw)
+    if (filePath === '/') continue
     // Require either multiple segments or a file extension for single-segment paths
-    if (!path.includes('/', 1) && !/\.[\w]+$/.test(path)) continue
+    if (!filePath.includes('/', 1) && !/\.[\w]+$/.test(filePath)) continue
 
-    results.push({ path, startIndex: pathStart, endIndex: pathStart + path.length })
+    results.push({ path: filePath, startIndex: pathStart, endIndex: pathStart + filePath.length })
   }
 
   return results
