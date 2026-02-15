@@ -8,7 +8,6 @@ export interface NetworkStatusResponse {
   lanIps: string[]
   machineHostname: string
   rebindScheduled?: boolean
-  mdns: { enabled: boolean; hostname: string } | null
   firewall: {
     platform: string
     active: boolean
@@ -56,7 +55,7 @@ let activePollingAbort: AbortController | null = null
 
 export const configureNetwork = createAsyncThunk(
   'network/configure',
-  async (config: { host: string; configured: boolean; mdns: { enabled: boolean; hostname: string } }, { dispatch }) => {
+  async (config: { host: string; configured: boolean }, { dispatch }) => {
     const response = await api.post<NetworkStatusResponse>('/api/network/configure', config)
     if (response.rebindScheduled) {
       if (activePollingAbort) activePollingAbort.abort()
