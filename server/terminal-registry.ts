@@ -191,6 +191,12 @@ export type BindSessionResult =
   | { ok: false; reason: 'terminal_missing' | 'mode_mismatch' | 'invalid_session_id' }
   | BindResult
 
+export type RepairLegacySessionOwnersResult = {
+  repaired: boolean
+  canonicalTerminalId?: string
+  clearedTerminalIds: string[]
+}
+
 export class ChunkRingBuffer {
   private chunks: string[] = []
   private size = 0
@@ -1249,6 +1255,68 @@ export class TerminalRegistry extends EventEmitter {
       if (term.resumeSessionId === sessionId) return term
     }
     return undefined
+  }
+
+  getCanonicalRunningTerminalBySession(mode: TerminalMode, sessionId: string): TerminalRecord | undefined {
+    if (!modeSupportsResume(mode)) return undefined
+
+    const owner = this.bindingAuthority.ownerForSession(mode as CodingCliProviderName, sessionId)
+    if (owner) {
+      const rec = this.terminals.get(owner)
+      if (rec && rec.mode === mode && rec.status === 'running' && rec.resumeSessionId === sessionId) {
+        return rec
+      }
+      this.bindingAuthority.unbindTerminal(owner)
+    }
+
+    const matches = Array.from(this.terminals.values())
+      .filter((term) => term.mode === mode && term.status === 'running' && term.resumeSessionId === sessionId)
+      .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+
+    return matches[0]
+  }
+
+  repairLegacySessionOwners(mode: TerminalMode, sessionId: string): RepairLegacySessionOwnersResult {
+    if (!modeSupportsResume(mode)) {
+      return { repaired: false, clearedTerminalIds: [] }
+    }
+
+    const matches = Array.from(this.terminals.values())
+      .filter((term) => term.mode === mode && term.status === 'running' && term.resumeSessionId === sessionId)
+      .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+    if (matches.length === 0) {
+      return { repaired: false, clearedTerminalIds: [] }
+    }
+
+    const provider = mode as CodingCliProviderName
+    const canonical = matches[0]
+    const owner = this.bindingAuthority.ownerForSession(provider, sessionId)
+    if (owner && owner !== canonical.terminalId) {
+      this.bindingAuthority.clearSessionOwner(provider, sessionId)
+    }
+
+    const bound = this.bindingAuthority.bind({
+      provider,
+      sessionId,
+      terminalId: canonical.terminalId,
+    })
+    if (bound.ok) {
+      canonical.resumeSessionId = sessionId
+    }
+
+    const clearedTerminalIds: string[] = []
+    for (const duplicate of matches.slice(1)) {
+      this.bindingAuthority.unbindTerminal(duplicate.terminalId)
+      duplicate.resumeSessionId = undefined
+      clearedTerminalIds.push(duplicate.terminalId)
+    }
+
+    const repaired = clearedTerminalIds.length > 0 || bound.ok
+    return {
+      repaired,
+      canonicalTerminalId: canonical.terminalId,
+      clearedTerminalIds,
+    }
   }
 
   /**
