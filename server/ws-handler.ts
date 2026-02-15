@@ -50,6 +50,7 @@ interface LiveWebSocket extends WebSocket {
   isAlive?: boolean
   connectionId?: string
   connectedAt?: number
+  isMobileClient?: boolean
   // Generation counter for chunked session updates to prevent interleaving
   sessionUpdateGeneration?: number
 }
@@ -77,6 +78,11 @@ const ErrorCode = z.enum([
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function isMobileUserAgent(userAgent: string | undefined): boolean {
+  if (!userAgent) return false
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(userAgent)
 }
 
 /**
@@ -532,6 +538,7 @@ export class WsHandler {
     const connectionId = randomUUID()
     ws.connectionId = connectionId
     ws.connectedAt = Date.now()
+    ws.isMobileClient = isMobileUserAgent(userAgent)
 
     const state: ClientState = {
       authenticated: false,

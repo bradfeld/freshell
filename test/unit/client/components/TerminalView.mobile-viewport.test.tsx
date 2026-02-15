@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, cleanup, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import tabsReducer from '@/store/tabsSlice'
@@ -170,7 +170,7 @@ describe('TerminalView mobile viewport handling', () => {
 
     const terminalContainer = getByTestId('terminal-xterm-container')
     expect(terminalContainer.style.touchAction).toBe('none')
-    expect(terminalContainer.style.height).toBe('calc(100% - 120px)')
+    expect(terminalContainer.style.height).toBe('calc(100% - 176px)')
 
     act(() => {
       viewport.height = 860 // Inset 40px: below activation threshold
@@ -178,7 +178,7 @@ describe('TerminalView mobile viewport handling', () => {
     })
 
     await waitFor(() => {
-      expect(terminalContainer.style.height).toBe('')
+      expect(terminalContainer.style.height).toBe('calc(100% - 56px)')
     })
   })
 
@@ -198,5 +198,31 @@ describe('TerminalView mobile viewport handling', () => {
     const terminalContainer = getByTestId('terminal-xterm-container')
     expect(terminalContainer.style.touchAction || '').toBe('')
     expect(terminalContainer.style.height).toBe('')
+  })
+
+  it('renders mobile key toolbar and sends tab input', async () => {
+    const viewport = createVisualViewportMock(860, 0)
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
+    ;(globalThis as any).setMobileForTest(true)
+
+    const store = createStore()
+    render(
+      <Provider store={store}>
+        <TerminalView
+          tabId="tab-1"
+          paneId="pane-1"
+          paneContent={{ ...createTerminalContent(), terminalId: 'term-1' }}
+          hidden={false}
+        />
+      </Provider>
+    )
+
+    expect(screen.getByTestId('mobile-terminal-toolbar')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Send Tab' }))
+
+    await waitFor(() => {
+      expect(mockSend).toHaveBeenCalledWith({ type: 'terminal.input', terminalId: 'term-1', data: '\t' })
+    })
   })
 })
