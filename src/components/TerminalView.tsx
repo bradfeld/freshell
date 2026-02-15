@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
-import { updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
-import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
+import { addTab, updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
+import { initLayout, updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { updateSettingsLocal } from '@/store/settingsSlice'
 import { recordTurnComplete, clearTabAttention, clearPaneAttention } from '@/store/turnCompletionSlice'
@@ -14,6 +14,7 @@ import { registerTerminalActions } from '@/lib/pane-action-registry'
 import { consumeTerminalRestoreRequestId, addTerminalRestoreRequestId } from '@/lib/terminal-restore'
 import { isTerminalPasteShortcut } from '@/lib/terminal-input-policy'
 import { useMobile } from '@/hooks/useMobile'
+import { findLocalFilePaths } from '@/lib/path-utils'
 import {
   createTurnCompleteSignalParserState,
   extractTurnCompleteSignals,
@@ -633,6 +634,39 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     term.open(containerRef.current)
 
+    // Register custom link provider for clickable local file paths
+    const filePathLinkDisposable = term.registerLinkProvider({
+      provideLinks(bufferLineNumber: number, callback: (links: import('xterm').ILink[] | undefined) => void) {
+        const bufferLine = term.buffer.active.getLine(bufferLineNumber - 1)
+        if (!bufferLine) { callback(undefined); return }
+        const text = bufferLine.translateToString()
+        const matches = findLocalFilePaths(text)
+        if (matches.length === 0) { callback(undefined); return }
+        callback(matches.map((m) => ({
+          range: {
+            start: { x: m.startIndex + 1, y: bufferLineNumber },
+            end: { x: m.endIndex, y: bufferLineNumber },
+          },
+          text: m.path,
+          activate: () => {
+            const id = nanoid()
+            dispatch(addTab({ id, mode: 'shell' }))
+            dispatch(initLayout({
+              tabId: id,
+              content: {
+                kind: 'editor',
+                filePath: m.path,
+                language: null,
+                readOnly: false,
+                content: '',
+                viewMode: 'source',
+              },
+            }))
+          },
+        })))
+      },
+    })
+
     const unregisterActions = registerTerminalActions(paneId, {
       copySelection: async () => {
         const selection = term.getSelection()
@@ -746,6 +780,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     ro.observe(containerRef.current)
 
     return () => {
+      filePathLinkDisposable.dispose()
       ro.disconnect()
       unregisterActions()
       searchResultsDisposable.dispose()
