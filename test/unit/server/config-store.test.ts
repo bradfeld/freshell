@@ -673,7 +673,7 @@ describe('ConfigStore', () => {
         configured: false,
         mdns: {
           enabled: false,
-          hostname: 'freshell',
+          hostname: os.hostname().replace(/\.local$/, '').toLowerCase(),
         },
       })
     })

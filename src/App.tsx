@@ -81,6 +81,8 @@ export default function App() {
   const networkStatus = useAppSelector((s) => s.network.status)
 
   const networkLoading = useAppSelector((s) => s.network.loading)
+  const networkConfiguring = useAppSelector((s) => s.network.configuring)
+  const networkBusy = networkLoading || networkConfiguring || !!networkStatus?.rebinding
 
   const [view, setView] = useState<AppView>('terminal')
   const [showSharePanel, setShowSharePanel] = useState(false)
@@ -510,7 +512,7 @@ export default function App() {
             title="Share LAN access"
             aria-label="Share"
           >
-            {networkLoading ? (
+            {networkBusy ? (
               <Loader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
             ) : (
               <Share2 className="h-3.5 w-3.5 text-muted-foreground" />
