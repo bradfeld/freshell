@@ -6,6 +6,8 @@ type TerminalSearchBarProps = {
   onFindNext: () => void
   onFindPrevious: () => void
   onClose: () => void
+  resultIndex?: number
+  resultCount?: number
 }
 
 export function TerminalSearchBar({
@@ -14,6 +16,8 @@ export function TerminalSearchBar({
   onFindNext,
   onFindPrevious,
   onClose,
+  resultIndex,
+  resultCount,
 }: TerminalSearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -45,6 +49,11 @@ export function TerminalSearchBar({
         }}
         className="h-8 w-52 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-border"
       />
+      {resultCount !== undefined && (
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          {resultCount === 0 ? 'No results' : `${(resultIndex ?? 0) + 1} of ${resultCount}`}
+        </span>
+      )}
       <button
         type="button"
         className="h-8 rounded-md px-2 text-xs"

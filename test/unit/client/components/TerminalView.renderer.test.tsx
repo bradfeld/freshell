@@ -59,6 +59,8 @@ vi.mock('@/components/terminal/terminal-runtime', () => ({
       fit: vi.fn(),
       findNext: vi.fn(() => true),
       findPrevious: vi.fn(() => true),
+      clearDecorations: vi.fn(),
+      onDidChangeResults: vi.fn(() => ({ dispose: vi.fn() })),
       dispose: vi.fn(),
       webglActive: () => webgl,
       emitContextLoss: () => {
