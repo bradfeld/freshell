@@ -12,7 +12,7 @@ import { logger, setLogLevel } from './logger.js'
 import { requestLogger } from './request-logger.js'
 import { validateStartupSecurity, httpAuthMiddleware, timingSafeCompare } from './auth.js'
 import { configStore } from './config-store.js'
-import { TerminalRegistry, modeSupportsResume } from './terminal-registry.js'
+import { TerminalRegistry } from './terminal-registry.js'
 import { WsHandler } from './ws-handler.js'
 import { SessionsSyncService } from './sessions-sync/service.js'
 import { claudeIndexer } from './claude-indexer.js'
@@ -40,6 +40,7 @@ import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
 import { collectCandidateDirectories } from './candidate-dirs.js'
 import { createTabsRegistryStore } from './tabs-registry/store.js'
 import { checkForUpdate } from './updater/version-checker.js'
+import { SessionAssociationCoordinator } from './session-association-coordinator.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -206,6 +207,7 @@ async function main() {
   networkManager.setWsHandler(wsHandler)
 
   const sessionsSync = new SessionsSyncService(wsHandler)
+  const associationCoordinator = new SessionAssociationCoordinator(registry, ASSOCIATION_MAX_AGE_MS)
 
   const broadcastTerminalMetaUpserts = (upsert: ReturnType<TerminalMetadataService['list']>) => {
     if (upsert.length === 0) return
@@ -903,42 +905,37 @@ async function main() {
     sessionsSync.publish(projects)
     const associationMetaUpserts: ReturnType<TerminalMetadataService['list']> = []
     const pendingMetadataSync = new Map<string, CodingCliSession>()
+    const nonClaudeProjects = projects.map((project) => ({
+      ...project,
+      sessions: project.sessions.filter((session) => session.provider !== 'claude'),
+    }))
+    for (const session of associationCoordinator.collectNewOrAdvanced(nonClaudeProjects)) {
+      const result = associationCoordinator.associateSingleSession(session)
+      if (!result.associated || !result.terminalId) continue
+      log.info({
+        terminalId: result.terminalId,
+        sessionId: session.sessionId,
+        provider: session.provider,
+      }, 'Associating terminal with coding CLI session')
+      try {
+        wsHandler.broadcast({
+          type: 'terminal.session.associated' as const,
+          terminalId: result.terminalId,
+          sessionId: session.sessionId,
+        })
+        const metaUpsert = terminalMetadata.associateSession(
+          result.terminalId,
+          session.provider,
+          session.sessionId,
+        )
+        if (metaUpsert) associationMetaUpserts.push(metaUpsert)
+      } catch (err) {
+        log.warn({ err, terminalId: result.terminalId }, 'Failed to broadcast session association')
+      }
+    }
 
     for (const project of projects) {
       for (const session of project.sessions) {
-        // Session association for non-Claude providers (e.g. Codex).
-        // Runs on every update — idempotent because findUnassociatedTerminals
-        // excludes already-associated terminals.
-        // Time guard: only associate if the session is recent relative to the terminal,
-        // preventing stale sessions from previous server runs from being matched.
-        if (session.provider !== 'claude' && modeSupportsResume(session.provider) && session.cwd) {
-          const unassociated = registry.findUnassociatedTerminals(session.provider, session.cwd)
-          if (unassociated.length > 0) {
-            const term = unassociated[0]
-            if (session.updatedAt >= term.createdAt - ASSOCIATION_MAX_AGE_MS) {
-              log.info({ terminalId: term.terminalId, sessionId: session.sessionId, provider: session.provider }, 'Associating terminal with coding CLI session')
-              const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
-              if (associated) {
-                try {
-                  wsHandler.broadcast({
-                    type: 'terminal.session.associated' as const,
-                    terminalId: term.terminalId,
-                    sessionId: session.sessionId,
-                  })
-                  const metaUpsert = terminalMetadata.associateSession(
-                    term.terminalId,
-                    session.provider,
-                    session.sessionId,
-                  )
-                  if (metaUpsert) associationMetaUpserts.push(metaUpsert)
-                } catch (err) {
-                  log.warn({ err, terminalId: term.terminalId }, 'Failed to broadcast session association')
-                }
-              }
-            }
-          }
-        }
-
         const matchingTerminals = registry.findTerminalsBySession(session.provider, session.sessionId, session.cwd)
         for (const term of matchingTerminals) {
           pendingMetadataSync.set(term.terminalId, session)
@@ -994,26 +991,31 @@ async function main() {
   // Broadcast message type: { type: 'terminal.session.associated', terminalId: string, sessionId: string }
   claudeIndexer.onNewSession((session) => {
     if (!session.cwd) return
-
-    const unassociated = registry.findUnassociatedClaudeTerminals(session.cwd)
-    if (unassociated.length === 0) return
-
-    // Only associate the oldest terminal (first in sorted list)
-    // This prevents incorrect associations when multiple terminals share the same cwd
-    const term = unassociated[0]
-    log.info({ terminalId: term.terminalId, sessionId: session.sessionId }, 'Associating terminal with new Claude session')
-    const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
-    if (!associated) {
-      log.warn({ terminalId: term.terminalId, sessionId: session.sessionId }, 'Skipping invalid Claude session association')
-      return
-    }
+    const shouldAssociate = associationCoordinator.noteSession({
+      provider: 'claude',
+      sessionId: session.sessionId,
+      projectPath: session.projectPath,
+      updatedAt: session.updatedAt,
+      cwd: session.cwd,
+    })
+    if (!shouldAssociate) return
+    const result = associationCoordinator.associateSingleSession({
+      provider: 'claude',
+      sessionId: session.sessionId,
+      projectPath: session.projectPath,
+      updatedAt: session.updatedAt,
+      cwd: session.cwd,
+    })
+    if (!result.associated || !result.terminalId) return
+    const terminalId = result.terminalId
+    log.info({ terminalId, sessionId: session.sessionId }, 'Associating terminal with new Claude session')
     try {
       wsHandler.broadcast({
         type: 'terminal.session.associated' as const,
-        terminalId: term.terminalId,
+        terminalId,
         sessionId: session.sessionId,
       })
-      const metaUpsert = terminalMetadata.associateSession(term.terminalId, 'claude', session.sessionId)
+      const metaUpsert = terminalMetadata.associateSession(terminalId, 'claude', session.sessionId)
       if (metaUpsert) {
         broadcastTerminalMetaUpserts([metaUpsert])
       }
@@ -1024,12 +1026,12 @@ async function main() {
     void (async () => {
       const latestClaudeSession = findCodingCliSession('claude', session.sessionId)
       if (!latestClaudeSession) return
-      const upsert = await terminalMetadata.applySessionMetadata(term.terminalId, latestClaudeSession)
+      const upsert = await terminalMetadata.applySessionMetadata(terminalId, latestClaudeSession)
       if (upsert) {
         broadcastTerminalMetaUpserts([upsert])
       }
     })().catch((err) => {
-      log.warn({ err, terminalId: term.terminalId, sessionId: session.sessionId }, 'Failed to apply Claude terminal metadata after association')
+      log.warn({ err, terminalId, sessionId: session.sessionId }, 'Failed to apply Claude terminal metadata after association')
     })
   })
 

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { TerminalRegistry, modeSupportsResume } from '../../server/terminal-registry'
+import { TerminalRegistry } from '../../server/terminal-registry'
 import { ClaudeSessionIndexer, ClaudeSession } from '../../server/claude-indexer'
 import type { CodingCliSession } from '../../server/coding-cli/types'
 import { TerminalMetadataService } from '../../server/terminal-metadata-service'
+import { SessionAssociationCoordinator } from '../../server/session-association-coordinator'
 
 vi.mock('node-pty', () => ({
   spawn: vi.fn(() => ({
@@ -604,34 +605,33 @@ describe('Codex Session-Terminal Association via onUpdate', () => {
   // Max age difference (ms) between a session's updatedAt and a terminal's createdAt
   // for association to be considered valid. Prevents binding to stale sessions.
   const ASSOCIATION_MAX_AGE_MS = 30_000
+  const coordinators = new WeakMap<TerminalRegistry, SessionAssociationCoordinator>()
 
   function associateOnUpdate(
     registry: TerminalRegistry,
     projects: { projectPath: string; sessions: CodingCliSession[] }[],
     broadcasts: any[],
   ) {
-    for (const project of projects) {
-      for (const session of project.sessions) {
-        if (session.provider === 'claude') continue
-        if (!modeSupportsResume(session.provider)) continue
-        if (!session.cwd) continue
+    let coordinator = coordinators.get(registry)
+    if (!coordinator) {
+      coordinator = new SessionAssociationCoordinator(registry, ASSOCIATION_MAX_AGE_MS)
+      coordinators.set(registry, coordinator)
+    }
 
-        const unassociated = registry.findUnassociatedTerminals(session.provider, session.cwd)
-        if (unassociated.length === 0) continue
+    const nonClaudeProjects: { projectPath: string; sessions: CodingCliSession[] }[] = projects.map((project) => ({
+      ...project,
+      sessions: project.sessions.filter((session) => session.provider !== 'claude'),
+    }))
 
-        const term = unassociated[0]
-        // Only associate if the session is recent relative to the terminal —
-        // prevents binding to old sessions from previous server runs
-        if (session.updatedAt < term.createdAt - ASSOCIATION_MAX_AGE_MS) continue
-
-        const associated = registry.setResumeSessionId(term.terminalId, session.sessionId)
-        if (!associated) continue
+    const sessionsToAssociate = coordinator.collectNewOrAdvanced(nonClaudeProjects)
+    for (const session of sessionsToAssociate) {
+      const result = coordinator.associateSingleSession(session)
+      if (!result.associated || !result.terminalId) continue
         broadcasts.push({
           type: 'terminal.session.associated',
-          terminalId: term.terminalId,
+          terminalId: result.terminalId,
           sessionId: session.sessionId,
         })
-      }
     }
   }
 
