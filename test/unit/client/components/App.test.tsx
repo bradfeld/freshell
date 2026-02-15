@@ -149,7 +149,6 @@ function makeNetworkStatus(overrides: Partial<NetworkStatusResponse> = {}): Netw
     port: 3001,
     lanIps: ['192.168.1.100'],
     machineHostname: 'test-host',
-    mdns: { enabled: false, hostname: 'freshell' },
     firewall: { platform: 'linux', active: false, portOpen: null, commands: [], configuring: false },
     rebinding: false,
     devMode: false,
@@ -278,27 +277,6 @@ describe('App Component - Share Button', () => {
     await waitFor(() => {
       expect(screen.getByText('Share Access')).toBeInTheDocument()
       expect(screen.getByText('http://10.0.0.5:3001')).toBeInTheDocument()
-    })
-  })
-
-  it('share panel shows mDNS hostname when enabled', async () => {
-    const store = createTestStore()
-    act(() => {
-      store.dispatch(setNetworkStatus(makeNetworkStatus({
-        configured: true,
-        host: '0.0.0.0',
-        accessUrl: 'http://192.168.1.100:3001',
-        mdns: { enabled: true, hostname: 'myshell' },
-      })))
-    })
-
-    renderApp(store)
-
-    const shareButton = screen.getByTitle('Share LAN access')
-    fireEvent.click(shareButton)
-
-    await waitFor(() => {
-      expect(screen.getByText('myshell.local')).toBeInTheDocument()
     })
   })
 

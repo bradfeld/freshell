@@ -19,6 +19,8 @@ const wsMocks = vi.hoisted(() => ({
 const runtimeMocks = vi.hoisted(() => ({
   findNext: vi.fn(() => true),
   findPrevious: vi.fn(() => true),
+  clearDecorations: vi.fn(),
+  onDidChangeResults: vi.fn(() => ({ dispose: vi.fn() })),
 }))
 
 let keyHandler: ((event: KeyboardEvent) => boolean) | null = null
@@ -37,6 +39,8 @@ vi.mock('@/components/terminal/terminal-runtime', () => ({
     fit: vi.fn(),
     findNext: runtimeMocks.findNext,
     findPrevious: runtimeMocks.findPrevious,
+    clearDecorations: runtimeMocks.clearDecorations,
+    onDidChangeResults: runtimeMocks.onDidChangeResults,
     dispose: vi.fn(),
     webglActive: vi.fn(() => false),
   }),
@@ -171,10 +175,22 @@ describe('terminal search flow (e2e)', () => {
     const input = await screen.findByRole('textbox', { name: 'Terminal search' })
 
     fireEvent.change(input, { target: { value: 'needle' } })
-    expect(runtimeMocks.findNext).toHaveBeenCalledWith('needle', { caseSensitive: false, incremental: true })
+    expect(runtimeMocks.findNext).toHaveBeenCalledWith('needle', expect.objectContaining({
+      caseSensitive: false,
+      incremental: true,
+      decorations: expect.objectContaining({
+        matchOverviewRuler: expect.any(String),
+        activeMatchColorOverviewRuler: expect.any(String),
+      }),
+    }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Next match' }))
     fireEvent.click(screen.getByRole('button', { name: 'Previous match' }))
-    expect(runtimeMocks.findPrevious).toHaveBeenCalledWith('needle', { caseSensitive: false, incremental: true })
+    expect(runtimeMocks.findPrevious).toHaveBeenCalledWith('needle', expect.objectContaining({
+      decorations: expect.objectContaining({
+        matchOverviewRuler: expect.any(String),
+        activeMatchColorOverviewRuler: expect.any(String),
+      }),
+    }))
   })
 })

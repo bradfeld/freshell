@@ -1095,48 +1095,6 @@ describe('SettingsView Component', () => {
       expect(screen.getByText(/remote access/i)).toBeInTheDocument()
     })
 
-    it('renders mDNS hostname field when remote access enabled', () => {
-      const store = configureStore({
-        reducer: {
-          settings: settingsReducer,
-          tabs: tabsReducer,
-          connection: connectionReducer,
-          sessions: sessionsReducer,
-          network: networkReducer,
-        },
-        preloadedState: {
-          settings: {
-            settings: defaultSettings,
-            loaded: true,
-            lastSavedAt: undefined,
-          },
-          network: {
-            status: {
-              configured: true,
-              host: '0.0.0.0' as const,
-              port: 3001,
-              lanIps: ['192.168.1.100'],
-              machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
-              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
-              rebinding: false,
-              devMode: false,
-              accessUrl: 'http://192.168.1.100:3001/?token=abc',
-            },
-            loading: false,
-            configuring: false,
-            error: null,
-          },
-        },
-      })
-      render(
-        <Provider store={store}>
-          <SettingsView onNavigate={vi.fn()} />
-        </Provider>,
-      )
-      expect(screen.getByLabelText(/mDNS hostname/i)).toBeInTheDocument()
-    })
-
     it('shows firewall Fix button for WSL2 even with empty commands', () => {
       const store = configureStore({
         reducer: {
@@ -1159,7 +1117,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false },
               rebinding: false,
               devMode: false,
@@ -1201,7 +1158,6 @@ describe('SettingsView Component', () => {
               port: 3001,
               lanIps: ['192.168.1.100'],
               machineHostname: 'my-laptop',
-              mdns: { enabled: true, hostname: 'freshell' },
               firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
               rebinding: false,
               devMode: true,
@@ -1222,6 +1178,216 @@ describe('SettingsView Component', () => {
       expect(screen.getByRole('alert')).toBeInTheDocument()
       expect(screen.getByText(/dev mode/i)).toBeInTheDocument()
       expect(screen.getByText(/npm run dev/i)).toBeInTheDocument()
+    })
+
+    it('suppresses dev-mode warning on WSL2', () => {
+      const store = configureStore({
+        reducer: {
+          settings: settingsReducer,
+          tabs: tabsReducer,
+          connection: connectionReducer,
+          sessions: sessionsReducer,
+          network: networkReducer,
+        },
+        preloadedState: {
+          settings: {
+            settings: defaultSettings,
+            loaded: true,
+            lastSavedAt: undefined,
+          },
+          network: {
+            status: {
+              configured: true,
+              host: '0.0.0.0' as const,
+              port: 3001,
+              lanIps: ['192.168.1.100'],
+              machineHostname: 'my-laptop',
+              firewall: { platform: 'wsl2', active: true, portOpen: false, commands: [], configuring: false },
+              rebinding: false,
+              devMode: true,
+              devPort: 5173,
+              accessUrl: 'http://192.168.1.100:5173/?token=abc',
+            },
+            loading: false,
+            configuring: false,
+            error: null,
+          },
+        },
+      })
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} />
+        </Provider>,
+      )
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('disables remote access toggle during rebind', () => {
+      const store = configureStore({
+        reducer: {
+          settings: settingsReducer,
+          tabs: tabsReducer,
+          connection: connectionReducer,
+          sessions: sessionsReducer,
+          network: networkReducer,
+        },
+        preloadedState: {
+          settings: {
+            settings: defaultSettings,
+            loaded: true,
+            lastSavedAt: undefined,
+          },
+          network: {
+            status: {
+              configured: true,
+              host: '0.0.0.0' as const,
+              port: 3001,
+              lanIps: ['192.168.1.100'],
+              machineHostname: 'my-laptop',
+              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+              rebinding: true,
+              devMode: false,
+              accessUrl: 'http://192.168.1.100:3001/?token=abc',
+            },
+            loading: false,
+            configuring: false,
+            error: null,
+          },
+        },
+      })
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} />
+        </Provider>,
+      )
+      const toggle = screen.getByRole('switch', { name: /remote access/i })
+      expect(toggle).toBeDisabled()
+    })
+
+    it('disables remote access toggle during configuring', () => {
+      const store = configureStore({
+        reducer: {
+          settings: settingsReducer,
+          tabs: tabsReducer,
+          connection: connectionReducer,
+          sessions: sessionsReducer,
+          network: networkReducer,
+        },
+        preloadedState: {
+          settings: {
+            settings: defaultSettings,
+            loaded: true,
+            lastSavedAt: undefined,
+          },
+          network: {
+            status: {
+              configured: true,
+              host: '0.0.0.0' as const,
+              port: 3001,
+              lanIps: ['192.168.1.100'],
+              machineHostname: 'my-laptop',
+              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+              rebinding: false,
+              devMode: false,
+              accessUrl: 'http://192.168.1.100:3001/?token=abc',
+            },
+            loading: false,
+            configuring: true,
+            error: null,
+          },
+        },
+      })
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} />
+        </Provider>,
+      )
+      const toggle = screen.getByRole('switch', { name: /remote access/i })
+      expect(toggle).toBeDisabled()
+    })
+
+    it('renders Get link button when access URL is present', () => {
+      const store = configureStore({
+        reducer: {
+          settings: settingsReducer,
+          tabs: tabsReducer,
+          connection: connectionReducer,
+          sessions: sessionsReducer,
+          network: networkReducer,
+        },
+        preloadedState: {
+          settings: {
+            settings: defaultSettings,
+            loaded: true,
+            lastSavedAt: undefined,
+          },
+          network: {
+            status: {
+              configured: true,
+              host: '0.0.0.0' as const,
+              port: 3001,
+              lanIps: ['192.168.1.100'],
+              machineHostname: 'my-laptop',
+              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+              rebinding: false,
+              devMode: false,
+              accessUrl: 'http://192.168.1.100:3001/?token=abc',
+            },
+            loading: false,
+            configuring: false,
+            error: null,
+          },
+        },
+      })
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} />
+        </Provider>,
+      )
+      expect(screen.getByText('Get link')).toBeInTheDocument()
+    })
+
+    it('calls onSharePanel when Get link is clicked', () => {
+      const onSharePanel = vi.fn()
+      const store = configureStore({
+        reducer: {
+          settings: settingsReducer,
+          tabs: tabsReducer,
+          connection: connectionReducer,
+          sessions: sessionsReducer,
+          network: networkReducer,
+        },
+        preloadedState: {
+          settings: {
+            settings: defaultSettings,
+            loaded: true,
+            lastSavedAt: undefined,
+          },
+          network: {
+            status: {
+              configured: true,
+              host: '0.0.0.0' as const,
+              port: 3001,
+              lanIps: ['192.168.1.100'],
+              machineHostname: 'my-laptop',
+              firewall: { platform: 'linux-none', active: false, portOpen: null, commands: [], configuring: false },
+              rebinding: false,
+              devMode: false,
+              accessUrl: 'http://192.168.1.100:3001/?token=abc',
+            },
+            loading: false,
+            configuring: false,
+            error: null,
+          },
+        },
+      })
+      render(
+        <Provider store={store}>
+          <SettingsView onNavigate={vi.fn()} onSharePanel={onSharePanel} />
+        </Provider>,
+      )
+      fireEvent.click(screen.getByText('Get link'))
+      expect(onSharePanel).toHaveBeenCalledOnce()
     })
   })
 })

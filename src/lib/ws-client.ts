@@ -202,6 +202,15 @@ export class WsClient {
           return
         }
 
+        if (event.code === 4009) {
+          // SERVER_SHUTDOWN — server is rebinding and will be back shortly.
+          // Reset backoff for a fast ~1s reconnect.
+          this.reconnectAttempts = 0
+          finishReject(new Error('Server restarting (rebind)'))
+          this.scheduleReconnect()
+          return
+        }
+
         if (wasConnecting) {
           finishReject(new Error('Connection closed before ready'))
         }

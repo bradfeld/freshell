@@ -58,10 +58,6 @@ export const defaultSettings: AppSettings = {
   network: {
     host: '127.0.0.1' as const,
     configured: false,
-    mdns: {
-      enabled: false,
-      hostname: 'freshell',
-    },
   },
 }
 
@@ -108,14 +104,7 @@ export function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): A
       },
     },
     freshclaude: { ...base.freshclaude, ...(patch.freshclaude || {}) },
-  }
-
-  if (patch.network) {
-    merged.network = {
-      ...merged.network,
-      ...patch.network,
-      mdns: { ...merged.network.mdns, ...patch.network?.mdns },
-    }
+    network: { ...base.network, ...(patch.network || {}) },
   }
 
   return {

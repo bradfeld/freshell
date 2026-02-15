@@ -45,12 +45,21 @@ const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
 const RATE_LIMIT_RETRY_BASE_MS = 250
 const RATE_LIMIT_RETRY_MAX_MS = 1000
 
+const SEARCH_DECORATIONS = {
+  matchBackground: '#515C6A',
+  matchOverviewRuler: '#D4AA00',
+  activeMatchBackground: '#EEB04A',
+  activeMatchColorOverviewRuler: '#EEB04A',
+} as const
+
 function createNoopRuntime(): TerminalRuntime {
   return {
     attachAddons: () => {},
     fit: () => {},
     findNext: () => false,
     findPrevious: () => false,
+    clearDecorations: () => {},
+    onDidChangeResults: () => ({ dispose: () => {} }),
     dispose: () => {},
     webglActive: () => false,
   }
@@ -81,6 +90,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const [pendingOsc52Event, setPendingOsc52Event] = useState<Osc52Event | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ resultIndex: number; resultCount: number } | null>(null)
   const setPendingLinkUriRef = useRef(setPendingLinkUri)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -312,18 +322,26 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     ws.send({ type: 'terminal.input', terminalId: tid, data })
   }, [dispatch, tabId, paneId, ws])
 
+  const searchOpts = useMemo(() => ({
+    caseSensitive: false,
+    incremental: true,
+    decorations: SEARCH_DECORATIONS,
+  }), [])
+
   const findNext = useCallback((value: string = searchQuery) => {
     if (!value) return
-    runtimeRef.current?.findNext(value, { caseSensitive: false, incremental: true })
-  }, [searchQuery])
+    runtimeRef.current?.findNext(value, searchOpts)
+  }, [searchQuery, searchOpts])
 
   const findPrevious = useCallback((value: string = searchQuery) => {
     if (!value) return
-    runtimeRef.current?.findPrevious(value, { caseSensitive: false, incremental: true })
-  }, [searchQuery])
+    runtimeRef.current?.findPrevious(value, searchOpts)
+  }, [searchQuery, searchOpts])
 
   const closeSearch = useCallback(() => {
     setSearchOpen(false)
+    setSearchResults(null)
+    runtimeRef.current?.clearDecorations()
     requestAnimationFrame(() => {
       termRef.current?.focus()
     })
@@ -344,6 +362,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     }
 
     const term = new Terminal({
+      allowProposedApi: true,
       convertEol: true,
       cursorBlink: settings.terminal.cursorBlink,
       fontSize: settings.terminal.fontSize,
@@ -375,6 +394,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     termRef.current = term
     runtimeRef.current = runtime
 
+    const searchResultsDisposable = runtime.onDidChangeResults((event) => {
+      setSearchResults({ resultIndex: event.resultIndex, resultCount: event.resultCount })
+    })
+
     term.open(containerRef.current)
 
     const unregisterActions = registerTerminalActions(paneId, {
@@ -393,6 +416,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       clearScrollback: () => term.clear(),
       reset: () => term.reset(),
       hasSelection: () => term.getSelection().length > 0,
+      openSearch: () => setSearchOpen(true),
     })
 
     requestAnimationFrame(() => {
@@ -481,6 +505,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     return () => {
       ro.disconnect()
       unregisterActions()
+      searchResultsDisposable.dispose()
       if (termRef.current === term) {
         runtime.dispose()
         runtimeRef.current = null
@@ -948,6 +973,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           onFindNext={() => findNext()}
           onFindPrevious={() => findPrevious()}
           onClose={closeSearch}
+          resultIndex={searchResults?.resultIndex}
+          resultCount={searchResults?.resultCount}
         />
       )}
       {snapshotWarning && (

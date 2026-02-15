@@ -10,15 +10,6 @@ vi.mock('../../../server/bootstrap.js', () => ({
 vi.mock('is-port-reachable', () => ({
   default: vi.fn().mockResolvedValue(true),
 }))
-vi.mock('bonjour-service', () => {
-  const unpublishAll = vi.fn()
-  const publish = vi.fn().mockReturnValue({ name: 'freshell' })
-  const destroy = vi.fn()
-  return {
-    default: vi.fn().mockImplementation(() => ({ publish, unpublishAll, destroy })),
-    Bonjour: vi.fn().mockImplementation(() => ({ publish, unpublishAll, destroy })),
-  }
-})
 vi.mock('../../../server/firewall.js', () => ({
   detectFirewall: vi.fn().mockResolvedValue({ platform: 'linux-none', active: false }),
   firewallCommands: vi.fn().mockReturnValue([]),
@@ -35,7 +26,6 @@ describe('NetworkManager', () => {
     network: {
       host: '127.0.0.1',
       configured: false,
-      mdns: { enabled: false, hostname: 'freshell' },
     },
   }) {
     let current = structuredClone(initial)
@@ -104,7 +94,6 @@ describe('NetworkManager', () => {
     const result = await manager.configure({
       host: '0.0.0.0',
       configured: true,
-      mdns: { enabled: false, hostname: 'freshell' },
     })
 
     // configure() schedules rebind via setImmediate, does NOT block
@@ -113,7 +102,6 @@ describe('NetworkManager', () => {
       network: {
         host: '0.0.0.0',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       },
     })
   })
@@ -125,21 +113,9 @@ describe('NetworkManager', () => {
     const result = await manager.configure({
       host: '127.0.0.1',
       configured: true,
-      mdns: { enabled: false, hostname: 'freshell' },
     })
 
     expect(result.rebindScheduled).toBe(false)
-  })
-
-  it('starts mDNS when enabled', async () => {
-    const { Bonjour } = await import('bonjour-service')
-    manager = new NetworkManager(server, mockConfigStore, 0)
-    await manager.configure({
-      host: '0.0.0.0',
-      configured: true,
-      mdns: { enabled: true, hostname: 'mybox' },
-    })
-    expect(Bonjour).toHaveBeenCalled()
   })
 
   it('builds correct accessUrl with token and port', async () => {
@@ -148,7 +124,6 @@ describe('NetworkManager', () => {
       network: {
         host: '0.0.0.0',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       },
     })
     manager = new NetworkManager(server, mockConfigStore, testPort)
@@ -178,7 +153,6 @@ describe('NetworkManager', () => {
     await manager.configure({
       host: '0.0.0.0',
       configured: true,
-      mdns: { enabled: false, hostname: 'freshell' },
     })
 
     // Wait for setImmediate-scheduled rebind to complete
@@ -213,7 +187,6 @@ describe('NetworkManager', () => {
     await manager.configure({
       host: '0.0.0.0',
       configured: true,
-      mdns: { enabled: false, hostname: 'freshell' },
     })
 
     // Wait for setImmediate-scheduled rebind
@@ -244,7 +217,6 @@ describe('NetworkManager', () => {
     await manager.configure({
       host: '0.0.0.0',
       configured: true,
-      mdns: { enabled: false, hostname: 'freshell' },
     })
 
     // Wait for setImmediate to fire so rebind() is in progress
@@ -254,7 +226,6 @@ describe('NetworkManager', () => {
     await manager.configure({
       host: '127.0.0.1',
       configured: true,
-      mdns: { enabled: false, hostname: 'freshell' },
     })
 
     // Wait for both rebinds to complete (first + queued)
@@ -331,7 +302,6 @@ describe('NetworkManager', () => {
       const network = {
         host: '127.0.0.1' as const,
         configured: false,
-        mdns: { enabled: false, hostname: 'freshell' },
       }
 
       await manager.initializeFromStartup('0.0.0.0', network)
@@ -340,46 +310,6 @@ describe('NetworkManager', () => {
       expect(mockConfigStore.patchSettings).not.toHaveBeenCalled()
     })
 
-    it('starts mDNS when remote access is enabled', async () => {
-      // Config store must reflect the same state that initializeFromStartup sees
-      mockConfigStore = createMockConfigStore({
-        network: {
-          host: '0.0.0.0',
-          configured: true,
-          mdns: { enabled: true, hostname: 'mybox' },
-        },
-      })
-      manager = new NetworkManager(server, mockConfigStore, testPort)
-
-      await manager.initializeFromStartup('0.0.0.0', {
-        host: '0.0.0.0',
-        configured: true,
-        mdns: { enabled: true, hostname: 'mybox' },
-      })
-
-      const status = await manager.getStatus()
-      expect(status.mdns).toEqual({ enabled: true, hostname: 'mybox' })
-    })
-
-    it('does not start mDNS when bound to localhost', async () => {
-      mockConfigStore = createMockConfigStore({
-        network: {
-          host: '127.0.0.1',
-          configured: true,
-          mdns: { enabled: true, hostname: 'mybox' },
-        },
-      })
-      manager = new NetworkManager(server, mockConfigStore, testPort)
-
-      await manager.initializeFromStartup('127.0.0.1', {
-        host: '127.0.0.1',
-        configured: true,
-        mdns: { enabled: true, hostname: 'mybox' },
-      })
-
-      const status = await manager.getStatus()
-      expect(status.mdns).toBeNull()
-    })
   })
 
   describe('buildAllowedOrigins (via rebuildAllowedOrigins)', () => {
@@ -388,7 +318,6 @@ describe('NetworkManager', () => {
       await manager.initializeFromStartup('127.0.0.1', {
         host: '127.0.0.1',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       })
 
       const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
@@ -404,7 +333,6 @@ describe('NetworkManager', () => {
         network: {
           host: '0.0.0.0',
           configured: true,
-          mdns: { enabled: false, hostname: 'freshell' },
         },
       })
       manager = new NetworkManager(server, mockConfigStore, testPort)
@@ -413,34 +341,11 @@ describe('NetworkManager', () => {
       await manager.initializeFromStartup('0.0.0.0', {
         host: '0.0.0.0',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       })
 
       const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
       expect(origins).toContain(`http://192.168.1.100:${testPort}`)
       expect(origins).toContain(`http://localhost:${testPort}`)
-    })
-
-    it('includes mDNS .local origin when mDNS is enabled', async () => {
-      mockConfigStore = createMockConfigStore({
-        network: {
-          host: '0.0.0.0',
-          configured: true,
-          mdns: { enabled: true, hostname: 'mybox' },
-        },
-      })
-      manager = new NetworkManager(server, mockConfigStore, testPort)
-      vi.mocked(detectLanIps).mockReturnValue(['192.168.1.100'])
-
-      await manager.initializeFromStartup('0.0.0.0', {
-        host: '0.0.0.0',
-        configured: true,
-        mdns: { enabled: true, hostname: 'mybox' },
-      })
-
-      const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
-      // Should include the machine's .local hostname
-      expect(origins.some(o => o.includes('.local:'))).toBe(true)
     })
 
     it('preserves EXTRA_ALLOWED_ORIGINS across rebuilds', async () => {
@@ -449,7 +354,6 @@ describe('NetworkManager', () => {
       await manager.initializeFromStartup('127.0.0.1', {
         host: '127.0.0.1',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       })
 
       const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
@@ -461,7 +365,6 @@ describe('NetworkManager', () => {
       await manager.initializeFromStartup('127.0.0.1', {
         host: '127.0.0.1',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       })
 
       const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
@@ -475,7 +378,6 @@ describe('NetworkManager', () => {
         network: {
           host: '127.0.0.1',
           configured: false,
-          mdns: { enabled: false, hostname: 'freshell' },
         },
       })
       manager = new NetworkManager(server, mockConfigStore, testPort)
@@ -485,7 +387,6 @@ describe('NetworkManager', () => {
       await manager.initializeFromStartup('127.0.0.1', {
         host: '127.0.0.1',
         configured: false,
-        mdns: { enabled: false, hostname: 'freshell' },
       })
       let origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
       expect(origins).not.toContain(`http://192.168.1.100:${testPort}`)
@@ -494,7 +395,6 @@ describe('NetworkManager', () => {
       await manager.configure({
         host: '0.0.0.0',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       })
       origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []
       expect(origins).toContain(`http://192.168.1.100:${testPort}`)
@@ -506,7 +406,6 @@ describe('NetworkManager', () => {
       await manager.initializeFromStartup('127.0.0.1', {
         host: '127.0.0.1',
         configured: true,
-        mdns: { enabled: false, hostname: 'freshell' },
       })
 
       const origins = process.env.ALLOWED_ORIGINS?.split(',') ?? []

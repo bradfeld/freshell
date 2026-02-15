@@ -671,10 +671,6 @@ describe('ConfigStore', () => {
       expect(settings.network).toEqual({
         host: '127.0.0.1',
         configured: false,
-        mdns: {
-          enabled: false,
-          hostname: 'freshell',
-        },
       })
     })
 
@@ -684,35 +680,28 @@ describe('ConfigStore', () => {
         network: {
           host: '0.0.0.0',
           configured: true,
-          mdns: { enabled: true, hostname: 'mybox' },
         },
       })
       const settings = await store.getSettings()
       expect(settings.network).toEqual({
         host: '0.0.0.0',
         configured: true,
-        mdns: { enabled: true, hostname: 'mybox' },
       })
     })
 
-    it('should deep-merge network settings (partial mdns patch)', async () => {
+    it('should merge partial network settings with existing values', async () => {
       const store = new ConfigStore()
       // First: set all network fields explicitly
       await store.patchSettings({
-        network: { host: '0.0.0.0', configured: true, mdns: { enabled: true, hostname: 'freshell' } },
+        network: { host: '0.0.0.0', configured: true },
       })
-      // Second: patch ONLY mdns.hostname — a shallow merge would clobber
-      // the mdns object entirely, losing enabled:true. A correct deep merge
-      // preserves mdns.enabled while updating mdns.hostname.
+      // Second: patch ONLY host — configured should be preserved
       await store.patchSettings({
-        network: { mdns: { hostname: 'custom' } },
+        network: { host: '127.0.0.1' },
       } as any)
       const settings = await store.getSettings()
-      // Deep merge should preserve the unpatched fields:
-      expect(settings.network.host).toBe('0.0.0.0')
+      expect(settings.network.host).toBe('127.0.0.1')
       expect(settings.network.configured).toBe(true)
-      expect(settings.network.mdns.enabled).toBe(true)
-      expect(settings.network.mdns.hostname).toBe('custom')
     })
   })
 

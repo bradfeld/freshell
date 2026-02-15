@@ -169,9 +169,5 @@ export interface AppSettings {
   network: {
     host: '127.0.0.1' | '0.0.0.0'
     configured: boolean
-    mdns: {
-      enabled: boolean
-      hostname: string
-    }
   }
 }
