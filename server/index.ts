@@ -10,7 +10,7 @@ import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { logger, setLogLevel } from './logger.js'
 import { requestLogger } from './request-logger.js'
-import { validateStartupSecurity, httpAuthMiddleware } from './auth.js'
+import { validateStartupSecurity, httpAuthMiddleware, timingSafeCompare } from './auth.js'
 import { configStore } from './config-store.js'
 import { TerminalRegistry, modeSupportsResume } from './terminal-registry.js'
 import { WsHandler } from './ws-handler.js'
@@ -39,6 +39,7 @@ import { PortForwardManager } from './port-forward.js'
 import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
 import { collectCandidateDirectories } from './candidate-dirs.js'
 import { createTabsRegistryStore } from './tabs-registry/store.js'
+import { checkForUpdate } from './updater/version-checker.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -83,11 +84,15 @@ async function main() {
 
   // --- Local file serving for browser pane (cookie auth for iframes) ---
   app.get('/local-file', cookieParser(), (req, res, next) => {
-    const headerToken = req.headers['x-auth-token'] as string | undefined
-    const cookieToken = req.cookies?.['freshell-auth']
+    const headerToken = typeof req.headers['x-auth-token'] === 'string'
+      ? req.headers['x-auth-token']
+      : undefined
+    const cookieToken = typeof req.cookies?.['freshell-auth'] === 'string'
+      ? req.cookies['freshell-auth']
+      : undefined
     const token = headerToken || cookieToken
     const expectedToken = process.env.AUTH_TOKEN
-    if (!expectedToken || token !== expectedToken) {
+    if (!expectedToken || !token || !timingSafeCompare(token, expectedToken)) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
     next()
@@ -180,10 +185,15 @@ async function main() {
     sessionRepairService,
     async () => {
       const currentSettings = migrateSettingsSortMode(await configStore.getSettings())
+      const readError = configStore.getLastReadError()
+      const configFallback = readError
+        ? { reason: readError, backupExists: await configStore.backupExists() }
+        : undefined
       return {
         settings: currentSettings,
         projects: codingCliIndexer.getProjects(),
         perfLogging: perfConfig.enabled,
+        configFallback,
       }
     },
     () => terminalMetadata.list(),
@@ -433,6 +443,16 @@ async function main() {
     res.json({ platform, availableClis })
   })
 
+  app.get('/api/version', async (_req, res) => {
+    try {
+      const updateCheck = await checkForUpdate(APP_VERSION)
+      res.json({ currentVersion: APP_VERSION, updateCheck })
+    } catch (err) {
+      log.warn({ err }, 'Version check failed')
+      res.json({ currentVersion: APP_VERSION, updateCheck: null })
+    }
+  })
+
   app.get('/api/files/candidate-dirs', async (_req, res) => {
     const cfg = await configStore.snapshot()
     const providerCwds = Object.values(cfg.settings?.codingCli?.providers || {}).map((provider) => provider?.cwd)
@@ -445,6 +465,119 @@ async function main() {
     })
     res.json({ directories })
   })
+
+  // Keep in sync with AppSettings type in config-store.ts
+  const CodingCliProviderConfigSchema = z
+    .object({
+      model: z.string().optional(),
+      sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).optional(),
+      permissionMode: z.enum(['default', 'plan', 'acceptEdits', 'bypassPermissions']).optional(),
+      maxTurns: z.coerce.number().optional(),
+      cwd: z.string().optional(),
+    })
+    .strict()
+
+  const SettingsPatchSchema = z
+    .object({
+      theme: z.enum(['system', 'light', 'dark']).optional(),
+      uiScale: z.coerce.number().optional(),
+      terminal: z
+        .object({
+          fontSize: z.coerce.number().optional(),
+          lineHeight: z.coerce.number().optional(),
+          cursorBlink: z.coerce.boolean().optional(),
+          scrollback: z.coerce.number().optional(),
+          theme: z
+            .enum([
+              'auto',
+              'dracula',
+              'one-dark',
+              'solarized-dark',
+              'github-dark',
+              'one-light',
+              'solarized-light',
+              'github-light',
+            ])
+            .optional(),
+          warnExternalLinks: z.coerce.boolean().optional(),
+          osc52Clipboard: z.enum(['ask', 'always', 'never']).optional(),
+          renderer: z.enum(['auto', 'webgl', 'canvas']).optional(),
+        })
+        .strict()
+        .optional(),
+      defaultCwd: z.string().nullable().optional(),
+      allowedFilePaths: z.array(z.string()).optional(),
+      logging: z
+        .object({
+          debug: z.coerce.boolean().optional(),
+        })
+        .strict()
+        .optional(),
+      safety: z
+        .object({
+          autoKillIdleMinutes: z.coerce.number().optional(),
+          warnBeforeKillMinutes: z.coerce.number().optional(),
+        })
+        .strict()
+        .optional(),
+      panes: z
+        .object({
+          defaultNewPane: z.enum(['ask', 'shell', 'browser', 'editor']).optional(),
+          snapThreshold: z.coerce.number().optional(),
+          iconsOnTabs: z.coerce.boolean().optional(),
+          tabAttentionStyle: z.enum(['highlight', 'pulse', 'darken', 'none']).optional(),
+          attentionDismiss: z.enum(['click', 'type']).optional(),
+        })
+        .strict()
+        .optional(),
+      sidebar: z
+        .object({
+          sortMode: z.enum(['recency', 'recency-pinned', 'activity', 'project']).optional(),
+          showProjectBadges: z.coerce.boolean().optional(),
+          showSubagents: z.coerce.boolean().optional(),
+          showNoninteractiveSessions: z.coerce.boolean().optional(),
+          width: z.coerce.number().optional(),
+          collapsed: z.coerce.boolean().optional(),
+        })
+        .strict()
+        .optional(),
+      notifications: z
+        .object({
+          soundEnabled: z.coerce.boolean().optional(),
+        })
+        .strict()
+        .optional(),
+      codingCli: z
+        .object({
+          enabledProviders: z
+            .array(z.enum(['claude', 'codex', 'opencode', 'gemini', 'kimi']))
+            .optional(),
+          providers: z
+            .record(
+              z.enum(['claude', 'codex', 'opencode', 'gemini', 'kimi']),
+              CodingCliProviderConfigSchema,
+            )
+            .optional(),
+        })
+        .strict()
+        .optional(),
+      freshclaude: z
+        .object({
+          defaultModel: z.string().optional(),
+          defaultPermissionMode: z.string().optional(),
+          defaultEffort: z.enum(['low', 'medium', 'high', 'max']).optional(),
+        })
+        .strict()
+        .optional(),
+      network: z
+        .object({
+          host: z.enum(['127.0.0.1', '0.0.0.0']).optional(),
+          configured: z.coerce.boolean().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
 
   const normalizeSettingsPatch = (patch: Record<string, any>) => {
     if (Object.prototype.hasOwnProperty.call(patch, 'defaultCwd')) {
@@ -459,7 +592,11 @@ async function main() {
   }
 
   app.patch('/api/settings', async (req, res) => {
-    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
+    const parsed = SettingsPatchSchema.safeParse(req.body || {})
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
+    }
+    const patch = normalizeSettingsPatch(migrateSettingsSortMode(parsed.data) as any)
     const updated = await configStore.patchSettings(patch)
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)
@@ -482,7 +619,11 @@ async function main() {
 
   // Alias (matches implementation plan)
   app.put('/api/settings', async (req, res) => {
-    const patch = normalizeSettingsPatch(migrateSettingsSortMode(req.body || {}) as any)
+    const parsed = SettingsPatchSchema.safeParse(req.body || {})
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
+    }
+    const patch = normalizeSettingsPatch(migrateSettingsSortMode(parsed.data) as any)
     const updated = await configStore.patchSettings(patch)
     const migrated = migrateSettingsSortMode(updated)
     registry.setSettings(migrated)

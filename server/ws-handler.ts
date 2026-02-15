@@ -4,10 +4,10 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { z } from 'zod'
 import { logger } from './logger.js'
 import { getPerfConfig, logPerfEvent, shouldLog, startPerfTimer } from './perf-logger.js'
-import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed } from './auth.js'
+import { getRequiredAuthToken, isLoopbackAddress, isOriginAllowed, timingSafeCompare } from './auth.js'
 import { modeSupportsResume } from './terminal-registry.js'
 import type { TerminalRegistry, TerminalMode } from './terminal-registry.js'
-import { configStore, type AppSettings } from './config-store.js'
+import { configStore, type AppSettings, type ConfigReadError } from './config-store.js'
 import type { CodingCliSessionManager } from './coding-cli/session-manager.js'
 import type { ProjectGroup } from './coding-cli/types.js'
 import type { TerminalMeta } from './terminal-metadata-service.js'
@@ -52,6 +52,7 @@ interface LiveWebSocket extends WebSocket {
   isAlive?: boolean
   connectionId?: string
   connectedAt?: number
+  isMobileClient?: boolean
   // Generation counter for chunked session updates to prevent interleaving
   sessionUpdateGeneration?: number
 }
@@ -79,6 +80,11 @@ const ErrorCode = z.enum([
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function isMobileUserAgent(userAgent: string | undefined): boolean {
+  if (!userAgent) return false
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(userAgent)
 }
 
 /**
@@ -191,6 +197,9 @@ const HelloSchema = z.object({
   capabilities: z.object({
     sessionsPatchV1: z.boolean().optional(),
     terminalAttachChunkV1: z.boolean().optional(),
+  }).optional(),
+  client: z.object({
+    mobile: z.boolean().optional(),
   }).optional(),
   sessions: z.object({
     active: z.string().optional(),
@@ -378,6 +387,10 @@ type HandshakeSnapshot = {
   settings?: AppSettings
   projects?: ProjectGroup[]
   perfLogging?: boolean
+  configFallback?: {
+    reason: ConfigReadError
+    backupExists: boolean
+  }
 }
 
 type HandshakeSnapshotProvider = () => Promise<HandshakeSnapshot>
@@ -553,6 +566,7 @@ export class WsHandler {
     const connectionId = randomUUID()
     ws.connectionId = connectionId
     ws.connectedAt = Date.now()
+    ws.isMobileClient = isMobileUserAgent(userAgent)
 
     const state: ClientState = {
       authenticated: false,
@@ -728,8 +742,15 @@ export class WsHandler {
           'warn',
         )
       })
-    } catch {
-      // ignore
+    } catch (err) {
+      log.warn(
+        {
+          err: err instanceof Error ? err : new Error(String(err)),
+          connectionId: ws.connectionId || 'unknown',
+          messageType: messageType || 'unknown',
+        },
+        'WebSocket send failed',
+      )
     }
   }
 
@@ -981,6 +1002,9 @@ export class WsHandler {
       if (typeof snapshot.perfLogging === 'boolean') {
         this.safeSend(ws, { type: 'perf.logging', enabled: snapshot.perfLogging })
       }
+      if (snapshot.configFallback) {
+        this.safeSend(ws, { type: 'config.fallback', ...snapshot.configFallback })
+      }
     } catch (err) {
       logger.warn({ err }, 'Failed to send handshake snapshot')
     }
@@ -1063,7 +1087,7 @@ export class WsHandler {
 
       if (m.type === 'hello') {
         const expected = getRequiredAuthToken()
-        if (!m.token || m.token !== expected) {
+        if (!m.token || !timingSafeCompare(m.token, expected)) {
           log.warn({ event: 'ws_auth_failed', connectionId: ws.connectionId }, 'WebSocket auth failed')
           this.sendError(ws, { code: 'NOT_AUTHENTICATED', message: 'Invalid token' })
           ws.close(CLOSE_CODES.NOT_AUTHENTICATED, 'Invalid token')
@@ -1072,6 +1096,9 @@ export class WsHandler {
         state.authenticated = true
         state.supportsSessionsPatchV1 = !!m.capabilities?.sessionsPatchV1
         state.supportsTerminalAttachChunkV1 = !!m.capabilities?.terminalAttachChunkV1
+        if (typeof m.client?.mobile === 'boolean') {
+          ws.isMobileClient = m.client.mobile
+        }
         if (state.helloTimer) clearTimeout(state.helloTimer)
 
         log.info({ event: 'ws_authenticated', connectionId: ws.connectionId }, 'WebSocket client authenticated')

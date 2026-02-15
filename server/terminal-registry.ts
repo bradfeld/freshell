@@ -18,6 +18,8 @@ const MAX_SCROLLBACK_CHARS = 2 * 1024 * 1024
 const APPROX_CHARS_PER_LINE = 200
 const MAX_TERMINALS = Number(process.env.MAX_TERMINALS || 50)
 const DEFAULT_MAX_PENDING_SNAPSHOT_CHARS = 512 * 1024
+const MOBILE_OUTPUT_FLUSH_MS = Number(process.env.MOBILE_OUTPUT_FLUSH_MS || 40)
+const MAX_MOBILE_OUTPUT_BUFFER_CHARS = Number(process.env.MAX_MOBILE_OUTPUT_BUFFER_CHARS || 256 * 1024)
 const perfConfig = getPerfConfig()
 
 // TerminalMode includes 'shell' for regular terminals, plus coding CLI providers.
@@ -138,6 +140,13 @@ function getModeLabel(mode: TerminalMode): string {
 
 type PendingSnapshotQueue = {
   chunks: string[]
+  queuedChars: number
+}
+
+type PendingMobileOutput = {
+  timer: NodeJS.Timeout | null
+  chunksByTerminal: Map<string, string[]>
+  perfByTerminal: Map<string, TerminalRecord['perf'] | undefined>
   queuedChars: number
 }
 
@@ -586,6 +595,7 @@ export class TerminalRegistry extends EventEmitter {
   private maxExitedTerminals: number
   private scrollbackMaxChars: number
   private maxPendingSnapshotChars: number
+  private mobileOutputBuffers = new Map<WebSocket, PendingMobileOutput>()
 
   constructor(settings?: AppSettings, maxTerminals?: number, maxExitedTerminals?: number) {
     super()
@@ -881,7 +891,7 @@ export class TerminalRegistry extends EventEmitter {
           pending.queuedChars = nextChars
           continue
         }
-        this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf: record.perf })
+        this.sendTerminalOutput(client, terminalId, data, record.perf)
       }
     })
 
@@ -895,6 +905,7 @@ export class TerminalRegistry extends EventEmitter {
       record.lastActivityAt = now
       record.exitedAt = now
       for (const client of record.clients) {
+        this.flushMobileOutput(client)
         this.safeSend(client, { type: 'terminal.exit', terminalId, exitCode: e.exitCode }, { terminalId, perf: record.perf })
       }
       record.clients.clear()
@@ -924,13 +935,15 @@ export class TerminalRegistry extends EventEmitter {
     if (!queued) return
     term.pendingSnapshotClients.delete(client)
     for (const data of queued.chunks) {
-      this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf: term.perf })
+      this.sendTerminalOutput(client, terminalId, data, term.perf)
     }
   }
 
   detach(terminalId: string, client: WebSocket): boolean {
     const term = this.terminals.get(terminalId)
     if (!term) return false
+    this.flushMobileOutput(client)
+    this.clearMobileOutput(client)
     term.clients.delete(client)
     term.pendingSnapshotClients.delete(client)
     return true
@@ -984,6 +997,7 @@ export class TerminalRegistry extends EventEmitter {
     term.lastActivityAt = now
     term.exitedAt = now
     for (const client of term.clients) {
+      this.flushMobileOutput(client)
       this.safeSend(client, { type: 'terminal.exit', terminalId, exitCode: term.exitCode })
     }
     term.clients.clear()
@@ -1031,6 +1045,80 @@ export class TerminalRegistry extends EventEmitter {
     return this.terminals.get(terminalId)
   }
 
+  private isMobileClient(client: WebSocket): boolean {
+    return (client as any).isMobileClient === true
+  }
+
+  private clearMobileOutput(client: WebSocket): void {
+    const pending = this.mobileOutputBuffers.get(client)
+    if (!pending) return
+    if (pending.timer) {
+      clearTimeout(pending.timer)
+      pending.timer = null
+    }
+    this.mobileOutputBuffers.delete(client)
+  }
+
+  private flushMobileOutput(client: WebSocket): void {
+    const pending = this.mobileOutputBuffers.get(client)
+    if (!pending) return
+
+    if (pending.timer) {
+      clearTimeout(pending.timer)
+      pending.timer = null
+    }
+
+    if (pending.queuedChars <= 0) {
+      this.mobileOutputBuffers.delete(client)
+      return
+    }
+
+    for (const [terminalId, chunks] of pending.chunksByTerminal) {
+      if (chunks.length === 0) continue
+      const data = chunks.join('')
+      const perf = pending.perfByTerminal.get(terminalId)
+      this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf })
+    }
+    this.mobileOutputBuffers.delete(client)
+  }
+
+  private sendTerminalOutput(client: WebSocket, terminalId: string, data: string, perf?: TerminalRecord['perf']): void {
+    if (!this.isMobileClient(client)) {
+      this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf })
+      return
+    }
+
+    let pending = this.mobileOutputBuffers.get(client)
+    if (!pending) {
+      pending = {
+        timer: null,
+        chunksByTerminal: new Map(),
+        perfByTerminal: new Map(),
+        queuedChars: 0,
+      }
+      this.mobileOutputBuffers.set(client, pending)
+    }
+
+    const nextSize = pending.queuedChars + data.length
+    if (nextSize > MAX_MOBILE_OUTPUT_BUFFER_CHARS) {
+      this.flushMobileOutput(client)
+      this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf })
+      return
+    }
+
+    const chunks = pending.chunksByTerminal.get(terminalId) || []
+    chunks.push(data)
+    pending.chunksByTerminal.set(terminalId, chunks)
+    pending.perfByTerminal.set(terminalId, perf)
+    pending.queuedChars = nextSize
+
+    if (!pending.timer) {
+      pending.timer = setTimeout(() => {
+        this.flushMobileOutput(client)
+      }, MOBILE_OUTPUT_FLUSH_MS)
+    }
+  }
+
   safeSend(client: WebSocket, msg: unknown, context?: { terminalId?: string; perf?: TerminalRecord['perf'] }) {
     // Backpressure guard.
     // @ts-ignore
@@ -1059,10 +1147,22 @@ export class TerminalRegistry extends EventEmitter {
       }
       return
     }
+    let messageType: string | undefined
+    if (msg && typeof msg === 'object' && 'type' in msg) {
+      const typeValue = (msg as { type?: unknown }).type
+      if (typeof typeValue === 'string') messageType = typeValue
+    }
     try {
       client.send(JSON.stringify(msg))
-    } catch {
-      // ignore
+    } catch (err) {
+      logger.warn(
+        {
+          err: err instanceof Error ? err : new Error(String(err)),
+          terminalId: context?.terminalId || 'unknown',
+          messageType: messageType || 'unknown',
+        },
+        'Terminal output send failed',
+      )
     }
   }
 
