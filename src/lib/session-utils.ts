@@ -8,9 +8,15 @@ import type { CodingCliProviderName } from '@/store/types'
 import { isValidClaudeSessionId } from '@/lib/claude-session-id'
 
 /**
- * Extract all session IDs from a pane tree.
+ * Extract a session reference from a single pane's content.
+ * Handles both terminal panes (claude/codex mode) and claude-chat (freshclaude) panes.
  */
 function extractSessionRef(content: PaneContent): { provider: CodingCliProviderName; sessionId: string } | undefined {
+  if (content.kind === 'claude-chat') {
+    const sessionId = content.resumeSessionId
+    if (!sessionId || !isValidClaudeSessionId(sessionId)) return undefined
+    return { provider: 'claude', sessionId }
+  }
   if (content.kind !== 'terminal') return undefined
   if (content.mode === 'shell') return undefined
   const sessionId = content.resumeSessionId
@@ -79,7 +85,7 @@ export function findTabIdForSession(state: RootState, provider: CodingCliProvide
 
 /**
  * Find the tab and pane that contain a specific session.
- * Walks all tabs' pane trees looking for a terminal pane matching the provider + sessionId.
+ * Walks all tabs' pane trees looking for a pane (terminal or claude-chat) matching the provider + sessionId.
  * Falls back to tab-level resumeSessionId when no layout exists (early boot/rehydration).
  */
 export function findPaneForSession(
