@@ -2,7 +2,7 @@ import express from 'express'
 import fsp from 'fs/promises'
 import path from 'path'
 import { spawn } from 'child_process'
-import { isReachableDirectory, resolveUserPath } from './path-utils.js'
+import { getPathModuleForFlavor, isReachableDirectory, normalizeUserPath, toFilesystemPath } from './path-utils.js'
 
 export const filesRouter = express.Router()
 
@@ -69,35 +69,41 @@ filesRouter.get('/complete', async (req, res) => {
     return res.status(400).json({ error: 'prefix query parameter required' })
   }
 
-  const resolved = resolveUserPath(prefix)
+  const { normalizedPath, flavor } = normalizeUserPath(prefix)
+  const pathModule = getPathModuleForFlavor(flavor)
+  const resolvedFsPath = await toFilesystemPath(normalizedPath, flavor)
 
   try {
     // Check if prefix is a directory - if so, list all files in it
-    let dir: string
+    let dirDisplayPath: string
+    let dirFsPath: string
     let basename: string
 
     try {
-      const stat = await fsp.stat(resolved)
+      const stat = await fsp.stat(resolvedFsPath)
       if (stat.isDirectory()) {
-        dir = resolved
+        dirDisplayPath = normalizedPath
+        dirFsPath = resolvedFsPath
         basename = ''
       } else {
-        dir = path.dirname(resolved)
-        basename = path.basename(resolved)
+        dirDisplayPath = pathModule.dirname(normalizedPath)
+        dirFsPath = await toFilesystemPath(dirDisplayPath, flavor)
+        basename = pathModule.basename(normalizedPath)
       }
     } catch {
       // Path doesn't exist, treat as partial path
-      dir = path.dirname(resolved)
-      basename = path.basename(resolved)
+      dirDisplayPath = pathModule.dirname(normalizedPath)
+      dirFsPath = await toFilesystemPath(dirDisplayPath, flavor)
+      basename = pathModule.basename(normalizedPath)
     }
 
-    const entries = await fsp.readdir(dir, { withFileTypes: true })
+    const entries = await fsp.readdir(dirFsPath, { withFileTypes: true })
 
     const matches = entries
       .filter((entry) => entry.name.startsWith(basename))
       .filter((entry) => !dirsOnly || entry.isDirectory())
       .map((entry) => ({
-        path: path.join(dir, entry.name),
+        path: pathModule.join(dirDisplayPath, entry.name),
         isDirectory: entry.isDirectory(),
       }))
       // Sort: directories first, then alphabetically
