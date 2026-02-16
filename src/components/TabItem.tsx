@@ -1,7 +1,6 @@
 import { X, Circle } from 'lucide-react'
 import { useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import PaneIcon from '@/components/icons/PaneIcon'
 import type { Tab, TabAttentionStyle } from '@/store/types'
 import type { PaneContent } from '@/store/paneTypes'
@@ -154,16 +153,9 @@ export default function TabItem({
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              className="whitespace-nowrap truncate text-sm max-w-[5rem]"
-            >
-              {tab.title}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{tab.title}</TooltipContent>
-        </Tooltip>
+        <span className="whitespace-nowrap truncate text-sm max-w-[5rem]">
+          {tab.title}
+        </span>
       )}
 
       <button
