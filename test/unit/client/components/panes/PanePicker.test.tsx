@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react'
 import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import PanePicker from '@/components/panes/PanePicker'
@@ -416,7 +416,7 @@ describe('PanePicker', () => {
 
     it('applies responsive gap classes to button container', () => {
       renderPicker()
-      const buttonContainer = getContainer().querySelector('.flex.flex-wrap')!
+      const buttonContainer = screen.getByTestId('pane-picker-options')
       expect(buttonContainer).toHaveClass('gap-2')
     })
 
@@ -424,6 +424,20 @@ describe('PanePicker', () => {
       renderPicker()
       const shellButton = screen.getByText('Shell').closest('button')!
       expect(shellButton).toHaveClass('p-2')
+    })
+  })
+
+  describe('balanced icon layout', () => {
+    it('prefers a balanced 3+2 arrangement when five options are visible', () => {
+      renderPicker({
+        availableClis: { claude: true },
+        enabledProviders: ['claude'],
+      })
+
+      const rows = screen.getAllByTestId('pane-picker-option-row')
+      expect(rows).toHaveLength(2)
+      expect(within(rows[0]).getAllByRole('button')).toHaveLength(3)
+      expect(within(rows[1]).getAllByRole('button')).toHaveLength(2)
     })
   })
 })
