@@ -4,6 +4,7 @@ export type TerminalActions = {
   selectAll: () => void
   clearScrollback: () => void
   reset: () => void
+  scrollToBottom: () => void
   hasSelection: () => boolean
 }
 

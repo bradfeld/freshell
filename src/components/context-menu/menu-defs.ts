@@ -284,6 +284,13 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
       { type: 'separator', id: 'terminal-sep' },
       {
         type: 'item',
+        id: 'terminal-scroll-bottom',
+        label: 'Scroll to bottom',
+        onSelect: () => terminalActions?.scrollToBottom(),
+        disabled: !terminalActions,
+      },
+      {
+        type: 'item',
         id: 'terminal-clear',
         label: 'Clear scrollback',
         onSelect: () => terminalActions?.clearScrollback(),

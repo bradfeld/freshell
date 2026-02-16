@@ -935,10 +935,11 @@ export default function SettingsView() {
           </SettingsSection>
 
           {/* Keyboard shortcuts */}
-          <SettingsSection title="Keyboard shortcuts" description="Tab navigation">
+          <SettingsSection title="Keyboard shortcuts">
             <div className="space-y-2 text-sm">
               <ShortcutRow keys={['Ctrl', 'Shift', '[']} description="Previous tab" />
               <ShortcutRow keys={['Ctrl', 'Shift', ']']} description="Next tab" />
+              <ShortcutRow keys={['Cmd/Ctrl', 'End']} description="Scroll to bottom" />
             </div>
           </SettingsSection>
 

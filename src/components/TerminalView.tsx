@@ -166,6 +166,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (snapshot) {
       try { term.write(snapshot) } catch { /* disposed */ }
     }
+    try { term.scrollToBottom() } catch { /* disposed */ }
   }, [])
 
   const markChunkedRunning = useCallback(() => {
@@ -257,6 +258,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       selectAll: () => term.selectAll(),
       clearScrollback: () => term.clear(),
       reset: () => term.reset(),
+      scrollToBottom: () => { try { term.scrollToBottom() } catch { /* disposed */ } },
       hasSelection: () => term.getSelection().length > 0,
     })
 
@@ -313,6 +315,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           dispatch(switchToNextTab())
           return false
         }
+      }
+
+      // Scroll to bottom: Cmd+End (macOS) / Ctrl+End (other)
+      if ((event.metaKey || event.ctrlKey) && event.code === 'End' && event.type === 'keydown' && !event.repeat) {
+        event.preventDefault()
+        term.scrollToBottom()
+        return false
       }
 
       return true
@@ -546,6 +555,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           if (msg.snapshot) {
             try { term.write(msg.snapshot) } catch { /* disposed */ }
           }
+          try { term.scrollToBottom() } catch { /* disposed */ }
         }
 
         if (msg.type === 'terminal.created' && msg.requestId === reqId) {
@@ -577,6 +587,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
             if (msg.snapshot) {
               try { term.write(msg.snapshot) } catch { /* disposed */ }
             }
+            try { term.scrollToBottom() } catch { /* disposed */ }
           }
           // Creator is already attached server-side for this terminal.
           // Avoid sending terminal.attach here: it can race with terminal.output and lead to
@@ -594,6 +605,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           if (msg.snapshot) {
             try { term.write(msg.snapshot) } catch { /* disposed */ }
           }
+          try { term.scrollToBottom() } catch { /* disposed */ }
           updateContent({ status: 'running' })
         }
 
