@@ -4,6 +4,8 @@ import { updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
 import { updateSessionActivity } from '@/store/sessionActivitySlice'
 import { recordTurnComplete, clearTabAttention, clearPaneAttention } from '@/store/turnCompletionSlice'
+import { openPopover } from '@/store/commentQueueSlice'
+import { useCommentQueue } from '@/hooks/useCommentQueue'
 import { getWsClient } from '@/lib/ws-client'
 import { getTerminalTheme } from '@/lib/terminal-themes'
 import { getResumeSessionIdFromRef } from '@/components/terminal-view-utils'
@@ -24,6 +26,8 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { Loader2 } from 'lucide-react'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
+import { CommentPopover } from '@/components/terminal/CommentPopover'
+import { CommentGutter } from '@/components/terminal/CommentGutter'
 import type { PaneContent, TerminalPaneContent } from '@/store/paneTypes'
 import 'xterm/css/xterm.css'
 
@@ -258,6 +262,17 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       clearScrollback: () => term.clear(),
       reset: () => term.reset(),
       hasSelection: () => term.getSelection().length > 0,
+      addComment: () => {
+        const selection = term.getSelection()
+        if (!selection) return
+        const pos = term.getSelectionPosition()
+        dispatch(openPopover({
+          paneId,
+          selectedText: selection,
+          selectionStart: pos ? { row: pos.start.y, col: pos.start.x } : null,
+          selectionEnd: pos ? { row: pos.end.y, col: pos.end.x } : null,
+        }))
+      },
     })
 
     requestAnimationFrame(() => {
@@ -313,6 +328,21 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           dispatch(switchToNextTab())
           return false
         }
+      }
+
+      // Add comment: Ctrl+Alt+M (Cmd+Alt+M on macOS)
+      if (event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'm' && event.type === 'keydown' && !event.repeat) {
+        const selection = term.getSelection()
+        if (selection) {
+          const pos = term.getSelectionPosition()
+          dispatch(openPopover({
+            paneId,
+            selectedText: selection,
+            selectionStart: pos ? { row: pos.start.y, col: pos.start.x } : null,
+            selectionEnd: pos ? { row: pos.end.y, col: pos.end.x } : null,
+          }))
+        }
+        return false
       }
 
       return true
@@ -780,6 +810,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     markSnapshotChunkedCreated,
   ])
 
+  // Comment queue: flush pending comments on turn-complete or immediately in shell mode
+  useCommentQueue({
+    paneId,
+    mode: terminalContent?.mode,
+    sendInput,
+  })
+
   // NOW we can do the conditional return - after all hooks
   if (!isTerminal || !terminalContent) {
     return null
@@ -810,6 +847,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
           {snapshotWarning}
         </div>
       )}
+      <CommentPopover paneId={paneId} />
+      <CommentGutter paneId={paneId} />
       <ConfirmModal
         open={pendingLinkUri !== null}
         title="Open external link?"

@@ -268,6 +268,13 @@ export function buildMenuItems(target: ContextTarget, ctx: MenuBuildContext): Me
       },
       {
         type: 'item',
+        id: 'terminal-add-comment',
+        label: 'Add comment',
+        onSelect: () => terminalActions?.addComment?.(),
+        disabled: !terminalActions || !hasSelection,
+      },
+      {
+        type: 'item',
         id: 'terminal-paste',
         label: 'Paste',
         onSelect: () => terminalActions?.paste(),

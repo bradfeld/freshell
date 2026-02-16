@@ -24,6 +24,8 @@ import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 import { updateSettingsLocal } from '@/store/settingsSlice'
 import { clearPaneAttention, clearTabAttention } from '@/store/turnCompletionSlice'
 import { clearPendingCreate, removeSession } from '@/store/claudeChatSlice'
+import { clearPaneComments } from '@/store/commentQueueSlice'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { cancelCreate } from '@/lib/sdk-message-handler'
 import type { TerminalMetaRecord } from '@/store/terminalMetaSlice'
 
@@ -32,6 +34,7 @@ const EMPTY_PANE_TITLES: Record<string, string> = {}
 const EMPTY_TERMINAL_META_BY_ID: Record<string, TerminalMetaRecord> = {}
 const EMPTY_ATTENTION_BY_PANE: Record<string, boolean> = {}
 const EMPTY_PENDING_CREATES: Record<string, string> = {}
+const EMPTY_QUEUE_BY_PANE: Record<string, import('@/store/commentQueueTypes').InlineComment[]> = {}
 
 interface PaneContainerProps {
   tabId: string
@@ -131,6 +134,10 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
   const rootNode = useAppSelector((s) => s.panes.layouts[tabId])
   const isOnlyPane = rootNode?.type === 'leaf'
 
+  // Comment queue state for close confirmation
+  const commentQueueByPane = useAppSelector((s) => s.commentQueue?.queueByPane ?? EMPTY_QUEUE_BY_PANE)
+  const [closePendingPane, setClosePendingPane] = useState<{ paneId: string; content: PaneContent } | null>(null)
+
   // Inline rename state (local to this PaneContainer instance)
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -174,7 +181,9 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     }
   }, [])
 
-  const handleClose = useCallback((paneId: string, content: PaneContent) => {
+  const executeClose = useCallback((paneId: string, content: PaneContent) => {
+    // Clear any pending comments for this pane
+    dispatch(clearPaneComments({ paneId }))
     // Clean up terminal process if this pane has one
     if (content.kind === 'terminal' && content.terminalId) {
       ws.send({
@@ -205,6 +214,15 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     }
     dispatch(closePaneWithCleanup({ tabId, paneId }))
   }, [dispatch, tabId, tabTerminalId, ws, sdkPendingCreates])
+
+  const handleClose = useCallback((paneId: string, content: PaneContent) => {
+    const pendingComments = commentQueueByPane[paneId]
+    if (pendingComments && pendingComments.length > 0) {
+      setClosePendingPane({ paneId, content })
+      return
+    }
+    executeClose(paneId, content)
+  }, [commentQueueByPane, executeClose])
 
   const handleFocus = useCallback((paneId: string) => {
     if (attentionDismiss === 'click' && attentionByPane[paneId]) {
@@ -325,30 +343,45 @@ export default function PaneContainer({ tabId, node, hidden }: PaneContainerProp
     const needsAttention = tabAttentionStyle !== 'none' && !!attentionByPane[node.id]
 
     return (
-      <Pane
-        tabId={tabId}
-        paneId={node.id}
-        isActive={activePane === node.id}
-        isOnlyPane={isOnlyPane}
-        title={paneTitle}
-        status={paneStatus}
-        content={node.content}
-        metaLabel={paneMetaLabel}
-        metaTooltip={paneMetaTooltip}
-        needsAttention={needsAttention}
-        onClose={() => handleClose(node.id, node.content)}
-        onFocus={() => handleFocus(node.id)}
-        onToggleZoom={() => handleToggleZoom(node.id)}
-        isZoomed={zoomedPaneId === node.id}
-        isRenaming={isRenaming}
-        renameValue={isRenaming ? renameValue : undefined}
-        onRenameChange={isRenaming ? setRenameValue : undefined}
-        onRenameBlur={isRenaming ? commitRename : undefined}
-        onRenameKeyDown={isRenaming ? handleRenameKeyDown : undefined}
-        onDoubleClickTitle={() => startRename(node.id, paneTitle)}
-      >
-        {renderContent(tabId, node.id, node.content, isOnlyPane, hidden)}
-      </Pane>
+      <>
+        <Pane
+          tabId={tabId}
+          paneId={node.id}
+          isActive={activePane === node.id}
+          isOnlyPane={isOnlyPane}
+          title={paneTitle}
+          status={paneStatus}
+          content={node.content}
+          metaLabel={paneMetaLabel}
+          metaTooltip={paneMetaTooltip}
+          needsAttention={needsAttention}
+          onClose={() => handleClose(node.id, node.content)}
+          onFocus={() => handleFocus(node.id)}
+          onToggleZoom={() => handleToggleZoom(node.id)}
+          isZoomed={zoomedPaneId === node.id}
+          isRenaming={isRenaming}
+          renameValue={isRenaming ? renameValue : undefined}
+          onRenameChange={isRenaming ? setRenameValue : undefined}
+          onRenameBlur={isRenaming ? commitRename : undefined}
+          onRenameKeyDown={isRenaming ? handleRenameKeyDown : undefined}
+          onDoubleClickTitle={() => startRename(node.id, paneTitle)}
+        >
+          {renderContent(tabId, node.id, node.content, isOnlyPane, hidden)}
+        </Pane>
+        <ConfirmModal
+          open={closePendingPane?.paneId === node.id}
+          title="Discard pending comments?"
+          body={`This pane has ${commentQueueByPane[node.id]?.length ?? 0} unsent comment${(commentQueueByPane[node.id]?.length ?? 0) !== 1 ? 's' : ''} that will be lost.`}
+          confirmLabel="Discard & Close"
+          onConfirm={() => {
+            if (closePendingPane) {
+              executeClose(closePendingPane.paneId, closePendingPane.content)
+            }
+            setClosePendingPane(null)
+          }}
+          onCancel={() => setClosePendingPane(null)}
+        />
+      </>
     )
   }
 
