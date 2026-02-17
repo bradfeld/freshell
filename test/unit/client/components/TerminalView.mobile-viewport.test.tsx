@@ -277,4 +277,67 @@ describe('TerminalView mobile viewport handling', () => {
       data: '\u001b[C',
     })
   })
+
+  it('repeats arrow key input while holding press, like keyboard autorepeat', () => {
+    vi.useFakeTimers()
+    try {
+      const viewport = createVisualViewportMock(860, 0)
+      Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+      Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
+      ;(globalThis as any).setMobileForTest(true)
+
+      const store = createStore()
+      render(
+        <Provider store={store}>
+          <TerminalView
+            tabId="tab-1"
+            paneId="pane-1"
+            paneContent={{ ...createTerminalContent(), terminalId: 'term-1' }}
+            hidden={false}
+          />
+        </Provider>
+      )
+
+      const up = screen.getByRole('button', { name: 'Up key' })
+
+      fireEvent.pointerDown(up, { pointerId: 1, pointerType: 'touch' })
+
+      // Initial keypress fires immediately; repeat starts after a delay.
+      act(() => {
+        vi.advanceTimersByTime(600)
+      })
+
+      fireEvent.pointerUp(up, { pointerId: 1, pointerType: 'touch' })
+
+      const inputMessages = getTerminalInputMessages()
+      const upInputs = inputMessages.filter((msg) => msg.data === '\u001b[A')
+      expect(upInputs.length).toBeGreaterThan(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('prevents context menu on mobile arrow key long-press', () => {
+    const viewport = createVisualViewportMock(860, 0)
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+    Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
+    ;(globalThis as any).setMobileForTest(true)
+
+    const store = createStore()
+    render(
+      <Provider store={store}>
+        <TerminalView
+          tabId="tab-1"
+          paneId="pane-1"
+          paneContent={{ ...createTerminalContent(), terminalId: 'term-1' }}
+          hidden={false}
+        />
+      </Provider>
+    )
+
+    const up = screen.getByRole('button', { name: 'Up key' })
+    const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    const dispatchResult = up.dispatchEvent(contextMenuEvent)
+    expect(dispatchResult).toBe(false)
+  })
 })

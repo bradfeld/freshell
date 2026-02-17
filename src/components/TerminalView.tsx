@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type TouchEvent as ReactTouchEvent,
+} from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { addTab, updateTab, switchToNextTab, switchToPrevTab } from '@/store/tabsSlice'
 import { initLayout, updatePaneContent, updatePaneTitle } from '@/store/panesSlice'
@@ -48,6 +57,8 @@ const RATE_LIMIT_RETRY_BASE_MS = 250
 const RATE_LIMIT_RETRY_MAX_MS = 1000
 const KEYBOARD_INSET_ACTIVATION_PX = 80
 const MOBILE_KEYBAR_HEIGHT_PX = 40
+const MOBILE_KEY_REPEAT_INITIAL_DELAY_MS = 320
+const MOBILE_KEY_REPEAT_INTERVAL_MS = 70
 const TAP_MULTI_INTERVAL_MS = 350
 const TAP_MAX_DISTANCE_PX = 24
 const TOUCH_SCROLL_PIXELS_PER_LINE = 18
@@ -80,6 +91,7 @@ interface TerminalViewProps {
 }
 
 type MobileToolbarKeyId = 'esc' | 'tab' | 'ctrl' | 'up' | 'down' | 'left' | 'right'
+type RepeatableMobileToolbarKeyId = Extract<MobileToolbarKeyId, 'up' | 'down' | 'left' | 'right'>
 
 const MOBILE_TOOLBAR_KEYS: Array<{ id: MobileToolbarKeyId; label: string; ariaLabel: string; isArrow?: boolean }> = [
   { id: 'esc', label: 'Esc', ariaLabel: 'Esc key' },
@@ -90,6 +102,10 @@ const MOBILE_TOOLBAR_KEYS: Array<{ id: MobileToolbarKeyId; label: string; ariaLa
   { id: 'left', label: '←', ariaLabel: 'Left key', isArrow: true },
   { id: 'right', label: '→', ariaLabel: 'Right key', isArrow: true },
 ]
+
+function isRepeatableMobileToolbarKey(keyId: MobileToolbarKeyId): keyId is RepeatableMobileToolbarKeyId {
+  return keyId === 'up' || keyId === 'down' || keyId === 'left' || keyId === 'right'
+}
 
 function resolveMobileToolbarInput(keyId: Exclude<MobileToolbarKeyId, 'ctrl'>, ctrlActive: boolean): string {
   if (ctrlActive) {
@@ -134,6 +150,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const [keyboardInsetPx, setKeyboardInsetPx] = useState(0)
   const [mobileCtrlActive, setMobileCtrlActive] = useState(false)
   const setPendingLinkUriRef = useRef(setPendingLinkUri)
+  const mobileCtrlActiveRef = useRef(false)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -160,6 +177,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const touchStartXRef = useRef(0)
   const touchMovedRef = useRef(false)
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mobileKeyRepeatDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mobileKeyRepeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastTapAtRef = useRef(0)
   const lastTapPointRef = useRef<{ x: number; y: number } | null>(null)
   const tapCountRef = useRef(0)
@@ -590,14 +609,76 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
   const sendMobileToolbarKey = useCallback((keyId: MobileToolbarKeyId) => {
     if (keyId === 'ctrl') {
-      setMobileCtrlActive((prev) => !prev)
+      setMobileCtrlActive((prev) => {
+        const next = !prev
+        mobileCtrlActiveRef.current = next
+        return next
+      })
       return
     }
 
-    const input = resolveMobileToolbarInput(keyId, mobileCtrlActive)
+    const input = resolveMobileToolbarInput(keyId, mobileCtrlActiveRef.current)
     sendInput(input)
     termRef.current?.focus()
-  }, [mobileCtrlActive, sendInput])
+  }, [sendInput])
+
+  const clearMobileToolbarRepeat = useCallback(() => {
+    if (mobileKeyRepeatDelayTimerRef.current) {
+      clearTimeout(mobileKeyRepeatDelayTimerRef.current)
+      mobileKeyRepeatDelayTimerRef.current = null
+    }
+    if (mobileKeyRepeatIntervalRef.current) {
+      clearInterval(mobileKeyRepeatIntervalRef.current)
+      mobileKeyRepeatIntervalRef.current = null
+    }
+  }, [])
+
+  const handleMobileToolbarPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>, keyId: MobileToolbarKeyId) => {
+    if (!isRepeatableMobileToolbarKey(keyId)) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Ignore capture failures (e.g. unsupported pointer source)
+    }
+    sendMobileToolbarKey(keyId)
+    clearMobileToolbarRepeat()
+    mobileKeyRepeatDelayTimerRef.current = setTimeout(() => {
+      mobileKeyRepeatIntervalRef.current = setInterval(() => {
+        sendMobileToolbarKey(keyId)
+      }, MOBILE_KEY_REPEAT_INTERVAL_MS)
+    }, MOBILE_KEY_REPEAT_INITIAL_DELAY_MS)
+  }, [clearMobileToolbarRepeat, sendMobileToolbarKey])
+
+  const handleMobileToolbarPointerEnd = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    clearMobileToolbarRepeat()
+  }, [clearMobileToolbarRepeat])
+
+  const handleMobileToolbarClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>, keyId: MobileToolbarKeyId) => {
+    // Pointer interactions are handled via pointerdown to support press-and-hold repeat.
+    // Keep click handling for non-repeatable keys and keyboard activation (detail === 0).
+    if (isRepeatableMobileToolbarKey(keyId) && event.detail !== 0) return
+    sendMobileToolbarKey(keyId)
+  }, [sendMobileToolbarKey])
+
+  const handleMobileToolbarContextMenu = useCallback((event: ReactMouseEvent<HTMLButtonElement>, keyId: MobileToolbarKeyId) => {
+    if (!isRepeatableMobileToolbarKey(keyId)) return
+    event.preventDefault()
+    event.stopPropagation()
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      clearMobileToolbarRepeat()
+    }
+  }, [clearMobileToolbarRepeat])
 
   // Init xterm once
   useEffect(() => {
@@ -1297,13 +1378,18 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
                   key={key.id}
                   type="button"
                   className={cn(
-                    'h-full min-w-0 flex-1 rounded-sm border border-border/60 px-1 text-[11px] font-medium leading-none',
+                    'h-full min-w-0 flex-1 rounded-sm border border-border/60 px-1 text-[11px] font-medium leading-none touch-manipulation select-none',
                     key.isArrow ? 'text-[19px] font-bold' : '',
                     ctrlPressed ? 'bg-primary/20 text-primary border-primary/40' : 'bg-muted/80 text-foreground',
                   )}
                   aria-label={key.ariaLabel}
                   aria-pressed={isCtrl ? ctrlPressed : undefined}
-                  onClick={() => sendMobileToolbarKey(key.id)}
+                  onClick={(event) => handleMobileToolbarClick(event, key.id)}
+                  onPointerDown={key.isArrow ? (event) => handleMobileToolbarPointerDown(event, key.id) : undefined}
+                  onPointerUp={key.isArrow ? handleMobileToolbarPointerEnd : undefined}
+                  onPointerCancel={key.isArrow ? handleMobileToolbarPointerEnd : undefined}
+                  onPointerLeave={key.isArrow ? handleMobileToolbarPointerEnd : undefined}
+                  onContextMenu={(event) => handleMobileToolbarContextMenu(event, key.id)}
                 >
                   {key.label}
                 </button>
