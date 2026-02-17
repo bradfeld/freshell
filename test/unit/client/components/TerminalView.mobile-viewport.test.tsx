@@ -237,6 +237,12 @@ describe('TerminalView mobile viewport handling', () => {
     const toolbar = screen.getByTestId('mobile-terminal-toolbar')
     const buttons = toolbar.querySelectorAll('button')
     expect(buttons.length).toBe(7)
+    expect(screen.getByRole('button', { name: 'Up key' })).toHaveTextContent('↑')
+    expect(screen.getByRole('button', { name: 'Down key' })).toHaveTextContent('↓')
+    expect(screen.getByRole('button', { name: 'Left key' })).toHaveTextContent('←')
+    expect(screen.getByRole('button', { name: 'Right key' })).toHaveTextContent('→')
+    expect(screen.getByRole('button', { name: 'Up key' }).className).toContain('text-[19px]')
+    expect(screen.getByRole('button', { name: 'Up key' }).className).toContain('font-bold')
     for (const button of buttons) {
       expect(button.className).toMatch(/\bflex-1\b/)
       expect(button.className).toMatch(/\bmin-w-0\b/)

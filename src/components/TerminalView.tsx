@@ -81,14 +81,14 @@ interface TerminalViewProps {
 
 type MobileToolbarKeyId = 'esc' | 'tab' | 'ctrl' | 'up' | 'down' | 'left' | 'right'
 
-const MOBILE_TOOLBAR_KEYS: Array<{ id: MobileToolbarKeyId; label: string }> = [
-  { id: 'esc', label: 'Esc' },
-  { id: 'tab', label: 'Tab' },
-  { id: 'ctrl', label: 'Ctrl' },
-  { id: 'up', label: 'Up' },
-  { id: 'down', label: 'Down' },
-  { id: 'left', label: 'Left' },
-  { id: 'right', label: 'Right' },
+const MOBILE_TOOLBAR_KEYS: Array<{ id: MobileToolbarKeyId; label: string; ariaLabel: string; isArrow?: boolean }> = [
+  { id: 'esc', label: 'Esc', ariaLabel: 'Esc key' },
+  { id: 'tab', label: 'Tab', ariaLabel: 'Tab key' },
+  { id: 'ctrl', label: 'Ctrl', ariaLabel: 'Toggle Ctrl modifier' },
+  { id: 'up', label: '↑', ariaLabel: 'Up key', isArrow: true },
+  { id: 'down', label: '↓', ariaLabel: 'Down key', isArrow: true },
+  { id: 'left', label: '←', ariaLabel: 'Left key', isArrow: true },
+  { id: 'right', label: '→', ariaLabel: 'Right key', isArrow: true },
 ]
 
 function resolveMobileToolbarInput(keyId: Exclude<MobileToolbarKeyId, 'ctrl'>, ctrlActive: boolean): string {
@@ -362,7 +362,8 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     const deltaY = touch.clientY - touchLastYRef.current
     touchLastYRef.current = touch.clientY
-    touchScrollAccumulatorRef.current += deltaY
+    // Match native touch behavior: content follows drag direction.
+    touchScrollAccumulatorRef.current -= deltaY
 
     const rawLines = touchScrollAccumulatorRef.current / TOUCH_SCROLL_PIXELS_PER_LINE
     const lines = rawLines > 0 ? Math.floor(rawLines) : Math.ceil(rawLines)
@@ -1297,9 +1298,10 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
                   type="button"
                   className={cn(
                     'h-full min-w-0 flex-1 rounded-sm border border-border/60 px-1 text-[11px] font-medium leading-none',
+                    key.isArrow ? 'text-[19px] font-bold' : '',
                     ctrlPressed ? 'bg-primary/20 text-primary border-primary/40' : 'bg-muted/80 text-foreground',
                   )}
-                  aria-label={isCtrl ? 'Toggle Ctrl modifier' : `${key.label} key`}
+                  aria-label={key.ariaLabel}
                   aria-pressed={isCtrl ? ctrlPressed : undefined}
                   onClick={() => sendMobileToolbarKey(key.id)}
                 >
