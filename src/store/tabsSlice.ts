@@ -222,12 +222,17 @@ function collectPaneIds(node: PaneNode | undefined): string[] {
 
 /**
  * Close a pane and clean up its attention state.
- * Only clears attention if closePane actually removed the pane (i.e. layout changed).
+ * If the target pane is the tab's only pane, closes the tab instead.
+ * Otherwise only clears attention if closePane actually removed the pane (i.e. layout changed).
  */
 export const closePaneWithCleanup = createAsyncThunk(
   'tabs/closePaneWithCleanup',
   async ({ tabId, paneId }: { tabId: string; paneId: string }, { dispatch, getState }) => {
     const before = (getState() as RootState).panes.layouts[tabId]
+    if (before?.type === 'leaf' && before.id === paneId) {
+      await dispatch(closeTab(tabId))
+      return
+    }
     dispatch(closePane({ tabId, paneId }))
     const after = (getState() as RootState).panes.layouts[tabId]
     if (before !== after) {
