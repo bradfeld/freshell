@@ -258,9 +258,9 @@ describe('App Mobile - Sidebar Backdrop', () => {
   it('keeps header onscreen by making pane area shrinkable in mobile layout', async () => {
     renderApp()
 
-    const terminalWorkArea = await screen.findByTestId('terminal-work-area')
+    await screen.findByTestId('terminal-work-area')
+    const terminalShell = screen.getByTestId('terminal-shell')
     const paneColumn = screen.getByTestId('app-pane-column')
-    const terminalShell = terminalWorkArea.parentElement as HTMLElement
 
     expect(paneColumn.className).toContain('min-h-0')
     expect(paneColumn.className).toContain('overflow-hidden')
