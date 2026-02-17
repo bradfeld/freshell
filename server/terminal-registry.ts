@@ -110,7 +110,11 @@ function providerNotificationArgs(mode: TerminalMode, target: ProviderTarget): s
   return []
 }
 
-function resolveCodingCliCommand(mode: TerminalMode, resumeSessionId?: string, target: ProviderTarget = 'unix') {
+export type ProviderSettings = {
+  permissionMode?: string
+}
+
+function resolveCodingCliCommand(mode: TerminalMode, resumeSessionId?: string, target: ProviderTarget = 'unix', providerSettings?: ProviderSettings) {
   if (mode === 'shell') return null
   const spec = CODING_CLI_COMMANDS[mode]
   const command = process.env[spec.envVar] || spec.defaultCommand
@@ -123,7 +127,11 @@ function resolveCodingCliCommand(mode: TerminalMode, resumeSessionId?: string, t
       logger.warn({ mode, resumeSessionId }, 'Resume requested but no resume args configured')
     }
   }
-  return { command, args: [...providerArgs, ...resumeArgs], label: spec.label }
+  const settingsArgs: string[] = []
+  if (providerSettings?.permissionMode && providerSettings.permissionMode !== 'default') {
+    settingsArgs.push('--permission-mode', providerSettings.permissionMode)
+  }
+  return { command, args: [...providerArgs, ...settingsArgs, ...resumeArgs], label: spec.label }
 }
 
 function normalizeResumeSessionId(mode: TerminalMode, resumeSessionId?: string): string | undefined {
@@ -521,7 +529,7 @@ function buildPowerShellCommand(command: string, args: string[]): string {
   return invocation
 }
 
-export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: ShellType, resumeSessionId?: string) {
+export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shell: ShellType, resumeSessionId?: string, providerSettings?: ProviderSettings) {
   const env = {
     ...process.env,
     TERM: process.env.TERM || 'xterm-256color',
@@ -579,7 +587,7 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
         return { file: wsl, args, cwd: undefined, env }
       }
 
-      const cli = resolveCodingCliCommand(mode, normalizedResume, 'unix')
+      const cli = resolveCodingCliCommand(mode, normalizedResume, 'unix', providerSettings)
       if (!cli) {
         args.push('--exec', 'bash', '-l')
         return { file: wsl, args, cwd: undefined, env }
@@ -616,7 +624,7 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
         }
         return { file, args: ['/K'], cwd: procCwd, env }
       }
-      const cli = resolveCodingCliCommand(mode, normalizedResume, 'windows')
+      const cli = resolveCodingCliCommand(mode, normalizedResume, 'windows', providerSettings)
       const cmd = cli?.command || mode
       const command = buildCmdCommand(cmd, cli?.args || [])
       const cd = winCwd ? `cd /d ${quoteCmdArg(winCwd)} && ` : ''
@@ -647,7 +655,7 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
       return { file, args: ['-NoLogo'], cwd: procCwd, env }
     }
 
-    const cli = resolveCodingCliCommand(mode, normalizedResume, 'windows')
+    const cli = resolveCodingCliCommand(mode, normalizedResume, 'windows', providerSettings)
     const cmd = cli?.command || mode
     const invocation = buildPowerShellCommand(cmd, cli?.args || [])
     const cd = winCwd ? `Set-Location -LiteralPath ${quotePowerShellLiteral(winCwd)}; ` : ''
@@ -662,7 +670,7 @@ export function buildSpawnSpec(mode: TerminalMode, cwd: string | undefined, shel
     return { file: systemShell, args: ['-l'], cwd: unixCwd, env }
   }
 
-  const cli = resolveCodingCliCommand(mode, normalizedResume, 'unix')
+  const cli = resolveCodingCliCommand(mode, normalizedResume, 'unix', providerSettings)
   const cmd = cli?.command || mode
   const args = cli?.args || []
   return { file: cmd, args, cwd: unixCwd, env }
@@ -848,7 +856,7 @@ export class TerminalRegistry extends EventEmitter {
     }
   }
 
-  create(opts: { mode: TerminalMode; shell?: ShellType; cwd?: string; cols?: number; rows?: number; resumeSessionId?: string }): TerminalRecord {
+  create(opts: { mode: TerminalMode; shell?: ShellType; cwd?: string; cols?: number; rows?: number; resumeSessionId?: string; providerSettings?: ProviderSettings }): TerminalRecord {
     this.reapExitedTerminals()
     if (this.runningCount() >= this.maxTerminals) {
       throw new Error(`Maximum terminal limit (${this.maxTerminals}) reached. Please close some terminals before creating new ones.`)
@@ -862,7 +870,7 @@ export class TerminalRegistry extends EventEmitter {
     const cwd = opts.cwd || getDefaultCwd(this.settings) || (isWindows() ? undefined : os.homedir())
     const normalizedResume = normalizeResumeSessionId(opts.mode, opts.resumeSessionId)
 
-    const { file, args, env, cwd: procCwd } = buildSpawnSpec(opts.mode, cwd, opts.shell || 'system', normalizedResume)
+    const { file, args, env, cwd: procCwd } = buildSpawnSpec(opts.mode, cwd, opts.shell || 'system', normalizedResume, opts.providerSettings)
 
     const endSpawnTimer = startPerfTimer(
       'terminal_spawn',
