@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { configureStore } from '@reduxjs/toolkit'
 import { Provider } from 'react-redux'
 import tabsReducer from '@/store/tabsSlice'
@@ -8,6 +8,13 @@ import settingsReducer, { defaultSettings } from '@/store/settingsSlice'
 import connectionReducer from '@/store/connectionSlice'
 import sessionActivityReducer from '@/store/sessionActivitySlice'
 import type { TerminalPaneContent } from '@/store/paneTypes'
+
+const wsMocks = vi.hoisted(() => ({
+  send: vi.fn(),
+  connect: vi.fn(() => Promise.resolve()),
+  onMessage: vi.fn(() => vi.fn()),
+  onReconnect: vi.fn(() => vi.fn()),
+}))
 
 vi.mock('@/components/terminal/terminal-runtime', () => ({
   createTerminalRuntime: () => ({
@@ -42,10 +49,10 @@ vi.mock('@xterm/xterm', () => ({
 
 vi.mock('@/lib/ws-client', () => ({
   getWsClient: vi.fn(() => ({
-    send: vi.fn(),
-    onMessage: vi.fn(() => vi.fn()),
-    onReconnect: vi.fn(() => vi.fn()),
-    connect: vi.fn(() => Promise.resolve()),
+    send: wsMocks.send,
+    onMessage: wsMocks.onMessage,
+    onReconnect: wsMocks.onReconnect,
+    connect: wsMocks.connect,
   })),
 }))
 
@@ -125,6 +132,12 @@ function createVisualViewportMock(height: number, offsetTop = 0): VisualViewport
   }
 }
 
+function getTerminalInputMessages() {
+  return wsMocks.send.mock.calls
+    .map((call) => call[0] as { type?: string; terminalId?: string; data?: string })
+    .filter((msg) => msg.type === 'terminal.input')
+}
+
 describe('TerminalView mobile viewport handling', () => {
   let originalVisualViewport: VisualViewport | undefined
   let originalInnerHeight: number
@@ -154,7 +167,7 @@ describe('TerminalView mobile viewport handling', () => {
     cancelAnimationFrameSpy = null
   })
 
-  it('applies touch-action none and keyboard inset height on mobile', async () => {
+  it('applies touch-action none and accounts for toolbar plus keyboard inset on mobile', async () => {
     const viewport = createVisualViewportMock(780, 0)
     Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
     Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
@@ -168,8 +181,10 @@ describe('TerminalView mobile viewport handling', () => {
     )
 
     const terminalContainer = getByTestId('terminal-xterm-container')
+    const toolbar = getByTestId('mobile-terminal-toolbar')
     expect(terminalContainer.style.touchAction).toBe('none')
-    expect(terminalContainer.style.height).toBe('calc(100% - 120px)')
+    expect(terminalContainer.style.height).toBe('calc(100% - 160px)')
+    expect(toolbar.style.bottom).toBe('120px')
 
     act(() => {
       viewport.height = 860 // Inset 40px: below activation threshold
@@ -177,7 +192,8 @@ describe('TerminalView mobile viewport handling', () => {
     })
 
     await waitFor(() => {
-      expect(terminalContainer.style.height).toBe('')
+      expect(terminalContainer.style.height).toBe('calc(100% - 40px)')
+      expect(toolbar.style.bottom).toBe('0px')
     })
   })
 
@@ -197,9 +213,10 @@ describe('TerminalView mobile viewport handling', () => {
     const terminalContainer = getByTestId('terminal-xterm-container')
     expect(terminalContainer.style.touchAction || '').toBe('')
     expect(terminalContainer.style.height).toBe('')
+    expect(screen.queryByTestId('mobile-terminal-toolbar')).not.toBeInTheDocument()
   })
 
-  it('does not render mobile key toolbar on mobile', () => {
+  it('renders mobile key toolbar, keeps keys horizontally shrinkable, and sends sticky ctrl sequences', () => {
     const viewport = createVisualViewportMock(860, 0)
     Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
     Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
@@ -216,6 +233,42 @@ describe('TerminalView mobile viewport handling', () => {
         />
       </Provider>
     )
-    expect(screen.queryByTestId('mobile-terminal-toolbar')).not.toBeInTheDocument()
+
+    const toolbar = screen.getByTestId('mobile-terminal-toolbar')
+    const buttons = toolbar.querySelectorAll('button')
+    expect(buttons.length).toBe(7)
+    for (const button of buttons) {
+      expect(button.className).toMatch(/\bflex-1\b/)
+      expect(button.className).toMatch(/\bmin-w-0\b/)
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Esc key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tab key' }))
+
+    const ctrl = screen.getByRole('button', { name: 'Toggle Ctrl modifier' })
+    fireEvent.click(ctrl)
+    expect(ctrl).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Up key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Left key' }))
+
+    const inputMessages = getTerminalInputMessages()
+    expect(inputMessages).toEqual([
+      { type: 'terminal.input', terminalId: 'term-1', data: '\u001b' },
+      { type: 'terminal.input', terminalId: 'term-1', data: '\t' },
+      { type: 'terminal.input', terminalId: 'term-1', data: '\u001b[1;5A' },
+      { type: 'terminal.input', terminalId: 'term-1', data: '\u001b[1;5D' },
+    ])
+
+    fireEvent.click(ctrl)
+    expect(ctrl).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'Right key' }))
+
+    const finalInputMessages = getTerminalInputMessages()
+    expect(finalInputMessages.at(-1)).toEqual({
+      type: 'terminal.input',
+      terminalId: 'term-1',
+      data: '\u001b[C',
+    })
   })
 })

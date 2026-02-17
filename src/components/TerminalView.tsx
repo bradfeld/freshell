@@ -47,6 +47,7 @@ const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 3
 const RATE_LIMIT_RETRY_BASE_MS = 250
 const RATE_LIMIT_RETRY_MAX_MS = 1000
 const KEYBOARD_INSET_ACTIVATION_PX = 80
+const MOBILE_KEYBAR_HEIGHT_PX = 40
 const TAP_MULTI_INTERVAL_MS = 350
 const TAP_MAX_DISTANCE_PX = 24
 const TOUCH_SCROLL_PIXELS_PER_LINE = 18
@@ -78,6 +79,34 @@ interface TerminalViewProps {
   hidden?: boolean
 }
 
+type MobileToolbarKeyId = 'esc' | 'tab' | 'ctrl' | 'up' | 'down' | 'left' | 'right'
+
+const MOBILE_TOOLBAR_KEYS: Array<{ id: MobileToolbarKeyId; label: string }> = [
+  { id: 'esc', label: 'Esc' },
+  { id: 'tab', label: 'Tab' },
+  { id: 'ctrl', label: 'Ctrl' },
+  { id: 'up', label: 'Up' },
+  { id: 'down', label: 'Down' },
+  { id: 'left', label: 'Left' },
+  { id: 'right', label: 'Right' },
+]
+
+function resolveMobileToolbarInput(keyId: Exclude<MobileToolbarKeyId, 'ctrl'>, ctrlActive: boolean): string {
+  if (ctrlActive) {
+    if (keyId === 'up') return '\u001b[1;5A'
+    if (keyId === 'down') return '\u001b[1;5B'
+    if (keyId === 'right') return '\u001b[1;5C'
+    if (keyId === 'left') return '\u001b[1;5D'
+  }
+
+  if (keyId === 'esc') return '\u001b'
+  if (keyId === 'tab') return '\t'
+  if (keyId === 'up') return '\u001b[A'
+  if (keyId === 'down') return '\u001b[B'
+  if (keyId === 'right') return '\u001b[C'
+  return '\u001b[D'
+}
+
 export default function TerminalView({ tabId, paneId, paneContent, hidden }: TerminalViewProps) {
   const dispatch = useAppDispatch()
   const isMobile = useMobile()
@@ -100,6 +129,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ resultIndex: number; resultCount: number } | null>(null)
   const [keyboardInsetPx, setKeyboardInsetPx] = useState(0)
+  const [mobileCtrlActive, setMobileCtrlActive] = useState(false)
   const setPendingLinkUriRef = useRef(setPendingLinkUri)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -553,6 +583,17 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       termRef.current?.focus()
     })
   }, [])
+
+  const sendMobileToolbarKey = useCallback((keyId: MobileToolbarKeyId) => {
+    if (keyId === 'ctrl') {
+      setMobileCtrlActive((prev) => !prev)
+      return
+    }
+
+    const input = resolveMobileToolbarInput(keyId, mobileCtrlActive)
+    sendInput(input)
+    termRef.current?.focus()
+  }, [mobileCtrlActive, sendInput])
 
   // Init xterm once
   useEffect(() => {
@@ -1208,15 +1249,14 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
   }
 
   const showSpinner = terminalContent.status === 'creating' || isAttaching
-  const mobileBottomInsetPx = isMobile ? keyboardInsetPx : 0
-  const terminalContainerStyle = useMemo(() => {
-    if (!isMobile) return undefined
-
-    return {
+  const mobileToolbarBottomPx = isMobile ? keyboardInsetPx : 0
+  const mobileBottomInsetPx = isMobile ? keyboardInsetPx + MOBILE_KEYBAR_HEIGHT_PX : 0
+  const terminalContainerStyle = !isMobile
+    ? undefined
+    : {
       touchAction: 'none' as const,
       ...(mobileBottomInsetPx > 0 ? { height: `calc(100% - ${mobileBottomInsetPx}px)` } : {}),
     }
-  }, [isMobile, mobileBottomInsetPx])
 
   return (
     <div
@@ -1235,6 +1275,35 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         onTouchEnd={isMobile ? handleMobileTouchEnd : undefined}
         onTouchCancel={isMobile ? handleMobileTouchEnd : undefined}
       />
+      {isMobile && (
+        <div
+          data-testid="mobile-terminal-toolbar"
+          className="absolute inset-x-0 z-20 px-1 pb-1"
+          style={{ bottom: `${mobileToolbarBottomPx}px` }}
+        >
+          <div className="flex h-8 w-full items-center gap-1 rounded-md border border-border/70 bg-background/95 p-1 shadow-sm">
+            {MOBILE_TOOLBAR_KEYS.map((key) => {
+              const isCtrl = key.id === 'ctrl'
+              const ctrlPressed = isCtrl && mobileCtrlActive
+              return (
+                <button
+                  key={key.id}
+                  type="button"
+                  className={cn(
+                    'h-full min-w-0 flex-1 rounded-sm border border-border/60 px-1 text-[11px] font-medium leading-none',
+                    ctrlPressed ? 'bg-primary/20 text-primary border-primary/40' : 'bg-muted/80 text-foreground',
+                  )}
+                  aria-label={isCtrl ? 'Toggle Ctrl modifier' : `${key.label} key`}
+                  aria-pressed={isCtrl ? ctrlPressed : undefined}
+                  onClick={() => sendMobileToolbarKey(key.id)}
+                >
+                  {key.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {showSpinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
           <div className="flex flex-col items-center gap-3">

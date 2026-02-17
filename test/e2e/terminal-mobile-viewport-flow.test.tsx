@@ -139,8 +139,10 @@ describe('terminal mobile viewport flow (e2e)', () => {
     )
 
     const terminalContainer = getByTestId('terminal-xterm-container')
+    const toolbar = getByTestId('mobile-terminal-toolbar')
     expect(terminalContainer.style.touchAction).toBe('none')
-    expect(terminalContainer.style.height).toBe('calc(100% - 140px)')
+    expect(terminalContainer.style.height).toBe('calc(100% - 180px)')
+    expect(toolbar.style.bottom).toBe('140px')
 
     act(() => {
       viewport.height = 870
@@ -149,6 +151,7 @@ describe('terminal mobile viewport flow (e2e)', () => {
       }
     })
 
-    expect(terminalContainer.style.height).toBe('')
+    expect(terminalContainer.style.height).toBe('calc(100% - 40px)')
+    expect(toolbar.style.bottom).toBe('0px')
   })
 })
