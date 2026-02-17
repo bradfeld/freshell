@@ -255,17 +255,6 @@ describe('App Mobile - Sidebar Backdrop', () => {
     expect(screen.getByTestId('mock-sidebar')).toHaveAttribute('data-full-width', 'true')
   })
 
-  it('keeps header onscreen by making pane area shrinkable in mobile layout', async () => {
-    renderApp()
-
-    const terminalWorkArea = await screen.findByTestId('terminal-work-area')
-    const paneColumn = screen.getByTestId('app-pane-column')
-
-    expect(terminalWorkArea.className).toContain('min-h-0')
-    expect(paneColumn.className).toContain('min-h-0')
-    expect(paneColumn.className).toContain('overflow-hidden')
-  })
-
   it('closes sidebar when backdrop is clicked', async () => {
     renderApp()
 
@@ -340,5 +329,36 @@ describe('App Mobile - Sidebar Backdrop', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('mock-sidebar')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('App Mobile - Header Pinning', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    localStorage.setItem('freshell.auth-token', 'test-token-abc123')
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(defaultSettings)
+      if (url === '/api/platform') return Promise.resolve({ platform: 'linux' })
+      if (url === '/api/sessions') return Promise.resolve([])
+      return Promise.resolve({})
+    })
+    ;(globalThis as any).setMobileForTest(true)
+  })
+
+  afterEach(() => {
+    cleanup()
+    ;(globalThis as any).setMobileForTest(false)
+  })
+
+  it('keeps header onscreen by making pane area shrinkable in mobile layout', async () => {
+    renderApp()
+
+    const terminalWorkArea = await screen.findByTestId('terminal-work-area')
+    const paneColumn = screen.getByTestId('app-pane-column')
+
+    expect(terminalWorkArea.className).toMatch(/\bmin-h-0\b/)
+    expect(paneColumn.className).toMatch(/\bmin-h-0\b/)
+    expect(paneColumn.className).toMatch(/\boverflow-hidden\b/)
   })
 })
