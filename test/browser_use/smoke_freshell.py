@@ -412,7 +412,7 @@ async def _run(args: argparse.Namespace) -> int:
         # These checks intentionally avoid reading the token value to keep it out of any debug logs.
         auth_present = await page.evaluate("() => !!localStorage.getItem('freshell.auth-token')")
         token_removed = await page.evaluate("() => !new URLSearchParams(window.location.search).has('token')")
-        has_add_pane = await page.evaluate("() => !!document.querySelector('button[aria-label=\"Add pane\"]')")
+        has_add_pane = await page.evaluate("() => !!document.querySelector('button[aria-label=\"Split right\"]')")
         has_connected = await page.evaluate("() => !!document.querySelector('[title=\"Connected\"]')")
         if auth_present and token_removed and has_add_pane and has_connected:
           ready = True

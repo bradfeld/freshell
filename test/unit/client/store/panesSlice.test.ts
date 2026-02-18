@@ -2038,6 +2038,38 @@ describe('panesSlice', () => {
 
       expect(countLeaves(root)).toBe(3)
     })
+
+    it('splits the active pane downward when direction is vertical', () => {
+      const tabId = 'tab1'
+      const leaf: PaneNode = { type: 'leaf', id: 'active', content: terminalContent('active-req') }
+      const state = makeState({ [tabId]: leaf }, { [tabId]: 'active' })
+      const result = panesReducer(state, addPane({
+        tabId,
+        newContent: { kind: 'picker' },
+        direction: 'vertical',
+      }))
+      const root = result.layouts[tabId]
+      expect(root.type).toBe('split')
+      if (root.type !== 'split') return
+      expect(root.direction).toBe('vertical')
+      expect(root.sizes).toEqual([50, 50])
+      expect(root.children[0]).toEqual(leaf)
+      expect(root.children[1].type).toBe('leaf')
+    })
+
+    it('defaults to horizontal split when no direction specified', () => {
+      const tabId = 'tab1'
+      const leaf: PaneNode = { type: 'leaf', id: 'active', content: terminalContent('active-req') }
+      const state = makeState({ [tabId]: leaf }, { [tabId]: 'active' })
+      const result = panesReducer(state, addPane({
+        tabId,
+        newContent: { kind: 'picker' },
+      }))
+      const root = result.layouts[tabId]
+      expect(root.type).toBe('split')
+      if (root.type !== 'split') return
+      expect(root.direction).toBe('horizontal')
+    })
   })
 
   describe('updatePaneTitle', () => {

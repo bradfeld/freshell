@@ -94,6 +94,12 @@ vi.mock('lucide-react', () => ({
   Search: ({ className }: { className?: string }) => (
     <svg data-testid="search-icon" className={className} />
   ),
+  Columns2: ({ className }: { className?: string }) => (
+    <svg data-testid="columns2-icon" className={className} />
+  ),
+  Rows2: ({ className }: { className?: string }) => (
+    <svg data-testid="rows2-icon" className={className} />
+  ),
 }))
 
 // Mock TerminalView component to avoid xterm.js dependencies
@@ -219,7 +225,7 @@ describe('Editor Pane Integration', () => {
     )
 
     // Click FAB to add picker pane
-    await user.click(screen.getByRole('button', { name: /add pane/i }))
+    await user.click(screen.getByRole('button', { name: /split right/i }))
 
     // Select Editor from picker (using keyboard shortcut for reliability)
     await user.keyboard('e')
@@ -255,7 +261,7 @@ describe('Editor Pane Integration', () => {
     )
 
     // Add editor pane via picker
-    await user.click(screen.getByRole('button', { name: /add pane/i }))
+    await user.click(screen.getByRole('button', { name: /split right/i }))
     await user.keyboard('e')
 
     // Should see the path input
@@ -517,7 +523,7 @@ describe('Editor Pane Integration', () => {
     })
 
     // Add another pane via FAB picker
-    await user.click(screen.getByRole('button', { name: /add pane/i }))
+    await user.click(screen.getByRole('button', { name: /split right/i }))
     await user.keyboard('s') // Select shell
 
     // Original editor content should still be present
@@ -613,7 +619,7 @@ describe('Editor Pane Integration', () => {
     })
 
     // Add an editor pane
-    await user.click(screen.getByRole('button', { name: /add pane/i }))
+    await user.click(screen.getByRole('button', { name: /split right/i }))
     // Click the Editor option directly (keyboard shortcuts require transition animation)
     await user.click(screen.getByText('Editor'))
 

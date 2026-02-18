@@ -219,7 +219,7 @@ async def setup_browser(args, log, token, base_url):
                 "() => !new URLSearchParams(window.location.search).has('token')"
             )
             has_add_pane = await page.evaluate(
-                '() => !!document.querySelector(\'button[aria-label="Add pane"]\')'
+                '() => !!document.querySelector(\'button[aria-label="Split right"]\')'
             )
             has_connected = await page.evaluate(
                 "() => !!document.querySelector('[title=\"Connected\"]')"

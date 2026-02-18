@@ -4,8 +4,11 @@ import FloatingActionButton from '@/components/panes/FloatingActionButton'
 
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
-  Plus: ({ className }: { className?: string }) => (
-    <svg data-testid="plus-icon" className={className} />
+  Columns2: ({ className }: { className?: string }) => (
+    <svg data-testid="columns2-icon" className={className} />
+  ),
+  Rows2: ({ className }: { className?: string }) => (
+    <svg data-testid="rows2-icon" className={className} />
   ),
 }))
 
@@ -20,33 +23,35 @@ describe('FloatingActionButton', () => {
     cleanup()
   })
 
-  it('renders the FAB button', () => {
+  it('renders both split-right and split-down buttons', () => {
     render(<FloatingActionButton onAdd={onAdd} />)
-    expect(screen.getByTitle('Add pane')).toBeInTheDocument()
+    expect(screen.getByTitle('Split right')).toBeInTheDocument()
+    expect(screen.getByTitle('Split down')).toBeInTheDocument()
   })
 
-  it('calls onAdd when clicked', () => {
+  it('calls onAdd with horizontal when split-right is clicked', () => {
     render(<FloatingActionButton onAdd={onAdd} />)
-    fireEvent.click(screen.getByTitle('Add pane'))
+    fireEvent.click(screen.getByTitle('Split right'))
     expect(onAdd).toHaveBeenCalledTimes(1)
+    expect(onAdd).toHaveBeenCalledWith('horizontal')
   })
 
-  it('has aria-label for accessibility', () => {
+  it('calls onAdd with vertical when split-down is clicked', () => {
     render(<FloatingActionButton onAdd={onAdd} />)
-    expect(screen.getByTitle('Add pane')).toHaveAttribute('aria-label', 'Add pane')
-  })
-
-  it('calls onAdd on Enter key', () => {
-    render(<FloatingActionButton onAdd={onAdd} />)
-    const button = screen.getByTitle('Add pane')
-    fireEvent.keyDown(button, { key: 'Enter' })
+    fireEvent.click(screen.getByTitle('Split down'))
     expect(onAdd).toHaveBeenCalledTimes(1)
+    expect(onAdd).toHaveBeenCalledWith('vertical')
   })
 
-  it('calls onAdd on Space key', () => {
+  it('has aria-labels for accessibility', () => {
     render(<FloatingActionButton onAdd={onAdd} />)
-    const button = screen.getByTitle('Add pane')
-    fireEvent.keyDown(button, { key: ' ' })
-    expect(onAdd).toHaveBeenCalledTimes(1)
+    expect(screen.getByTitle('Split right')).toHaveAttribute('aria-label', 'Split right')
+    expect(screen.getByTitle('Split down')).toHaveAttribute('aria-label', 'Split down')
+  })
+
+  it('renders correct icons for each direction', () => {
+    render(<FloatingActionButton onAdd={onAdd} />)
+    expect(screen.getByTestId('columns2-icon')).toBeInTheDocument()
+    expect(screen.getByTestId('rows2-icon')).toBeInTheDocument()
   })
 })

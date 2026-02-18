@@ -428,15 +428,17 @@ export const panesSlice = createSlice({
     },
 
     /**
-     * Add a pane by splitting the active pane horizontally (to the right).
+     * Add a pane by splitting the active pane in the given direction.
+     * Defaults to horizontal (to the right) if no direction is specified.
      * Preserves the existing layout structure instead of rebuilding a grid.
-     * The new pane is placed to the right of the active pane and becomes active.
+     * The new pane becomes active.
      */
     addPane: (
       state,
       action: PayloadAction<{
         tabId: string
         newContent: PaneContentInput
+        direction?: 'horizontal' | 'vertical'
       }>
     ) => {
       const { tabId, newContent } = action.payload
@@ -459,11 +461,11 @@ export const panesSlice = createSlice({
         content: normalizedContent,
       }
 
-      // Replace the active pane with a horizontal split: [activePane, newPane]
+      // Replace the active pane with a split: [activePane, newPane]
       const replacement: PaneNode = {
         type: 'split',
         id: nanoid(),
-        direction: 'horizontal',
+        direction: action.payload.direction || 'horizontal',
         sizes: [50, 50],
         children: [{ ...activeLeaf }, newLeaf],
       }

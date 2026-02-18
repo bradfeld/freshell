@@ -80,6 +80,12 @@ vi.mock('lucide-react', () => ({
   Search: ({ className }: { className?: string }) => (
     <svg data-testid="search-icon" className={className} />
   ),
+  Columns2: ({ className }: { className?: string }) => (
+    <svg data-testid="columns2-icon" className={className} />
+  ),
+  Rows2: ({ className }: { className?: string }) => (
+    <svg data-testid="rows2-icon" className={className} />
+  ),
 }))
 
 // Mock PaneIcon to avoid transitive dependency issues
@@ -296,8 +302,9 @@ describe('PaneLayout', () => {
         store
       )
 
-      // FAB should be present
-      expect(screen.getByTitle('Add pane')).toBeInTheDocument()
+      // FAB should have both split buttons
+      expect(screen.getByTitle('Split right')).toBeInTheDocument()
+      expect(screen.getByTitle('Split down')).toBeInTheDocument()
     })
   })
 
@@ -321,7 +328,7 @@ describe('PaneLayout', () => {
       )
 
       // Click FAB to add picker pane
-      const fabButton = screen.getByTitle('Add pane')
+      const fabButton = screen.getByTitle('Split right')
       fireEvent.click(fabButton)
 
       // Layout should now be a split
@@ -366,7 +373,7 @@ describe('PaneLayout', () => {
       )
 
       // Click FAB to add picker pane
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
@@ -405,12 +412,39 @@ describe('PaneLayout', () => {
       )
 
       // Click FAB to add picker pane
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       // With grid layout, 2 panes are always horizontal (side by side)
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
       expect(splitNode.direction).toBe('horizontal')
+    })
+
+    it('creates vertical split when split-down button is clicked', async () => {
+      const paneId = 'pane-1'
+      const store = createStore({
+        layouts: {
+          'tab-1': {
+            type: 'leaf',
+            id: paneId,
+            content: createTerminalContent(),
+          },
+        },
+        activePane: { 'tab-1': paneId },
+      })
+
+      renderWithStore(
+        <PaneLayout tabId="tab-1" defaultContent={createTerminalContent()} />,
+        store
+      )
+
+      // Click split-down button
+      fireEvent.click(screen.getByTitle('Split down'))
+
+      const state = store.getState().panes
+      const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
+      expect(splitNode.direction).toBe('vertical')
+      expect(splitNode.children).toHaveLength(2)
     })
 
     it('sets new pane as active after adding', async () => {
@@ -432,7 +466,7 @@ describe('PaneLayout', () => {
       )
 
       // Click FAB to add picker pane
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
@@ -462,7 +496,7 @@ describe('PaneLayout', () => {
       )
 
       // Click FAB to add picker pane
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       // Layout should now be a split with picker content
       const state = store.getState().panes
@@ -492,7 +526,7 @@ describe('PaneLayout', () => {
       )
 
       // Click FAB to add picker pane
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       const state = store.getState().panes
       const splitNode = state.layouts['tab-1'] as Extract<PaneNode, { type: 'split' }>
@@ -522,7 +556,7 @@ describe('PaneLayout', () => {
       )
 
       // Click FAB to add picker pane - falls back to first leaf when no active pane is set
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       // Layout should now be a split with 2 panes
       const state = store.getState().panes
@@ -548,14 +582,14 @@ describe('PaneLayout', () => {
       )
 
       // Add first picker pane
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       // Get the new active pane (which should be the newly added one)
       let state = store.getState().panes
       const firstNewPaneId = state.activePane['tab-1']
 
       // Add second picker pane
-      fireEvent.click(screen.getByTitle('Add pane'))
+      fireEvent.click(screen.getByTitle('Split right'))
 
       state = store.getState().panes
       // Should have 3 panes now in a nested structure

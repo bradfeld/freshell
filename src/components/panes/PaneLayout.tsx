@@ -32,10 +32,11 @@ export default function PaneLayout({ tabId, defaultContent, hidden }: PaneLayout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, tabId, layout])
 
-  const handleAddPane = useCallback(() => {
+  const handleAddPane = useCallback((direction: 'horizontal' | 'vertical') => {
     dispatch(addPane({
       tabId,
       newContent: { kind: 'picker' },
+      direction,
     }))
   }, [dispatch, tabId])
 
