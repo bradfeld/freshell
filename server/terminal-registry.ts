@@ -35,6 +35,7 @@ type CodingCliCommandSpec = {
   envVar: string
   defaultCommand: string
   resumeArgs?: (sessionId: string) => string[]
+  supportsPermissionMode?: boolean
 }
 
 const CODING_CLI_COMMANDS: Record<Exclude<TerminalMode, 'shell'>, CodingCliCommandSpec> = {
@@ -43,6 +44,7 @@ const CODING_CLI_COMMANDS: Record<Exclude<TerminalMode, 'shell'>, CodingCliComma
     envVar: 'CLAUDE_CMD',
     defaultCommand: 'claude',
     resumeArgs: (sessionId) => ['--resume', sessionId],
+    supportsPermissionMode: true,
   },
   codex: {
     label: 'Codex',
@@ -110,7 +112,7 @@ function providerNotificationArgs(mode: TerminalMode, target: ProviderTarget): s
   return []
 }
 
-export type ProviderSettings = {
+type ProviderSettings = {
   permissionMode?: string
 }
 
@@ -128,7 +130,7 @@ function resolveCodingCliCommand(mode: TerminalMode, resumeSessionId?: string, t
     }
   }
   const settingsArgs: string[] = []
-  if (providerSettings?.permissionMode && providerSettings.permissionMode !== 'default') {
+  if (spec.supportsPermissionMode && providerSettings?.permissionMode && providerSettings.permissionMode !== 'default') {
     settingsArgs.push('--permission-mode', providerSettings.permissionMode)
   }
   return { command, args: [...providerArgs, ...settingsArgs, ...resumeArgs], label: spec.label }
