@@ -517,6 +517,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
     if (osc.cleaned) {
       try { term.write(osc.cleaned) } catch { /* disposed */ }
     }
+    try { term.scrollToBottom() } catch { /* disposed */ }
     for (const event of osc.events) {
       handleOsc52Event(event)
     }
@@ -786,6 +787,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
       selectAll: () => term.selectAll(),
       clearScrollback: () => term.clear(),
       reset: () => term.reset(),
+      scrollToBottom: () => { try { term.scrollToBottom() } catch { /* disposed */ } },
       hasSelection: () => term.getSelection().length > 0,
       openSearch: () => setSearchOpen(true),
     })
@@ -865,6 +867,13 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         if (tid) {
           ws.send({ type: 'terminal.input', terminalId: tid, data: '\n' })
         }
+        return false
+      }
+
+      // Scroll to bottom: Cmd+End (macOS) / Ctrl+End (other)
+      if ((event.metaKey || event.ctrlKey) && event.code === 'End' && event.type === 'keydown' && !event.repeat) {
+        event.preventDefault()
+        term.scrollToBottom()
         return false
       }
 

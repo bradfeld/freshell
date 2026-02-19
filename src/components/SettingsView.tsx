@@ -1111,6 +1111,7 @@ export default function SettingsView({ onNavigate, onFirewallTerminal, onSharePa
               <ShortcutRow keys={['Ctrl', 'Shift', ']']} description="Next tab" />
               <ShortcutRow keys={['Shift', 'Enter']} description="Newline (same as Ctrl+J)" />
               <ShortcutRow keys={['Ctrl', 'J']} description="Newline" />
+              <ShortcutRow keys={['Cmd/Ctrl', 'End']} description="Scroll to bottom" />
             </div>
           </SettingsSection>
 
