@@ -28,6 +28,29 @@ const x = 1
     expect(screen.getByText('const x = 1')).toBeInTheDocument()
   })
 
+  it('renders empty content without error', () => {
+    const { container } = render(<MarkdownPreview content="" />)
+    // The prose wrapper should still render even with no content
+    expect(container.querySelector('.prose')).toBeInTheDocument()
+  })
+
+  it('applies prose typography classes for styled markdown rendering', () => {
+    const { container } = render(<MarkdownPreview content="# Styled" />)
+    const proseEl = container.querySelector('.prose')
+    expect(proseEl).toBeInTheDocument()
+    expect(proseEl).toHaveClass('prose-sm')
+    expect(proseEl).toHaveClass('dark:prose-invert')
+  })
+
+  it('uses semantic bg-background token instead of hardcoded colors', () => {
+    const { container } = render(<MarkdownPreview content="test" />)
+    const outer = container.querySelector('.markdown-preview')
+    expect(outer).toHaveClass('bg-background')
+    // Should NOT have hardcoded color classes
+    expect(outer).not.toHaveClass('bg-white')
+    expect(outer).not.toHaveClass('dark:bg-gray-900')
+  })
+
   it('renders GFM tables', () => {
     render(
       <MarkdownPreview
