@@ -6,6 +6,16 @@ export type SessionsProjectsDiff = {
   removeProjectPaths: string[]
 }
 
+function fieldValuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+
+  const aIsObject = typeof a === 'object' && a !== null
+  const bIsObject = typeof b === 'object' && b !== null
+  if (!aIsObject || !bIsObject) return false
+
+  return isDeepStrictEqual(a, b)
+}
+
 function sessionsEqual(a: CodingCliSession, b: CodingCliSession): boolean {
   // Compare all own enumerable fields, so new session fields can't be silently ignored.
   if ((a.provider || 'claude') !== (b.provider || 'claude')) return false
@@ -13,13 +23,13 @@ function sessionsEqual(a: CodingCliSession, b: CodingCliSession): boolean {
   for (const key in a) {
     if (!Object.prototype.hasOwnProperty.call(a, key)) continue
     if (key === 'provider') continue
-    if (!isDeepStrictEqual((a as any)[key], (b as any)[key])) return false
+    if (!fieldValuesEqual((a as any)[key], (b as any)[key])) return false
   }
 
   for (const key in b) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) continue
     if (key === 'provider') continue
-    if (!isDeepStrictEqual((a as any)[key], (b as any)[key])) return false
+    if (!fieldValuesEqual((a as any)[key], (b as any)[key])) return false
   }
 
   return true

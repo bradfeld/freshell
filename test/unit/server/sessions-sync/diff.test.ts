@@ -90,6 +90,8 @@ describe('diffProjects', () => {
       }]),
     ]
 
+    expect(prev[0].sessions[0].tokenUsage).not.toBe(next[0].sessions[0].tokenUsage)
+
     const diff = diffProjects(prev, next)
     expect(diff.removeProjectPaths).toEqual([])
     expect(diff.upsertProjects).toEqual([])
