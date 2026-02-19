@@ -1285,28 +1285,28 @@ describe('shutdownGracefully', () => {
   })
 
   it('should send SIGTERM to running terminals', async () => {
-    registry.create({ mode: 'shell' })
-    registry.create({ mode: 'shell' })
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    try {
+      registry.create({ mode: 'shell' })
+      registry.create({ mode: 'shell' })
 
-    const ptys = mockPtyProcess.instances
+      const ptys = mockPtyProcess.instances
 
-    // Simulate processes that exit when kill arrives
-    for (const pty of ptys) {
-      pty.kill.mockImplementation(() => {
-        setTimeout(() => pty._emitExit(0), 10)
-      })
-    }
+      // Simulate processes that exit when SIGTERM arrives
+      for (const pty of ptys) {
+        pty.kill.mockImplementation(() => {
+          setTimeout(() => pty._emitExit(0), 10)
+        })
+      }
 
-    await registry.shutdownGracefully(5000)
+      await registry.shutdownGracefully(5000)
 
-    for (const pty of ptys) {
-      // On Windows, kill() is called without a signal argument;
-      // on Unix, it's called with 'SIGTERM'
-      if (process.platform === 'win32') {
-        expect(pty.kill).toHaveBeenCalledWith()
-      } else {
+      for (const pty of ptys) {
         expect(pty.kill).toHaveBeenCalledWith('SIGTERM')
       }
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
     }
   })
 
@@ -1325,22 +1325,22 @@ describe('shutdownGracefully', () => {
   })
 
   it('should force-kill terminals after timeout', async () => {
-    registry.create({ mode: 'shell' })
-    const pty = mockPtyProcess.instances[0]
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    try {
+      registry.create({ mode: 'shell' })
+      const pty = mockPtyProcess.instances[0]
 
-    // Never exits on kill
-    pty.kill.mockImplementation(() => {})
+      // Never exits on SIGTERM
+      pty.kill.mockImplementation(() => {})
 
-    await registry.shutdownGracefully(200)
+      await registry.shutdownGracefully(200)
 
-    // Should have been called at least twice: once for graceful kill, once forced
-    expect(pty.kill).toHaveBeenCalledTimes(2)
-    // On Windows, kill() is called without a signal argument;
-    // on Unix, it's called with 'SIGTERM'
-    if (process.platform === 'win32') {
-      expect(pty.kill).toHaveBeenNthCalledWith(1)
-    } else {
+      // Should have been called at least twice: once SIGTERM, once forced
+      expect(pty.kill).toHaveBeenCalledTimes(2)
       expect(pty.kill).toHaveBeenNthCalledWith(1, 'SIGTERM')
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
     }
   })
 
