@@ -67,4 +67,66 @@ describe('DiffView', () => {
     expect(diffEl).not.toBeNull()
     expect(diffEl?.getAttribute('data-file-path')).toBe('/tmp/test.ts')
   })
+
+  // --- word-level highlighting tests ---
+
+  it('renders word-level highlights within changed lines', () => {
+    // "foo" → "bar" should produce word-level highlights
+    render(<DiffView oldStr="const foo = 1" newStr="const bar = 1" />)
+    const figure = screen.getByRole('figure', { name: /diff/i })
+
+    // Word-level change spans get data-word-change attribute
+    const wordSpans = figure.querySelectorAll('[data-word-change]')
+    expect(wordSpans.length).toBeGreaterThan(0)
+
+    const removedWords = figure.querySelectorAll('[data-word-change="removed"]')
+    const addedWords = figure.querySelectorAll('[data-word-change="added"]')
+    expect(removedWords.length).toBeGreaterThan(0)
+    expect(addedWords.length).toBeGreaterThan(0)
+
+    // "foo" should be in a removed word span, "bar" in an added word span
+    const removedTexts = Array.from(removedWords).map(el => el.textContent)
+    const addedTexts = Array.from(addedWords).map(el => el.textContent)
+    expect(removedTexts.some(t => t?.includes('foo'))).toBe(true)
+    expect(addedTexts.some(t => t?.includes('bar'))).toBe(true)
+  })
+
+  it('word highlights not applied to unpaired additions', () => {
+    // Pure addition (no corresponding removal) — no word-level diffs
+    render(<DiffView oldStr="" newStr="brand new line" />)
+    const figure = screen.getByRole('figure', { name: /diff/i })
+
+    // Should NOT have any word-change highlights (no pairing possible)
+    const wordSpans = figure.querySelectorAll('[data-word-change]')
+    expect(wordSpans).toHaveLength(0)
+  })
+
+  // --- compact mode and maxLines tests ---
+
+  it('compact mode shows truncated lines with expand indicator', () => {
+    const oldStr = Array.from({ length: 20 }, (_, i) => `old-line-${i}`).join('\n')
+    const newStr = Array.from({ length: 20 }, (_, i) => `new-line-${i}`).join('\n')
+    render(<DiffView oldStr={oldStr} newStr={newStr} compact />)
+
+    const figure = screen.getByRole('figure', { name: /diff/i })
+    // Compact mode limits to 5 lines
+    const lineDivs = figure.querySelectorAll('.leading-relaxed > div')
+    expect(lineDivs.length).toBeLessThanOrEqual(5)
+
+    // Should show "more lines" indicator
+    expect(screen.getByText(/more line/i)).toBeInTheDocument()
+  })
+
+  it('maxLines truncates at specified count', () => {
+    const oldStr = Array.from({ length: 10 }, (_, i) => `line-${i}\n`).join('')
+    const newStr = Array.from({ length: 10 }, (_, i) => `changed-${i}\n`).join('')
+    render(<DiffView oldStr={oldStr} newStr={newStr} maxLines={3} />)
+
+    const figure = screen.getByRole('figure', { name: /diff/i })
+    const lineDivs = figure.querySelectorAll('.leading-relaxed > div')
+    expect(lineDivs).toHaveLength(3)
+
+    // Should show truncation message
+    expect(screen.getByText(/more line/i)).toBeInTheDocument()
+  })
 })

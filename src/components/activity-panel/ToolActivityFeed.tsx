@@ -2,7 +2,16 @@ import { useRef, useEffect, useState } from 'react'
 import { Terminal, FileText, AlertCircle, Check, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatToolName, formatTimestamp } from '@/lib/activity-panel-utils'
+import ToolDetailPanel from './ToolDetailPanel'
 import type { ActivityPanelEvent } from '@/store/activityPanelTypes'
+
+/** Check if an event is an Edit or Write tool.call that should render a diff viewer. */
+function isEditOrWriteToolCall(panelEvent: ActivityPanelEvent): boolean {
+  const { event } = panelEvent
+  if (event.type !== 'tool.call') return false
+  const toolName = event.tool?.name ?? event.toolCall?.name
+  return toolName === 'Edit' || toolName === 'Write'
+}
 
 interface ToolActivityFeedProps {
   events: ActivityPanelEvent[]
@@ -122,7 +131,9 @@ export default function ToolActivityFeed({ events }: ToolActivityFeedProps) {
       onScroll={handleScroll}
     >
       {events.map((panelEvent) => (
-        <EventRow key={panelEvent.id} panelEvent={panelEvent} />
+        isEditOrWriteToolCall(panelEvent)
+          ? <ToolDetailPanel key={panelEvent.id} panelEvent={panelEvent} />
+          : <EventRow key={panelEvent.id} panelEvent={panelEvent} />
       ))}
     </div>
   )

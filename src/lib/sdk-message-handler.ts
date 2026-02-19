@@ -87,6 +87,9 @@ export function handleSdkMessage(dispatch: AppDispatch, msg: Record<string, unkn
       // Fan-out tool_use and tool_result blocks to the activity panel
       for (const block of content) {
         if (block.type === 'tool_use' && block.name) {
+          // For Edit/Write, include full arguments so the diff viewer can render them.
+          // For other tools, truncate to avoid bloating Redux state.
+          const isEditOrWrite = block.name === 'Edit' || block.name === 'Write'
           dispatch(addActivityEvent({
             sessionId: assistantSessionId,
             event: {
@@ -94,9 +97,18 @@ export function handleSdkMessage(dispatch: AppDispatch, msg: Record<string, unkn
               timestamp: new Date().toISOString(),
               sessionId: assistantSessionId,
               provider: 'claude',
-              toolCall: {
+              tool: {
+                callId: block.id ?? '',
                 name: block.name,
-                args: block.input ? JSON.stringify(block.input).slice(0, 200) : undefined,
+                arguments: isEditOrWrite
+                  ? block.input
+                  : (block.input ? JSON.stringify(block.input).slice(0, 200) : undefined),
+              },
+              // Legacy alias for backward compatibility
+              toolCall: {
+                id: block.id ?? '',
+                name: block.name,
+                arguments: block.input ? JSON.stringify(block.input).slice(0, 200) : undefined,
               },
             },
           }))
