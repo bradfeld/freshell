@@ -12,8 +12,29 @@ export interface ProdCheckResult {
   version?: string
 }
 
-export async function checkProdRunning(_port: number): Promise<ProdCheckResult> {
-  throw new Error('Not implemented')
+export async function checkProdRunning(port: number): Promise<ProdCheckResult> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2000)
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+
+    if (!res.ok) {
+      return { status: 'not-running' }
+    }
+
+    const data = (await res.json()) as { app?: string; version?: string }
+    if (data.app === 'freshell') {
+      return { status: 'running', version: data.version }
+    }
+
+    return { status: 'not-running' }
+  } catch {
+    return { status: 'not-running' }
+  }
 }
 
 export async function main(): Promise<void> {
