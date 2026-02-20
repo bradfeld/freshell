@@ -58,6 +58,10 @@ const MAX_CHUNK_BYTES = Number(process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 const ATTACH_CHUNK_BYTES = Number(process.env.MAX_WS_ATTACH_CHUNK_BYTES || process.env.MAX_WS_CHUNK_BYTES || 500 * 1024)
 const MIN_ATTACH_CHUNK_BYTES = 16 * 1024
 const ATTACH_FRAME_SEND_TIMEOUT_MS = Number(process.env.WS_ATTACH_FRAME_SEND_TIMEOUT_MS || 30_000)
+// Drain-aware sending: wait for buffer to drop below threshold between chunks
+const DRAIN_THRESHOLD_BYTES = Number(process.env.WS_DRAIN_THRESHOLD_BYTES || 512 * 1024) // 512KB
+const DRAIN_TIMEOUT_MS = Number(process.env.WS_DRAIN_TIMEOUT_MS || 30_000) // 30s
+const DRAIN_POLL_INTERVAL_MS = 50
 // Rate limit: max terminal.create requests per client within a sliding window
 const TERMINAL_CREATE_RATE_LIMIT = Number(process.env.TERMINAL_CREATE_RATE_LIMIT || 10)
 const TERMINAL_CREATE_RATE_WINDOW_MS = Number(process.env.TERMINAL_CREATE_RATE_WINDOW_MS || 10_000)
@@ -658,6 +662,35 @@ export class WsHandler {
     })
   }
 
+  /**
+   * Wait for ws.bufferedAmount to drop below threshold.
+   * Returns true if drained, false if timed out or connection closed.
+   * Uses polling because the ws library does not emit 'drain' on WebSocket instances.
+   */
+  private waitForDrain(ws: LiveWebSocket, thresholdBytes: number, timeoutMs: number): Promise<boolean> {
+    if (ws.readyState !== WebSocket.OPEN) return Promise.resolve(false)
+    if ((ws.bufferedAmount ?? 0) <= thresholdBytes) return Promise.resolve(true)
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const settle = (result: boolean) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        clearInterval(poller)
+        ws.off('close', onClose)
+        resolve(result)
+      }
+      const onClose = () => settle(false)
+      const timer = setTimeout(() => settle(false), timeoutMs)
+      const poller = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) { settle(false); return }
+        if ((ws.bufferedAmount ?? 0) <= thresholdBytes) settle(true)
+      }, DRAIN_POLL_INTERVAL_MS)
+      ws.on('close', onClose)
+    })
+  }
+
   private queueAttachFrame(ws: LiveWebSocket, msg: unknown): Promise<boolean> {
     if (ws.readyState !== WebSocket.OPEN) return Promise.resolve(false)
 
@@ -923,10 +956,14 @@ export class WsHandler {
 
       this.safeSend(ws, msg)
 
-      // Yield to event loop between chunks to allow other processing
-      // This helps prevent blocking and allows the buffer to flush
+      // Wait for buffer to drain before sending next chunk
       if (i < chunks.length - 1) {
-        await new Promise<void>((resolve) => setImmediate(resolve))
+        const buffered = ws.bufferedAmount as number | undefined
+        if (typeof buffered === 'number' && buffered > DRAIN_THRESHOLD_BYTES) {
+          if (!await this.waitForDrain(ws, DRAIN_THRESHOLD_BYTES, DRAIN_TIMEOUT_MS)) return
+        } else {
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        }
       }
     }
   }
