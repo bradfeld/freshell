@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { IDisposable } from '@xterm/xterm'
 import { createTerminalRuntime } from '@/components/terminal/terminal-runtime'
 
@@ -35,6 +35,15 @@ vi.mock('@xterm/addon-webgl', () => ({
 }))
 
 describe('terminal runtime', () => {
+  beforeEach(() => {
+    contextLossHandler = null
+    throwWebglLoad = false
+    fitSpy.mockClear()
+    findNextSpy.mockClear()
+    findPreviousSpy.mockClear()
+    webglDisposeSpy.mockClear()
+  })
+
   it('loads fit and search addons', () => {
     const terminal = {
       loadAddon: vi.fn((addon: unknown) => {
@@ -48,6 +57,20 @@ describe('terminal runtime', () => {
     runtime.attachAddons()
 
     expect(terminal.loadAddon).toHaveBeenCalledTimes(2)
+  })
+
+  it('starts with webgl inactive and enables it asynchronously', async () => {
+    const terminal = {
+      loadAddon: vi.fn(),
+    }
+
+    const runtime = createTerminalRuntime({ terminal: terminal as any, enableWebgl: true })
+    runtime.attachAddons()
+
+    expect(runtime.webglActive()).toBe(false)
+    await vi.waitFor(() => {
+      expect(runtime.webglActive()).toBe(true)
+    })
   })
 
   it('attempts webgl and continues when addon load throws', () => {
@@ -66,7 +89,7 @@ describe('terminal runtime', () => {
     throwWebglLoad = false
   })
 
-  it('marks runtime as non-webgl on context loss and stays usable', () => {
+  it('marks runtime as non-webgl on context loss and stays usable', async () => {
     const terminal = {
       loadAddon: vi.fn(),
     }
@@ -74,7 +97,9 @@ describe('terminal runtime', () => {
     const runtime = createTerminalRuntime({ terminal: terminal as any, enableWebgl: true })
     runtime.attachAddons()
 
-    expect(runtime.webglActive()).toBe(true)
+    await vi.waitFor(() => {
+      expect(runtime.webglActive()).toBe(true)
+    })
     expect(contextLossHandler).not.toBeNull()
     contextLossHandler?.()
     expect(runtime.webglActive()).toBe(false)
