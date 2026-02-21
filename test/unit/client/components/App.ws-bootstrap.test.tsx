@@ -198,7 +198,7 @@ describe('App WS bootstrap recovery', () => {
     })
   })
 
-  it('clears lastErrorCode on successful reconnect', async () => {
+  it('clears lastErrorCode when a ready message arrives after a failed connect', async () => {
     const store = createStore()
 
     // First connect fails with 4003
@@ -206,7 +206,7 @@ describe('App WS bootstrap recovery', () => {
     ;(err as any).wsCloseCode = 4003
     wsMocks.connect.mockRejectedValueOnce(err)
 
-    const { rerender } = render(
+    render(
       <Provider store={store}>
         <App />
       </Provider>
@@ -216,17 +216,10 @@ describe('App WS bootstrap recovery', () => {
       expect(store.getState().connection.lastErrorCode).toBe(4003)
     })
 
-    // Next connect succeeds
-    wsMocks.connect.mockResolvedValueOnce(undefined)
-
-    // Re-render to trigger bootstrap again
-    rerender(
-      <Provider store={store}>
-        <App />
-      </Provider>
-    )
-
-    // Simulate the ready message arriving
+    // Simulate a later reconnect succeeding: the WS message handler
+    // (registered during bootstrap) receives a ready message, which
+    // dispatches setStatus('ready') — the reducer clears lastErrorCode.
+    expect(messageHandler).toBeTypeOf('function')
     act(() => {
       messageHandler?.({
         type: 'ready',
@@ -238,6 +231,7 @@ describe('App WS bootstrap recovery', () => {
     await waitFor(() => {
       expect(store.getState().connection.status).toBe('ready')
       expect(store.getState().connection.lastErrorCode).toBeUndefined()
+      expect(store.getState().connection.lastError).toBeUndefined()
     })
   })
 
