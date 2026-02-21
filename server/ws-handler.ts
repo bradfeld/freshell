@@ -1460,6 +1460,11 @@ export class WsHandler {
           return
         }
 
+        if (!state.codingCliSessions.has(m.sessionId)) {
+          this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not owner of this coding CLI session' })
+          return
+        }
+
         const session = this.codingCliManager.get(m.sessionId)
         if (!session) {
           this.sendError(ws, { code: 'INVALID_SESSION_ID', message: 'Session not found' })
@@ -1473,6 +1478,11 @@ export class WsHandler {
       case 'codingcli.kill': {
         if (!this.codingCliManager) {
           this.sendError(ws, { code: 'INTERNAL_ERROR', message: 'Coding CLI sessions not enabled' })
+          return
+        }
+
+        if (!state.codingCliSessions.has(m.sessionId)) {
+          this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not owner of this coding CLI session' })
           return
         }
 
@@ -1640,6 +1650,11 @@ export class WsHandler {
           this.sendError(ws, { code: 'INTERNAL_ERROR', message: 'SDK bridge not enabled' })
           return
         }
+        if (!state.sdkSessions.has(m.sessionId) && !state.sdkSubscriptions.has(m.sessionId)) {
+          this.sendError(ws, { code: 'UNAUTHORIZED', message: 'Not subscribed to this SDK session' })
+          return
+        }
+
         const session = this.sdkBridge.getSession(m.sessionId)
         if (!session) {
           this.sendError(ws, { code: 'INVALID_SESSION_ID', message: 'SDK session not found' })

@@ -426,6 +426,12 @@ describe('WS Handler SDK Integration', () => {
     it('routes sdk.attach and returns history + status', async () => {
       const ws = await connectAndAuth()
       try {
+        // First create a session so client owns it
+        await sendAndWaitForResponse(ws, {
+          type: 'sdk.create',
+          requestId: 'req-attach',
+        }, 'sdk.created')
+
         const messages: any[] = []
         const collectDone = new Promise<void>((resolve) => {
           let count = 0
@@ -466,7 +472,7 @@ describe('WS Handler SDK Integration', () => {
       }
     })
 
-    it('returns error for sdk.attach with unknown session', async () => {
+    it('returns UNAUTHORIZED for sdk.attach with unknown session (ownership checked first)', async () => {
       mockSdkBridge.getSession.mockReturnValue(undefined)
       const ws = await connectAndAuth()
       try {
@@ -476,7 +482,24 @@ describe('WS Handler SDK Integration', () => {
         }, 'error')
 
         expect(response.type).toBe('error')
-        expect(response.code).toBe('INVALID_SESSION_ID')
+        expect(response.code).toBe('UNAUTHORIZED')
+      } finally {
+        ws.close()
+      }
+    })
+
+    it('rejects sdk.attach for session not owned or subscribed by this client', async () => {
+      // Session exists in bridge (getSession returns it by default)
+      // but this client has never called sdk.create, so it does not own it
+      const ws = await connectAndAuth()
+      try {
+        const response = await sendAndWaitForResponse(ws, {
+          type: 'sdk.attach',
+          sessionId: 'sdk-sess-1',
+        }, 'error')
+
+        expect(response.type).toBe('error')
+        expect(response.code).toBe('UNAUTHORIZED')
       } finally {
         ws.close()
       }

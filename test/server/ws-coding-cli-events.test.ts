@@ -208,13 +208,13 @@ describe('WebSocket Coding CLI Events', () => {
     ws.close()
   })
 
-  it('handles codingcli.kill for unknown session', async () => {
+  it('rejects codingcli.kill for unowned session', async () => {
     const ws = await createAuthenticatedWs()
 
     const responsePromise = new Promise<any>((resolve) => {
       ws.on('message', (data) => {
         const msg = JSON.parse(data.toString())
-        if (msg.type === 'codingcli.killed') resolve(msg)
+        if (msg.type === 'error') resolve(msg)
       })
     })
 
@@ -226,8 +226,57 @@ describe('WebSocket Coding CLI Events', () => {
     )
 
     const response = await responsePromise
-    expect(response.type).toBe('codingcli.killed')
-    expect(response.success).toBe(false)
+    expect(response.type).toBe('error')
+    expect(response.code).toBe('UNAUTHORIZED')
+
+    ws.close()
+  })
+
+  it('rejects codingcli.input for session not owned by this client', async () => {
+    const ws = await createAuthenticatedWs()
+
+    const responsePromise = new Promise<any>((resolve) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'error') resolve(msg)
+      })
+    })
+
+    ws.send(
+      JSON.stringify({
+        type: 'codingcli.input',
+        sessionId: 'someone-elses-session',
+        data: 'malicious input',
+      })
+    )
+
+    const response = await responsePromise
+    expect(response.type).toBe('error')
+    expect(response.code).toBe('UNAUTHORIZED')
+
+    ws.close()
+  })
+
+  it('rejects codingcli.kill for session not owned by this client', async () => {
+    const ws = await createAuthenticatedWs()
+
+    const responsePromise = new Promise<any>((resolve) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'error') resolve(msg)
+      })
+    })
+
+    ws.send(
+      JSON.stringify({
+        type: 'codingcli.kill',
+        sessionId: 'someone-elses-session',
+      })
+    )
+
+    const response = await responsePromise
+    expect(response.type).toBe('error')
+    expect(response.code).toBe('UNAUTHORIZED')
 
     ws.close()
   })
