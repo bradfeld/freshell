@@ -67,7 +67,6 @@ app.use('/api/terminals', createTerminalsRouter({
 
 | Router module | Mount path | Routes | Key dependencies |
 |---|---|---|---|
-| `health-router.ts` | (special, see Middleware Ordering) | GET /api/health, GET /api/debug | configStore, wsHandler, registry, codingCliIndexer, tabsRegistryStore, sessionRepairService, sdkBridge, startupState |
 | `local-file-router.ts` | `/local-file` | GET /local-file | cookieParser, timingSafeCompare, fs, path |
 | `settings-router.ts` | `/api/settings` | GET /, PATCH /, PUT / | configStore, registry, wsHandler, codingCliIndexer, perfConfig |
 | `perf-router.ts` | `/api/perf` | POST / | configStore, registry, wsHandler, perfConfig, logger |
