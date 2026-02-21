@@ -58,4 +58,44 @@ describe('createTerminalWriteQueue', () => {
     expect(cancelFrame).toHaveBeenCalledTimes(1)
     expect(write).not.toHaveBeenCalled()
   })
+
+  it('does not schedule an extra frame when enqueueing while a continuation frame is pending', () => {
+    const writes: string[] = []
+    const rafCallbacks: FrameRequestCallback[] = []
+    let nowMs = 0
+
+    const queue = createTerminalWriteQueue({
+      write: (chunk) => {
+        writes.push(chunk)
+        nowMs += 5
+      },
+      requestFrame: (cb) => {
+        rafCallbacks.push(cb)
+        return rafCallbacks.length
+      },
+      cancelFrame: () => {},
+      now: () => nowMs,
+      budgetMs: 4,
+    })
+
+    queue.enqueue('A')
+    queue.enqueue('B')
+
+    expect(rafCallbacks).toHaveLength(1)
+
+    rafCallbacks.shift()?.(16)
+    expect(writes).toEqual(['A'])
+    expect(rafCallbacks).toHaveLength(1)
+
+    queue.enqueue('C')
+    expect(rafCallbacks).toHaveLength(1)
+
+    rafCallbacks.shift()?.(32)
+    expect(writes).toEqual(['A', 'B'])
+    expect(rafCallbacks).toHaveLength(1)
+
+    rafCallbacks.shift()?.(48)
+    expect(writes).toEqual(['A', 'B', 'C'])
+    expect(rafCallbacks).toHaveLength(0)
+  })
 })

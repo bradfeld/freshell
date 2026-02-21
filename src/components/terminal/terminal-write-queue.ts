@@ -29,7 +29,7 @@ export function createTerminalWriteQueue(args: TerminalWriteQueueArgs): Terminal
       next?.()
     }
     if (queue.length > 0) {
-      rafId = requestFrame(flush)
+      scheduleFlush()
       return
     }
     args.onDrain?.()

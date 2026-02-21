@@ -1225,7 +1225,7 @@ export class TerminalRegistry extends EventEmitter {
     // This avoids queueing additional data for clients that need explicit resync.
     const buffered = (client as any).bufferedAmount as number | undefined
     if (typeof buffered === 'number' && buffered > MAX_WS_BUFFERED_AMOUNT) {
-      this.safeSend(client, { type: 'terminal.output', terminalId, data }, { terminalId, perf })
+      this.safeSendOutputFrames(client, terminalId, data, perf)
       return
     }
 

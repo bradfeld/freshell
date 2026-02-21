@@ -1186,13 +1186,12 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         const msgTerminalId = typeof (msg as { terminalId?: unknown }).terminalId === 'string'
           ? (msg as { terminalId: string }).terminalId
           : undefined
-        const currentTerminalId = terminalIdRef.current
         const isChunkLifecycleType =
           msg.type === 'terminal.attached.start'
           || msg.type === 'terminal.attached.chunk'
           || msg.type === 'terminal.attached.end'
 
-        if (isChunkLifecycleType && msgTerminalId && currentTerminalId && msgTerminalId !== currentTerminalId) {
+        if (isChunkLifecycleType && msgTerminalId && tid && msgTerminalId !== tid) {
           return
         }
 
