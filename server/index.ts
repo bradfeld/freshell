@@ -21,7 +21,7 @@ import { codexProvider } from './coding-cli/providers/codex.js'
 import { type CodingCliProviderName, type CodingCliSession } from './coding-cli/types.js'
 import { TerminalMetadataService } from './terminal-metadata-service.js'
 import { migrateSettingsSortMode } from './settings-migrate.js'
-import { filesRouter } from './files-router.js'
+import { createFilesRouter } from './files-router.js'
 import { createPlatformRouter } from './platform-router.js'
 import { createProxyRouter } from './proxy-router.js'
 import { createLocalFileRouter } from './local-file-router.js'
@@ -41,7 +41,6 @@ import { getNetworkHost } from './get-network-host.js'
 import cookieParser from 'cookie-parser'
 import { PortForwardManager } from './port-forward.js'
 import { getRequesterIdentity, parseTrustProxyEnv } from './request-ip.js'
-import { collectCandidateDirectories } from './candidate-dirs.js'
 import { createTabsRegistryStore } from './tabs-registry/store.js'
 import { checkForUpdate } from './updater/version-checker.js'
 import { SessionAssociationCoordinator } from './session-association-coordinator.js'
@@ -273,18 +272,6 @@ async function main() {
     appVersion: APP_VERSION,
   }))
 
-  app.get('/api/files/candidate-dirs', async (_req, res) => {
-    const cfg = await configStore.snapshot()
-    const providerCwds = Object.values(cfg.settings?.codingCli?.providers || {}).map((provider) => provider?.cwd)
-    const directories = collectCandidateDirectories({
-      projects: codingCliIndexer.getProjects(),
-      terminals: registry.list(),
-      recentDirectories: cfg.recentDirectories || [],
-      providerCwds,
-      defaultCwd: cfg.settings?.defaultCwd,
-    })
-    res.json({ directories })
-  })
 
   // --- API: sessions ---
   app.use('/api', createSessionsRouter({
@@ -303,7 +290,7 @@ async function main() {
   app.use('/api/ai', createAiRouter({ registry, perfConfig }))
 
   // --- API: files (for editor pane) ---
-  app.use('/api/files', filesRouter)
+  app.use('/api/files', createFilesRouter({ configStore, codingCliIndexer, registry }))
 
   // --- API: port forwarding (for browser pane remote access) ---
   const portForwardManager = new PortForwardManager()

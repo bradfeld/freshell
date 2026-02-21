@@ -1,16 +1,25 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+// @vitest-environment node
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import express, { type Express } from 'express'
 import request from 'supertest'
-import { collectCandidateDirectories } from '../../../server/candidate-dirs'
+import { createFilesRouter } from '../../../server/files-router'
 
 describe('Candidate directories API integration', () => {
   let app: Express
 
   beforeEach(() => {
     app = express()
-    app.get('/api/files/candidate-dirs', (_req, res) => {
-      const directories = collectCandidateDirectories({
-        projects: [
+    app.use(express.json())
+    app.use('/api/files', createFilesRouter({
+      configStore: {
+        getSettings: vi.fn().mockResolvedValue({}),
+        snapshot: vi.fn().mockResolvedValue({
+          settings: { codingCli: { providers: {} } },
+          recentDirectories: ['/recent/one', '/terminals/current'],
+        }),
+      },
+      codingCliIndexer: {
+        getProjects: () => [
           {
             projectPath: '/code/project-alpha',
             sessions: [
@@ -23,17 +32,14 @@ describe('Candidate directories API integration', () => {
             sessions: [{ cwd: '/code/project-gamma/worktree' }],
           },
         ],
-        terminals: [
+      },
+      registry: {
+        list: () => [
           { cwd: '/terminals/current' },
           { cwd: '/code/project-beta' },
         ],
-        recentDirectories: ['/recent/one', '/terminals/current'],
-        providerCwds: ['/providers/claude', ''],
-        defaultCwd: '/defaults/base',
-      })
-
-      res.json({ directories })
-    })
+      },
+    }))
   })
 
   it('aggregates candidate directories from all configured sources and deduplicates', async () => {
@@ -48,8 +54,6 @@ describe('Candidate directories API integration', () => {
         '/code/project-gamma/worktree',
         '/terminals/current',
         '/recent/one',
-        '/providers/claude',
-        '/defaults/base',
       ],
     })
   })
