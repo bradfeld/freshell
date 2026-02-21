@@ -510,6 +510,7 @@ export default function App() {
       if (cleanedUp) cleanup()
 
       dispatch(setError(undefined))
+      dispatch(setErrorCode(undefined))
       dispatch(setStatus('connecting'))
       try {
         await ws.connect()
