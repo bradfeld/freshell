@@ -24,8 +24,9 @@ export function parseEnv(content: string): Record<string, string> {
     if (match) {
       const key = match[1].trim()
       const raw = match[2].trim()
-      const unquoted = raw.replace(/^(['"])(.*)\1$/, '$2')
-      env[key] = unquoted
+      // Strip surrounding quotes, allowing trailing inline comments after closing quote
+      const quoted = raw.match(/^(['"])(.*)\1(?:\s+#.*)?$/)
+      env[key] = quoted ? quoted[2] : raw.replace(/\s+#.*$/, '')
     }
   }
   return env

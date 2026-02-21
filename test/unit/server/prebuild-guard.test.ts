@@ -47,6 +47,18 @@ describe('prebuild-guard', () => {
     it('handles export prefix with spaces and quotes', () => {
       expect(parseEnv('export PORT = "4000"')).toEqual({ PORT: '4000' })
     })
+
+    it('strips inline comments after quoted values', () => {
+      expect(parseEnv('PORT="3001" # prod')).toEqual({ PORT: '3001' })
+    })
+
+    it('strips inline comments after single-quoted values', () => {
+      expect(parseEnv("PORT='3001' # prod")).toEqual({ PORT: '3001' })
+    })
+
+    it('strips inline comments after unquoted values', () => {
+      expect(parseEnv('PORT=3001 # prod')).toEqual({ PORT: '3001' })
+    })
   })
 
   describe('checkProdRunning', () => {

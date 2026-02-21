@@ -100,7 +100,8 @@ function createStore() {
 describe('App WS bootstrap recovery', () => {
   beforeEach(() => {
     cleanup()
-    vi.clearAllMocks()
+    vi.resetAllMocks()
+    wsMocks.onReconnect.mockReturnValue(() => {})
     messageHandler = null
 
     wsMocks.onMessage.mockImplementation((cb: (msg: any) => void) => {
@@ -174,6 +175,69 @@ describe('App WS bootstrap recovery', () => {
       expect(store.getState().connection.status).toBe('ready')
       expect(store.getState().connection.lastError).toBeUndefined()
       expect(store.getState().connection.serverInstanceId).toBe('srv-test')
+    })
+  })
+
+  it('dispatches wsCloseCode to lastErrorCode in Redux when connect rejects with close code', async () => {
+    const store = createStore()
+
+    const err = new Error('Server busy: max connections reached')
+    ;(err as any).wsCloseCode = 4003
+    wsMocks.connect.mockRejectedValueOnce(err)
+
+    render(
+      <Provider store={store}>
+        <App />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(store.getState().connection.status).toBe('disconnected')
+      expect(store.getState().connection.lastError).toMatch(/max connections/)
+      expect(store.getState().connection.lastErrorCode).toBe(4003)
+    })
+  })
+
+  it('clears lastErrorCode on successful reconnect', async () => {
+    const store = createStore()
+
+    // First connect fails with 4003
+    const err = new Error('Server busy: max connections reached')
+    ;(err as any).wsCloseCode = 4003
+    wsMocks.connect.mockRejectedValueOnce(err)
+
+    const { rerender } = render(
+      <Provider store={store}>
+        <App />
+      </Provider>
+    )
+
+    await waitFor(() => {
+      expect(store.getState().connection.lastErrorCode).toBe(4003)
+    })
+
+    // Next connect succeeds
+    wsMocks.connect.mockResolvedValueOnce(undefined)
+
+    // Re-render to trigger bootstrap again
+    rerender(
+      <Provider store={store}>
+        <App />
+      </Provider>
+    )
+
+    // Simulate the ready message arriving
+    act(() => {
+      messageHandler?.({
+        type: 'ready',
+        timestamp: new Date().toISOString(),
+        serverInstanceId: 'srv-reconnect',
+      })
+    })
+
+    await waitFor(() => {
+      expect(store.getState().connection.status).toBe('ready')
+      expect(store.getState().connection.lastErrorCode).toBeUndefined()
     })
   })
 
