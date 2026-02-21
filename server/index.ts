@@ -125,15 +125,6 @@ async function main() {
   const codingCliSessionManager = new CodingCliSessionManager(codingCliProviders)
   const tabsRegistryStore = createTabsRegistryStore()
 
-  app.use('/api/debug', createDebugRouter({
-    appVersion: APP_VERSION,
-    configStore,
-    wsHandler,
-    codingCliIndexer,
-    tabsRegistryStore,
-    registry,
-  }))
-
   const settings = migrateSettingsSortMode(await configStore.getSettings())
   const registry = new TerminalRegistry(settings)
   const terminalMetadata = new TerminalMetadataService()
@@ -284,6 +275,16 @@ async function main() {
 
   // --- API: files (for editor pane) ---
   app.use('/api/files', createFilesRouter({ configStore, codingCliIndexer, registry }))
+
+  // --- API: debug ---
+  app.use('/api/debug', createDebugRouter({
+    appVersion: APP_VERSION,
+    configStore,
+    wsHandler,
+    codingCliIndexer,
+    tabsRegistryStore,
+    registry,
+  }))
 
   // --- API: port forwarding (for browser pane remote access) ---
   const portForwardManager = new PortForwardManager()
