@@ -28,6 +28,7 @@ import { createPlatformRouter } from './platform-router.js'
 import { createProxyRouter } from './proxy-router.js'
 import { createLocalFileRouter } from './local-file-router.js'
 import { createTerminalsRouter } from './terminals-router.js'
+import { createProjectColorsRouter } from './project-colors-router.js'
 import { getSessionRepairService } from './session-scanner/service.js'
 import { SdkBridge } from './sdk-bridge.js'
 import { createClientLogsRouter } from './client-logs.js'
@@ -561,21 +562,7 @@ async function main() {
 	    res.json({ ok: true })
 	  })
 
-  const ProjectColorSchema = z.object({
-    projectPath: z.string().min(1).max(1024),
-    color: z.string().min(1).max(64),
-  })
-
-  app.put('/api/project-colors', async (req, res) => {
-    const parsed = ProjectColorSchema.safeParse(req.body || {})
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues })
-    }
-    const { projectPath, color } = parsed.data
-    await configStore.setProjectColor(projectPath, color)
-    await codingCliIndexer.refresh()
-    res.json({ ok: true })
-  })
+  app.use('/api', createProjectColorsRouter({ configStore, codingCliIndexer }))
 
   // --- API: terminals ---
   app.use('/api/terminals', createTerminalsRouter({ configStore, registry, wsHandler }))
