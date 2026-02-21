@@ -35,6 +35,18 @@ describe('prebuild-guard', () => {
     it('preserves unquoted values with internal quotes', () => {
       expect(parseEnv('MSG=hello "world"')).toEqual({ MSG: 'hello "world"' })
     })
+
+    it('strips export prefix from keys', () => {
+      expect(parseEnv('export PORT=4000')).toEqual({ PORT: '4000' })
+    })
+
+    it('handles spaces around equals sign', () => {
+      expect(parseEnv('PORT = 4000')).toEqual({ PORT: '4000' })
+    })
+
+    it('handles export prefix with spaces and quotes', () => {
+      expect(parseEnv('export PORT = "4000"')).toEqual({ PORT: '4000' })
+    })
   })
 
   describe('checkProdRunning', () => {

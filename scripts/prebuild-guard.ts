@@ -19,12 +19,13 @@ export function parseEnv(content: string): Record<string, string> {
   for (const line of content.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
-    const match = trimmed.match(/^([^=]+)=(.*)$/)
+    // Handle optional 'export' prefix, trim key/value, strip quotes
+    const match = trimmed.match(/^(?:export\s+)?([^=]+?)(?:\s*)=(?:\s*)(.*)$/)
     if (match) {
-      // Strip surrounding quotes (single or double) from values
-      const raw = match[2]
+      const key = match[1].trim()
+      const raw = match[2].trim()
       const unquoted = raw.replace(/^(['"])(.*)\1$/, '$2')
-      env[match[1]] = unquoted
+      env[key] = unquoted
     }
   }
   return env
